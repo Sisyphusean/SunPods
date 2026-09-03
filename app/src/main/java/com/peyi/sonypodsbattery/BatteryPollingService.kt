@@ -20,11 +20,19 @@ import kotlinx.coroutines.launch
 class BatteryPollingService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val pollingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile
+    private var pollingActive = false
     private var failures = 0
     private val poll: Runnable = object : Runnable {
         override fun run() {
+            if (!pollingActive || EarbudConnectionStateStore.current(applicationContext) == EarbudConnectionState.DISCONNECTED) return
             pollingScope.launch {
-                val state = RefreshCoordinator.awaitRefresh(applicationContext, startPolling = false)
+                val state = RefreshCoordinator.awaitRefresh(
+                    applicationContext,
+                    startPolling = false,
+                    automatic = true
+                )
+                if (!pollingActive || EarbudConnectionStateStore.current(applicationContext) == EarbudConnectionState.DISCONNECTED) return@launch
                 failures = if (state.status.startsWith("Updated")) 0 else failures + 1
                 if (failures >= MAX_FAILURES) {
                     stopSelf()
@@ -36,6 +44,7 @@ class BatteryPollingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        pollingActive = true
         startAsForeground()
         handler.removeCallbacks(poll)
         handler.postDelayed(poll, INTERVAL_MS)
@@ -43,6 +52,7 @@ class BatteryPollingService : Service() {
     }
 
     override fun onDestroy() {
+        pollingActive = false
         handler.removeCallbacks(poll)
         pollingScope.cancel()
         super.onDestroy()
@@ -76,6 +86,10 @@ class BatteryPollingService : Service() {
             } catch (error: Exception) {
                 DiagnosticsStore.add(context, "Background refresh could not start: ${error.javaClass.simpleName}: ${error.message}")
             }
+        }
+
+        fun stop(context: Context) {
+            context.stopService(Intent(context, BatteryPollingService::class.java))
         }
     }
 }
