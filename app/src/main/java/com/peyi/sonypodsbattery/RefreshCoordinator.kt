@@ -78,6 +78,15 @@ object RefreshCoordinator {
         SonyCommandCoordinator.prepareSessionForAclReconnect(context)
     }
 
+    fun handleAudioProfileEvent(
+        context: Context,
+        device: BluetoothDevice,
+        profile: AudioProfile,
+        state: AudioProfileConnectionState
+    ) {
+        SonyCommandCoordinator.handleAudioProfileEvent(context, device, profile, state)
+    }
+
     fun closeSessionForServiceStop(context: Context) {
         SonyCommandCoordinator.closeSessionForServiceStop(context)
     }
@@ -112,7 +121,8 @@ private sealed interface SonyCommand {
         val completion: CompletableDeferred<BatteryState>,
         val onComplete: (() -> Unit)? = null,
         val postInteraction: Boolean = false,
-        val automatic: Boolean = false
+        val automatic: Boolean = false,
+        val profileTriggered: Boolean = false
     ) : SonyCommand
 
     data class SetMode(
@@ -137,6 +147,13 @@ private sealed interface SonyCommand {
         val attempt: Int,
         val generation: Long
     ) : SonyCommand
+
+    data class AudioProfileChanged(
+        val context: Context,
+        val device: BluetoothDevice,
+        val profile: AudioProfile,
+        val state: AudioProfileConnectionState
+    ) : SonyCommand
 }
 
 private object SonyCommandCoordinator {
@@ -148,6 +165,8 @@ private object SonyCommandCoordinator {
 
     @Volatile
     private var postInteractionRefreshQueued = false
+
+    private var profileRefreshQueued = false
 
     private var reconnectJob: Job? = null
     private var reconnectGeneration = 0L
@@ -223,6 +242,24 @@ private object SonyCommandCoordinator {
                 CompletableDeferred(),
                 postInteraction = true,
                 automatic = true
+            )
+        )
+        startWorker()
+    }
+
+    @Synchronized
+    fun handleAudioProfileEvent(
+        context: Context,
+        device: BluetoothDevice,
+        profile: AudioProfile,
+        state: AudioProfileConnectionState
+    ) {
+        commands.trySend(
+            SonyCommand.AudioProfileChanged(
+                context.applicationContext,
+                device,
+                profile,
+                state
             )
         )
         startWorker()
@@ -366,7 +403,12 @@ private object SonyCommandCoordinator {
     private fun isReconnectCurrent(generation: Long): Boolean =
         generation == reconnectGeneration
 
-    private fun scheduleReconnect(context: Context, device: BluetoothDevice, attempt: Int = 0) {
+    private fun scheduleReconnect(
+        context: Context,
+        device: BluetoothDevice,
+        attempt: Int = 0,
+        waitForProfileState: Boolean = false
+    ) {
         val app = context.applicationContext
         val generation: Long
         synchronized(this) {
@@ -375,7 +417,11 @@ private object SonyCommandCoordinator {
             SonyControlSessionManager.enterReconnectWait(app)
             reconnectJob = scope.launch {
                 val delayIndex = attempt.coerceAtMost(reconnectDelaysMillis.lastIndex)
-                val delayMillis = reconnectDelaysMillis[delayIndex]
+                val delayMillis = if (waitForProfileState) {
+                    PROFILE_STATE_RETRY_DELAY_MS
+                } else {
+                    reconnectDelaysMillis[delayIndex]
+                }
                 DiagnosticsStore.add(app, "RFCOMM reconnect scheduled in ${delayMillis}ms")
                 delay(delayMillis)
                 if (isReconnectCurrent(generation)) {
@@ -390,10 +436,17 @@ private object SonyCommandCoordinator {
         if (!isReconnectCurrent(command.generation)) return
         val app = command.context.applicationContext
         DiagnosticsStore.add(app, "RFCOMM reconnect attempt: ${command.attempt + 1}")
-        val client = SonyBatteryClient(app)
-        if (!canAttemptAutomaticConnection(app, client, command.device)) {
-            scheduleReconnect(app, command.device, command.attempt + 1)
-            return
+        when (SonyAudioProfileQuery.snapshot(app, command.device).availability) {
+            AudioProfileAvailability.AVAILABLE -> Unit
+            AudioProfileAvailability.DISCONNECTED -> {
+                handleAllAudioProfilesDisconnected(app, command.device)
+                return
+            }
+            AudioProfileAvailability.UNKNOWN -> {
+                DiagnosticsStore.add(app, "RFCOMM reconnect waiting for audio profile state")
+                scheduleReconnect(app, command.device, command.attempt, waitForProfileState = true)
+                return
+            }
         }
         try {
             SonyControlSessionManager.ensureConnected(app, command.device)
@@ -432,6 +485,9 @@ private object SonyCommandCoordinator {
             is SonyCommand.Reconnect -> {
                 executeReconnect(command)
             }
+            is SonyCommand.AudioProfileChanged -> {
+                executeAudioProfileChanged(command)
+            }
         }
     }
 
@@ -441,6 +497,7 @@ private object SonyCommandCoordinator {
         val client = SonyBatteryClient(app)
 
         if (command.postInteraction) postInteractionRefreshQueued = false
+        if (command.profileTriggered) profileRefreshQueued = false
         if (command.automatic && EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) {
             DiagnosticsStore.add(app, "Automatic refresh skipped: disconnected")
             command.onComplete?.invoke()
@@ -466,9 +523,20 @@ private object SonyCommandCoordinator {
             command.onComplete?.invoke()
             return previous
         }
-        if (command.automatic && !canAttemptAutomaticConnection(app, client, target!!)) {
-            command.onComplete?.invoke()
-            return previous
+        if (command.automatic) {
+            when (SonyAudioProfileQuery.snapshot(app, target!!).availability) {
+                AudioProfileAvailability.AVAILABLE -> Unit
+                AudioProfileAvailability.DISCONNECTED -> {
+                    handleAllAudioProfilesDisconnected(app, target)
+                    command.onComplete?.invoke()
+                    return previous
+                }
+                AudioProfileAvailability.UNKNOWN -> {
+                    DiagnosticsStore.add(app, "Automatic refresh skipped: audio profile state unresolved")
+                    command.onComplete?.invoke()
+                    return previous
+                }
+            }
         }
         val state = if (target == null) {
             previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
@@ -602,6 +670,81 @@ private object SonyCommandCoordinator {
         return finishControlCommand(app, state, command.requestedAtMillis)
     }
 
+    private suspend fun executeAudioProfileChanged(command: SonyCommand.AudioProfileChanged) {
+        val app = command.context.applicationContext
+        val snapshot = SonyAudioProfileQuery.snapshot(app, command.device)
+        val availability = if (
+            (command.state == AudioProfileConnectionState.CONNECTED ||
+                command.state == AudioProfileConnectionState.CONNECTING) &&
+            snapshot.availability == AudioProfileAvailability.DISCONNECTED
+        ) {
+            AudioProfileAvailability.AVAILABLE
+        } else {
+            snapshot.availability
+        }
+        when (availability) {
+            AudioProfileAvailability.DISCONNECTED -> {
+                handleAllAudioProfilesDisconnected(app, command.device)
+            }
+            AudioProfileAvailability.UNKNOWN -> {
+                if (command.state == AudioProfileConnectionState.CONNECTED) {
+                    markAudioProfileAvailable(app, command.device)
+                } else {
+                    DiagnosticsStore.add(app, "Audio profile state unresolved; waiting for profile event")
+                }
+            }
+            AudioProfileAvailability.AVAILABLE -> {
+                markAudioProfileAvailable(app, command.device)
+            }
+        }
+        if (command.state == AudioProfileConnectionState.CONNECTED &&
+            availability != AudioProfileAvailability.DISCONNECTED
+        ) {
+            enqueueProfileRefresh(app, command.device)
+        }
+    }
+
+    private fun enqueueProfileRefresh(context: Context, device: BluetoothDevice) {
+        synchronized(this) {
+            if (profileRefreshQueued) return
+            profileRefreshQueued = true
+            commands.trySend(
+                SonyCommand.Refresh(
+                    context.applicationContext,
+                    device,
+                    startPolling = false,
+                    completion = CompletableDeferred(),
+                    automatic = true,
+                    profileTriggered = true
+                )
+            )
+        }
+        startWorker()
+    }
+
+    private fun markAudioProfileAvailable(context: Context, device: BluetoothDevice) {
+        cancelReconnect()
+        SonyControlSessionManager.prepareAclReconnect(context)
+        EarbudConnectionStateStore.markWithDiagnostics(
+            context,
+            EarbudConnectionState.CONNECTED,
+            device
+        )
+        BatteryPollingService.start(context)
+    }
+
+    private fun handleAllAudioProfilesDisconnected(context: Context, device: BluetoothDevice) {
+        cancelReconnect()
+        DiagnosticsStore.add(context, "All audio profiles disconnected; RFCOMM reconnect cancelled")
+        EarbudConnectionStateStore.markWithDiagnostics(
+            context,
+            EarbudConnectionState.DISCONNECTED,
+            device
+        )
+        SonyControlSessionManager.closeForAclDisconnect(context)
+        BatteryPollingService.stop(context)
+    }
+
     private fun markControlChannelUnavailable(context: Context, device: BluetoothDevice?) {
         if (EarbudConnectionStateStore.current(context) == EarbudConnectionState.DISCONNECTED) return
         DiagnosticsStore.add(context, "RFCOMM unavailable, marking disconnected")
@@ -614,17 +757,6 @@ private object SonyCommandCoordinator {
         if (device != null) scheduleReconnect(context, device)
     }
 
-    private fun canAttemptAutomaticConnection(
-        context: Context,
-        client: SonyBatteryClient,
-        device: BluetoothDevice
-    ): Boolean {
-        val profileConnected = client.hasConnectedBluetoothProfile(device)
-        if (profileConnected != false) return true
-        return EarbudConnectionStateStore.current(context) == EarbudConnectionState.CONNECTED ||
-            SonyControlSessionManager.currentState() == SonySessionState.RECONNECT_WAIT
-    }
-
     private suspend fun finishControlCommand(
         context: Context,
         state: BatteryState,
@@ -635,4 +767,6 @@ private object SonyCommandCoordinator {
         BatteryNotifier.show(context, state)
         return state
     }
+
+    private const val PROFILE_STATE_RETRY_DELAY_MS = 1_000L
 }
