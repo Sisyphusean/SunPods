@@ -16,9 +16,8 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
         val name = try { device?.name.orEmpty() } catch (_: SecurityException) { "" }
         if (!Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE).containsMatchIn(name)) return
         val pending = goAsync()
-        Thread {
-            try { RefreshCoordinator.refresh(context.applicationContext, device) }
-            finally { pending.finish() }
-        }.start()
+        RefreshCoordinator.enqueueRefresh(context.applicationContext, device) {
+            pending.finish()
+        }
     }
 }
