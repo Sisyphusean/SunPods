@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SonyPods Battery Widget Mock-up</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --widget-background: #1c1c1f;
+        --control-background: #3b3b3e;
+        --text-primary: #f4f4f4;
+        --text-secondary: #c8c8c8;
+        --accent: #b8ff38;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        min-height: 100vh;
+        font-family: Arial, sans-serif;
+        background: #f4f4f4;
+      }
+
+      button {
+        border: 0;
+        color: var(--text-primary);
+        font: inherit;
+        cursor: pointer;
+      }
+
+      .preview-canvas {
+        display: grid;
+        min-height: 100vh;
+        padding: 48px;
+        place-items: center;
+      }
+
+      .battery-widget {
+        display: grid;
+        grid-template-columns: 116px repeat(3, minmax(100px, 1fr)) 86px;
+        grid-template-rows: 116px 72px 66px;
+        gap: 18px;
+        width: min(1100px, 100%);
+        min-height: 360px;
+        padding: 34px 40px 32px;
+        border-radius: 42px;
+        background: var(--widget-background);
+        box-shadow: 0 18px 36px rgb(0 0 0 / 22%);
+      }
+
+      .app-logo {
+        position: relative;
+        display: grid;
+        width: 92px;
+        height: 92px;
+        align-content: end;
+        justify-items: center;
+        padding-bottom: 12px;
+        border: 4px solid var(--accent);
+        border-radius: 50%;
+        background: var(--widget-background);
+      }
+
+      .earbud {
+        position: absolute;
+        top: 18px;
+        width: 12px;
+        height: 38px;
+        border-radius: 8px;
+        background: var(--text-primary);
+      }
+
+      .earbud::before {
+        position: absolute;
+        top: -8px;
+        left: -5px;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--text-primary);
+        content: "";
+      }
+
+      .earbud-left {
+        left: 30px;
+        transform: rotate(-8deg);
+      }
+
+      .earbud-right {
+        right: 30px;
+        transform: rotate(8deg);
+      }
+
+      .logo-label {
+        position: relative;
+        z-index: 1;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 2px;
+      }
+
+      .battery-reading {
+        display: grid;
+        align-content: center;
+        justify-items: center;
+        color: var(--text-primary);
+      }
+
+      .battery-reading + .battery-reading {
+        border-left: 2px solid #59595b;
+      }
+
+      .reading-label {
+        color: var(--text-secondary);
+        font-size: 17px;
+      }
+
+      .battery-reading strong {
+        font-size: clamp(28px, 4vw, 44px);
+      }
+
+      .refresh-control {
+        align-self: center;
+        justify-self: center;
+        padding: 0;
+        color: var(--accent);
+        background: transparent;
+        font-size: 56px;
+        line-height: 1;
+      }
+
+      .sound-modes,
+      .ambient-controls {
+        display: grid;
+        gap: 16px;
+      }
+
+      .sound-modes {
+        grid-column: 1 / -1;
+        grid-template-columns: 1fr 1.2fr 1fr;
+      }
+
+      .ambient-controls {
+        grid-column: 1 / -1;
+        grid-template-columns: 0.55fr 2fr 0.55fr 1.15fr;
+      }
+
+      .sound-modes button,
+      .ambient-controls button,
+      .ambient-controls output {
+        display: grid;
+        min-width: 0;
+        min-height: 66px;
+        place-items: center;
+        padding: 12px 18px;
+        border-radius: 18px;
+        background: var(--control-background);
+        color: var(--text-primary);
+        font-size: clamp(14px, 2vw, 22px);
+        font-weight: 700;
+        text-align: center;
+      }
+
+      .sound-modes .active {
+        background: var(--accent);
+        color: #101010;
+      }
+
+      .ambient-controls output {
+        overflow: hidden;
+        white-space: nowrap;
+      }
+
+      @media (max-width: 700px) {
+        .preview-canvas {
+          padding: 16px;
+        }
+
+        .battery-widget {
+          grid-template-columns: 72px repeat(3, minmax(70px, 1fr)) 50px;
+          grid-template-rows: 82px 58px 54px;
+          gap: 8px;
+          padding: 20px 16px;
+          border-radius: 24px;
+        }
+
+        .app-logo {
+          width: 62px;
+          height: 62px;
+          border-width: 3px;
+          padding-bottom: 8px;
+        }
+
+        .earbud {
+          top: 12px;
+          width: 8px;
+          height: 26px;
+        }
+
+        .earbud::before {
+          top: -5px;
+          left: -4px;
+          width: 16px;
+          height: 16px;
+        }
+
+        .earbud-left {
+          left: 20px;
+        }
+
+        .earbud-right {
+          right: 20px;
+        }
+
+        .logo-label {
+          font-size: 8px;
+        }
+
+        .reading-label {
+          font-size: 10px;
+        }
+
+        .refresh-control {
+          font-size: 32px;
+        }
+
+        .sound-modes,
+        .ambient-controls {
+          gap: 6px;
+        }
+
+        .sound-modes button,
+        .ambient-controls button,
+        .ambient-controls output {
+          min-height: 48px;
+          padding: 6px;
+          border-radius: 12px;
+          font-size: 11px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="preview-canvas">
+      <section class="battery-widget" aria-label="SonyPods Battery widget">
+        <button class="app-logo" type="button" aria-label="Open SonyPods Battery app">
+          <span class="earbud earbud-left" aria-hidden="true"></span>
+          <span class="earbud earbud-right" aria-hidden="true"></span>
+          <span class="logo-label">PODS</span>
+        </button>
+
+        <div class="battery-reading">
+          <span class="reading-label">LEFT</span>
+          <strong>48%</strong>
+        </div>
+
+        <div class="battery-reading">
+          <span class="reading-label">RIGHT</span>
+          <strong>0%</strong>
+        </div>
+
+        <div class="battery-reading">
+          <span class="reading-label">CASE</span>
+          <strong>88%</strong>
+        </div>
+
+        <button class="refresh-control" type="button" aria-label="Refresh battery">
+          <span aria-hidden="true">&#8635;</span>
+        </button>
+
+        <div class="sound-modes" aria-label="Sound switching modes">
+          <button type="button">NC</button>
+          <button type="button">AMBIENT</button>
+          <button class="active" type="button">OFF</button>
+        </div>
+
+        <div class="ambient-controls" aria-label="Ambient-only controls">
+          <button type="button" aria-label="Decrease ambient level">-</button>
+          <output>AMBIENT 20</output>
+          <button type="button" aria-label="Increase ambient level">+</button>
+          <button type="button">VOICE</button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

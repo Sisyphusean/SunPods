@@ -1,0 +1,9 @@
+/.gradle/
+/.gradle-home/
+/.kotlin/
+/local.properties
+/.signing/
+/signing.properties
+/**/build/
+*.iml
+.idea/
