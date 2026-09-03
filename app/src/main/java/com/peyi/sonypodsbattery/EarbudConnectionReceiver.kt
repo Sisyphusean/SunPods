@@ -89,10 +89,12 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
         if (action == BluetoothDevice.ACTION_ACL_DISCONNECTED) {
             EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.DISCONNECTED, device)
             DiagnosticsStore.add(app, "Polling stopped: ACL disconnect")
+            RefreshCoordinator.closeSessionForAclDisconnect(app)
             BatteryPollingService.stop(app)
             return
         }
 
+        RefreshCoordinator.prepareSessionForAclReconnect(app)
         EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, device)
         BatteryPollingService.start(app)
         val pending = goAsync()
