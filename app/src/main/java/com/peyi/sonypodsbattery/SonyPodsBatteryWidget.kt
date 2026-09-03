@@ -315,8 +315,8 @@ private fun ModeTrack(activeMode: AudioMode) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         ModeButton("NC", AudioMode.NC, activeMode, GlanceModifier.defaultWeight())
-        ModeButton("AMBIENT", AudioMode.AMBIENT, activeMode, GlanceModifier.defaultWeight())
-        ModeButton("OFF", AudioMode.OFF, activeMode, GlanceModifier.defaultWeight())
+        ModeButton("Ambient", AudioMode.AMBIENT, activeMode, GlanceModifier.defaultWeight())
+        ModeButton("Off", AudioMode.OFF, activeMode, GlanceModifier.defaultWeight())
     }
 }
 
@@ -327,7 +327,7 @@ private fun ModeButton(label: String, mode: AudioMode, activeMode: AudioMode, mo
     Box(
         modifier = modifier
             .cornerRadius(18.dp)
-            .then(if (isActive) GlanceModifier.background(colors.primary) else GlanceModifier)
+            .background(if (isActive) colors.primary else colors.surfaceVariant)
             .fillMaxHeight()
             .clickable(actionRunCallback<SetListeningModeAction>(actionParametersOf(AudioModeKey.to(mode.name)))),
         contentAlignment = Alignment.Center
