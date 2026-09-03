@@ -1,8 +1,12 @@
 import java.util.Properties
 
+val signingPropertiesFile = rootProject.file("signing.properties")
 val signingProperties = Properties().apply {
-    rootProject.file("signing.properties").inputStream().use(::load)
+    if (signingPropertiesFile.isFile) {
+        signingPropertiesFile.inputStream().use(::load)
+    }
 }
+val hasLocalSigning = signingPropertiesFile.isFile
 
 plugins {
     id("com.android.application")
@@ -24,22 +28,28 @@ android {
     }
 
     signingConfigs {
-        create("localStable") {
-            storeFile = rootProject.file(signingProperties.getProperty("storeFile"))
-            storePassword = signingProperties.getProperty("storePassword")
-            keyAlias = signingProperties.getProperty("keyAlias")
-            keyPassword = signingProperties.getProperty("keyPassword")
+        if (hasLocalSigning) {
+            create("localStable") {
+                storeFile = rootProject.file(signingProperties.getProperty("storeFile"))
+                storePassword = signingProperties.getProperty("storePassword")
+                keyAlias = signingProperties.getProperty("keyAlias")
+                keyPassword = signingProperties.getProperty("keyPassword")
+            }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("localStable")
+            if (hasLocalSigning) {
+                signingConfig = signingConfigs.getByName("localStable")
+            }
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("localStable")
+            if (hasLocalSigning) {
+                signingConfig = signingConfigs.getByName("localStable")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
