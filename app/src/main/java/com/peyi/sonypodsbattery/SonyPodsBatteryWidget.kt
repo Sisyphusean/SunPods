@@ -2,6 +2,7 @@ package com.peyi.sonypodsbattery
 
 import android.content.Context
 import androidx.compose.runtime.Composable
+import androidx.glance.LocalSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.ColorFilter
@@ -17,6 +18,7 @@ import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.cornerRadius
@@ -80,6 +82,7 @@ private const val MODE_SYNC_GRACE_PERIOD_MS = 4_000L
 
 class SonyPodsBatteryWidget : GlanceAppWidget() {
     override val stateDefinition = PreferencesGlanceStateDefinition
+    override val sizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
@@ -131,36 +134,78 @@ private val statusTitleText = TextStyle(fontSize = 14.sp, fontWeight = FontWeigh
 private val statusSubtitleText = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Normal)
 private val valueText = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
-private val innerContainerColor
-    @Composable get() = GlanceTheme.colors.secondaryContainer
-
 @Composable
 private fun WidgetContent(state: BatteryState, currentMode: AudioMode) {
+    val size = LocalSize.current
+    val compactWidth = size.width < 320.dp
+    val compactHeight = size.height < 190.dp
+    val horizontalPadding = if (compactWidth) 12.dp else 16.dp
+    val verticalPadding = if (compactHeight) 10.dp else 14.dp
+    val bodyGap = if (compactWidth) 6.dp else 8.dp
+    val batteryColumnWidth = (size.width * if (compactWidth) 0.40f else 0.35f)
+        .coerceIn(105.dp, 145.dp)
+
     Box(
         modifier = GlanceModifier.fillMaxWidth()
+            .fillMaxHeight()
             .background(GlanceTheme.colors.surface)
             .cornerRadius(28.dp)
-            .padding(16.dp)
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding)
     ) {
-        Column(modifier = GlanceModifier.fillMaxWidth()) {
-            Header(state)
+        Column(modifier = GlanceModifier.fillMaxWidth().fillMaxHeight()) {
+            Header(state, compactWidth)
+            Spacer(modifier = GlanceModifier.height(bodyGap))
             Row(
-                modifier = GlanceModifier.fillMaxWidth().height(144.dp).padding(top = 12.dp),
+                modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
                 verticalAlignment = Alignment.Top
             ) {
-                Column(modifier = GlanceModifier.width(104.dp).height(144.dp)) {
-                    BatteryCard("Left", state.left, state.leftCharging, R.drawable.ic_earbud_left)
-                    Spacer(modifier = GlanceModifier.height(8.dp))
-                    BatteryCard("Right", state.right, state.rightCharging, R.drawable.ic_earbud_right)
-                    Spacer(modifier = GlanceModifier.defaultWeight())
-                    BatteryCard("Case", state.case, state.caseCharging, R.drawable.ic_case)
+                Column(
+                    modifier = GlanceModifier.width(batteryColumnWidth).fillMaxHeight()
+                ) {
+                    BatteryCard(
+                        label = "Left",
+                        level = state.left,
+                        charging = state.leftCharging,
+                        icon = R.drawable.ic_earbud_left,
+                        compactWidth = compactWidth,
+                        compactHeight = compactHeight,
+                        modifier = GlanceModifier.defaultWeight()
+                    )
+                    Spacer(modifier = GlanceModifier.height(bodyGap))
+                    BatteryCard(
+                        label = "Right",
+                        level = state.right,
+                        charging = state.rightCharging,
+                        icon = R.drawable.ic_earbud_right,
+                        compactWidth = compactWidth,
+                        compactHeight = compactHeight,
+                        modifier = GlanceModifier.defaultWeight()
+                    )
+                    Spacer(modifier = GlanceModifier.height(bodyGap))
+                    BatteryCard(
+                        label = "Case",
+                        level = state.case,
+                        charging = state.caseCharging,
+                        icon = R.drawable.ic_case,
+                        compactWidth = compactWidth,
+                        compactHeight = compactHeight,
+                        modifier = GlanceModifier.defaultWeight()
+                    )
                 }
                 Column(
-                    modifier = GlanceModifier.defaultWeight().height(144.dp).padding(start = 10.dp)
+                    modifier = GlanceModifier.defaultWeight()
+                        .fillMaxHeight()
+                        .padding(start = bodyGap)
                 ) {
                     ModeTrack(currentMode)
-                    Spacer(modifier = GlanceModifier.height(8.dp))
-                    ContextCard(state, currentMode, GlanceModifier.fillMaxWidth().height(92.dp))
+                    Spacer(modifier = GlanceModifier.height(bodyGap))
+                    ContextCard(
+                        state = state,
+                        currentMode = currentMode,
+                        compactWidth = compactWidth,
+                        compactHeight = compactHeight,
+                        modifier = GlanceModifier.fillMaxWidth().defaultWeight()
+                    )
                 }
             }
         }
@@ -168,57 +213,93 @@ private fun WidgetContent(state: BatteryState, currentMode: AudioMode) {
 }
 
 @Composable
-private fun Header(state: BatteryState) {
+private fun Header(state: BatteryState, compactWidth: Boolean) {
     Row(
-        modifier = GlanceModifier.fillMaxWidth(),
+        modifier = GlanceModifier.fillMaxWidth().height(48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Image(
-            provider = ImageProvider(R.drawable.ic_sony_wave),
-            contentDescription = "Sony Logo",
-            colorFilter = ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant),
-            modifier = GlanceModifier.size(20.dp).clickable(actionStartActivity<LaunchSonyAppActivity>())
-        )
+        Box(
+            modifier = GlanceModifier.size(48.dp)
+                .clickable(actionStartActivity<LaunchSonyAppActivity>()),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                provider = ImageProvider(R.drawable.ic_sony_wave),
+                contentDescription = "Sony Logo",
+                colorFilter = ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant),
+                modifier = GlanceModifier.size(if (compactWidth) 20.dp else 22.dp)
+            )
+        }
         Spacer(modifier = GlanceModifier.defaultWeight())
         Text(
             text = if (state.updatedAt == 0L) "Not updated" else "Updated ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(state.updatedAt))}",
-            style = labelText.copy(color = GlanceTheme.colors.onSurfaceVariant)
+            style = labelText.copy(
+                color = GlanceTheme.colors.onSurfaceVariant,
+                fontSize = if (compactWidth) 11.sp else 13.sp
+            )
         )
         Spacer(modifier = GlanceModifier.defaultWeight())
-        Image(
-            provider = ImageProvider(R.drawable.ic_refresh),
-            contentDescription = "Refresh",
-            colorFilter = ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant),
-            modifier = GlanceModifier.size(20.dp).clickable(actionRunCallback<RefreshWidgetAction>())
-        )
+        Box(
+            modifier = GlanceModifier.size(48.dp)
+                .clickable(actionRunCallback<RefreshWidgetAction>()),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                provider = ImageProvider(R.drawable.ic_refresh),
+                contentDescription = "Refresh",
+                colorFilter = ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant),
+                modifier = GlanceModifier.size(if (compactWidth) 20.dp else 22.dp)
+            )
+        }
     }
 }
 
 @Composable
-private fun BatteryCard(label: String, level: Int?, charging: Boolean, icon: Int) {
+private fun BatteryCard(
+    label: String,
+    level: Int?,
+    charging: Boolean,
+    icon: Int,
+    compactWidth: Boolean,
+    compactHeight: Boolean,
+    modifier: GlanceModifier
+) {
     val isDimmed = level == null || level == 0
     val subduedColor = GlanceTheme.colors.onSurfaceVariant
     val labelColor = if (isDimmed) GlanceTheme.colors.outline else subduedColor
     val valueColor = if (isDimmed) GlanceTheme.colors.outline else GlanceTheme.colors.onSurface
     Row(
-        modifier = GlanceModifier.fillMaxWidth()
-            .background(GlanceTheme.colors.secondaryContainer)
+        modifier = modifier.fillMaxWidth()
+            .background(GlanceTheme.colors.surfaceVariant)
             .cornerRadius(16.dp)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(
+                horizontal = if (compactWidth) 8.dp else 12.dp,
+                vertical = if (compactHeight) 4.dp else 8.dp
+            ),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Image(
             provider = ImageProvider(icon),
             contentDescription = label,
             colorFilter = ColorFilter.tint(labelColor),
-            modifier = GlanceModifier.width(18.dp).height(18.dp)
+            modifier = GlanceModifier.size(if (compactWidth) 16.dp else 18.dp)
         )
-        Text(label, style = labelText.copy(color = labelColor), modifier = GlanceModifier.padding(start = 7.dp))
+        Text(
+            text = label,
+            style = labelText.copy(
+                color = labelColor,
+                fontSize = if (compactWidth) 11.sp else 12.sp
+            ),
+            modifier = GlanceModifier.padding(start = if (compactWidth) 5.dp else 8.dp)
+        )
         Spacer(modifier = GlanceModifier.defaultWeight())
         Text(
             text = (level?.let { "$it%" } ?: "--") + if (charging) " ⚡" else "",
-            style = valueText.copy(color = valueColor)
+            style = valueText.copy(
+                color = valueColor,
+                fontSize = if (compactWidth) 13.sp else 14.sp
+            )
         )
     }
 }
@@ -227,7 +308,7 @@ private fun BatteryCard(label: String, level: Int?, charging: Boolean, icon: Int
 private fun ModeTrack(activeMode: AudioMode) {
     Row(
         modifier = GlanceModifier.fillMaxWidth()
-            .background(GlanceTheme.colors.secondaryContainer)
+            .background(GlanceTheme.colors.surfaceVariant)
             .cornerRadius(22.dp)
             .height(44.dp)
             .padding(4.dp),
@@ -246,56 +327,81 @@ private fun ModeButton(label: String, mode: AudioMode, activeMode: AudioMode, mo
     Box(
         modifier = modifier
             .cornerRadius(18.dp)
-            .then(if (isActive) GlanceModifier.background(colors.primaryContainer) else GlanceModifier)
+            .then(if (isActive) GlanceModifier.background(colors.primary) else GlanceModifier)
             .fillMaxHeight()
             .clickable(actionRunCallback<SetListeningModeAction>(actionParametersOf(AudioModeKey.to(mode.name)))),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            style = labelText.copy(color = if (isActive) colors.onPrimaryContainer else colors.onSurfaceVariant)
+            style = labelText.copy(color = if (isActive) colors.onPrimary else colors.onSurfaceVariant)
         )
     }
 }
 
 @Composable
-private fun ContextCard(state: BatteryState, currentMode: AudioMode, modifier: GlanceModifier) {
+private fun ContextCard(
+    state: BatteryState,
+    currentMode: AudioMode,
+    compactWidth: Boolean,
+    compactHeight: Boolean,
+    modifier: GlanceModifier
+) {
     Box(
         modifier = modifier
-            .background(innerContainerColor)
+            .background(GlanceTheme.colors.secondaryContainer)
             .cornerRadius(16.dp)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(
+                horizontal = if (compactWidth) 8.dp else 12.dp,
+                vertical = if (compactHeight) 4.dp else 10.dp
+            ),
         contentAlignment = Alignment.Center
     ) {
         when (currentMode) {
-            AudioMode.AMBIENT -> AmbientControls(state)
+            AudioMode.AMBIENT -> AmbientControls(state, compactWidth, compactHeight)
             AudioMode.NC -> StatusContent(
                 R.drawable.ic_noise_cancelling,
                 "Noise Cancelling",
-                "Active"
+                "Active",
+                compactWidth
             )
             AudioMode.OFF -> StatusContent(
                 R.drawable.ic_sound_off,
                 "Sound Control Off",
-                "Passive Isolation"
+                "Passive Isolation",
+                compactWidth
             )
         }
     }
 }
 
 @Composable
-private fun AmbientControls(state: BatteryState) {
+private fun AmbientControls(state: BatteryState, compactWidth: Boolean, compactHeight: Boolean) {
     Column(modifier = GlanceModifier.fillMaxWidth()) {
         Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Ambient level", style = labelText.copy(color = GlanceTheme.colors.onSurfaceVariant), modifier = GlanceModifier.defaultWeight())
-            Text("${state.ambientLevel}", style = bodyText.copy(color = GlanceTheme.colors.onSurfaceVariant))
+            Text(
+                text = "Ambient level",
+                style = labelText.copy(
+                    color = GlanceTheme.colors.onSecondaryContainer,
+                    fontSize = if (compactWidth) 11.sp else 13.sp
+                ),
+                modifier = GlanceModifier.defaultWeight()
+            )
+            Text(
+                text = "${state.ambientLevel}",
+                style = bodyText.copy(
+                    color = GlanceTheme.colors.onSecondaryContainer,
+                    fontSize = if (compactWidth) 12.sp else 13.sp
+                )
+            )
         }
         Row(
-            modifier = GlanceModifier.fillMaxWidth().padding(top = 6.dp),
+            modifier = GlanceModifier.fillMaxWidth()
+                .padding(top = if (compactHeight) 0.dp else 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             StepButton("−", -1)
-            AmbientSteps(state.ambientLevel, GlanceModifier.defaultWeight())
+            AmbientSteps(state.ambientLevel, compactWidth, GlanceModifier.defaultWeight())
             StepButton("+", 1)
         }
     }
@@ -304,8 +410,8 @@ private fun AmbientControls(state: BatteryState) {
 @Composable
 private fun StepButton(symbol: String, delta: Int) {
     Box(
-        modifier = GlanceModifier.size(32.dp)
-            .cornerRadius(13.dp)
+        modifier = GlanceModifier.size(48.dp)
+            .cornerRadius(16.dp)
             .clickable(actionRunCallback<AdjustAmbientAction>(actionParametersOf(AdjustAmbientAction.deltaKey.to(delta)))),
         contentAlignment = Alignment.Center
     ) {
@@ -317,14 +423,14 @@ private fun StepButton(symbol: String, delta: Int) {
 }
 
 @Composable
-private fun AmbientSteps(level: Int, modifier: GlanceModifier) {
+private fun AmbientSteps(level: Int, compactWidth: Boolean, modifier: GlanceModifier) {
     Row(
-            modifier = modifier.padding(horizontal = 5.dp),
+        modifier = modifier.padding(horizontal = if (compactWidth) 2.dp else 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         for (step in 1..20) {
             Box(
-                modifier = GlanceModifier.defaultWeight().height(4.dp)
+                modifier = GlanceModifier.defaultWeight().height(3.dp)
                     .cornerRadius(2.dp)
                     .then(if (step <= level) GlanceModifier.background(GlanceTheme.colors.primaryContainer) else GlanceModifier.background(GlanceTheme.colors.onSurfaceVariant))
             ) {}
@@ -333,16 +439,31 @@ private fun AmbientSteps(level: Int, modifier: GlanceModifier) {
 }
 
 @Composable
-private fun StatusContent(icon: Int, title: String, subtitle: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun StatusContent(icon: Int, title: String, subtitle: String, compactWidth: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Image(
             provider = ImageProvider(icon),
             contentDescription = title,
-            colorFilter = ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant),
-            modifier = GlanceModifier.size(24.dp)
+            colorFilter = ColorFilter.tint(GlanceTheme.colors.onSecondaryContainer),
+            modifier = GlanceModifier.size(if (compactWidth) 20.dp else 24.dp)
         )
-        Text(title, style = statusTitleText.copy(color = GlanceTheme.colors.onSurface), modifier = GlanceModifier.padding(top = 5.dp))
-        Text(subtitle, style = statusSubtitleText.copy(color = GlanceTheme.colors.onSurfaceVariant), modifier = GlanceModifier.padding(top = 2.dp))
+        Column(modifier = GlanceModifier.padding(start = 8.dp)) {
+            Text(
+                text = title,
+                style = statusTitleText.copy(
+                    color = GlanceTheme.colors.onSecondaryContainer,
+                    fontSize = if (compactWidth) 13.sp else 14.sp
+                )
+            )
+            Text(
+                text = subtitle,
+                style = statusSubtitleText.copy(
+                    color = GlanceTheme.colors.onSecondaryContainer,
+                    fontSize = if (compactWidth) 11.sp else 12.sp
+                ),
+                modifier = GlanceModifier.padding(top = 2.dp)
+            )
+        }
     }
 }
 
