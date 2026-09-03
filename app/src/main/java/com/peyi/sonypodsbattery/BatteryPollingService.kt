@@ -55,6 +55,7 @@ class BatteryPollingService : Service() {
         pollingActive = false
         handler.removeCallbacks(poll)
         pollingScope.cancel()
+        RefreshCoordinator.closeSessionForServiceStop(applicationContext)
         super.onDestroy()
     }
 

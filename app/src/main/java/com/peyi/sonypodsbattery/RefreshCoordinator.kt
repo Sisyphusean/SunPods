@@ -5,8 +5,10 @@ import android.content.Context
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -68,6 +70,18 @@ object RefreshCoordinator {
         SonyCommandCoordinator.enqueuePostInteractionRefresh(context)
     }
 
+    fun closeSessionForAclDisconnect(context: Context) {
+        SonyCommandCoordinator.closeSessionForAclDisconnect(context)
+    }
+
+    fun prepareSessionForAclReconnect(context: Context) {
+        SonyCommandCoordinator.prepareSessionForAclReconnect(context)
+    }
+
+    fun closeSessionForServiceStop(context: Context) {
+        SonyCommandCoordinator.closeSessionForServiceStop(context)
+    }
+
     suspend fun awaitRefresh(
         context: Context,
         device: BluetoothDevice? = null,
@@ -116,6 +130,13 @@ private sealed interface SonyCommand {
         val focusOnVoice: Boolean,
         val requestedAtMillis: Long
     ) : SonyCommand
+
+    data class Reconnect(
+        val context: Context,
+        val device: BluetoothDevice,
+        val attempt: Int,
+        val generation: Long
+    ) : SonyCommand
 }
 
 private object SonyCommandCoordinator {
@@ -127,6 +148,11 @@ private object SonyCommandCoordinator {
 
     @Volatile
     private var postInteractionRefreshQueued = false
+
+    private var reconnectJob: Job? = null
+    private var reconnectGeneration = 0L
+
+    private val reconnectDelaysMillis = longArrayOf(1_000L, 2_000L, 5_000L, 15_000L, 30_000L)
 
     fun enqueueRefresh(
         context: Context,
@@ -200,6 +226,22 @@ private object SonyCommandCoordinator {
             )
         )
         startWorker()
+    }
+
+    @Synchronized
+    fun closeSessionForAclDisconnect(context: Context) {
+        cancelReconnectLocked()
+        SonyControlSessionManager.closeForAclDisconnect(context)
+    }
+
+    @Synchronized
+    fun prepareSessionForAclReconnect(context: Context) {
+        cancelReconnectLocked()
+        SonyControlSessionManager.prepareAclReconnect(context)
+    }
+
+    fun closeSessionForServiceStop(context: Context) {
+        SonyControlSessionManager.closeForServiceStop(context)
     }
 
     suspend fun awaitRefresh(
@@ -309,6 +351,73 @@ private object SonyCommandCoordinator {
         }
     }
 
+    @Synchronized
+    private fun cancelReconnect() {
+        cancelReconnectLocked()
+    }
+
+    private fun cancelReconnectLocked() {
+        reconnectGeneration += 1L
+        reconnectJob?.cancel()
+        reconnectJob = null
+    }
+
+    @Synchronized
+    private fun isReconnectCurrent(generation: Long): Boolean =
+        generation == reconnectGeneration
+
+    private fun scheduleReconnect(context: Context, device: BluetoothDevice, attempt: Int = 0) {
+        val app = context.applicationContext
+        val generation: Long
+        synchronized(this) {
+            cancelReconnectLocked()
+            generation = reconnectGeneration
+            SonyControlSessionManager.enterReconnectWait(app)
+            reconnectJob = scope.launch {
+                val delayIndex = attempt.coerceAtMost(reconnectDelaysMillis.lastIndex)
+                val delayMillis = reconnectDelaysMillis[delayIndex]
+                DiagnosticsStore.add(app, "RFCOMM reconnect scheduled in ${delayMillis}ms")
+                delay(delayMillis)
+                if (isReconnectCurrent(generation)) {
+                    commands.send(SonyCommand.Reconnect(app, device, attempt, generation))
+                }
+            }
+        }
+        startWorker()
+    }
+
+    private suspend fun executeReconnect(command: SonyCommand.Reconnect) {
+        if (!isReconnectCurrent(command.generation)) return
+        val app = command.context.applicationContext
+        DiagnosticsStore.add(app, "RFCOMM reconnect attempt: ${command.attempt + 1}")
+        val client = SonyBatteryClient(app)
+        if (!canAttemptAutomaticConnection(app, client, command.device)) {
+            scheduleReconnect(app, command.device, command.attempt + 1)
+            return
+        }
+        try {
+            SonyControlSessionManager.ensureConnected(app, command.device)
+            if (!isReconnectCurrent(command.generation)) return
+            reconnectJob = null
+            EarbudConnectionStateStore.markWithDiagnostics(
+                app,
+                EarbudConnectionState.CONNECTED,
+                command.device
+            )
+            BatteryPollingService.start(app)
+            enqueueRefresh(
+                app,
+                command.device,
+                startPolling = false,
+                onComplete = null,
+                automatic = true
+            )
+        } catch (error: SonyControlChannelUnavailableException) {
+            DiagnosticsStore.add(app, "RFCOMM reconnect failed: ${error.message}")
+            scheduleReconnect(app, command.device, command.attempt + 1)
+        }
+    }
+
     private suspend fun execute(command: SonyCommand) {
         when (command) {
             is SonyCommand.Refresh -> {
@@ -319,6 +428,9 @@ private object SonyCommandCoordinator {
             }
             is SonyCommand.SetAmbientLevel -> {
                 executeAmbientLevel(command)
+            }
+            is SonyCommand.Reconnect -> {
+                executeReconnect(command)
             }
         }
     }
@@ -334,9 +446,18 @@ private object SonyCommandCoordinator {
             command.onComplete?.invoke()
             return previous
         }
+        if (command.automatic && SonyControlSessionManager.currentState() == SonySessionState.RECONNECT_WAIT) {
+            DiagnosticsStore.add(app, "Automatic refresh skipped: reconnect pending")
+            command.onComplete?.invoke()
+            return previous
+        }
 
         val manualReconnectAttempt = !command.automatic &&
             EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED
+        if (!command.automatic) {
+            cancelReconnect()
+            if (manualReconnectAttempt) SonyControlSessionManager.prepareManualReconnect(app)
+        }
         if (manualReconnectAttempt) DiagnosticsStore.add(app, "Manual refresh attempting reconnect")
 
         DiagnosticsStore.add(app, "Refresh started")
@@ -345,7 +466,7 @@ private object SonyCommandCoordinator {
             command.onComplete?.invoke()
             return previous
         }
-        if (command.automatic && client.hasConnectedBluetoothProfile(target!!) == false) {
+        if (command.automatic && !canAttemptAutomaticConnection(app, client, target!!)) {
             command.onComplete?.invoke()
             return previous
         }
@@ -490,6 +611,18 @@ private object SonyCommandCoordinator {
             device
         )
         BatteryPollingService.stop(context)
+        if (device != null) scheduleReconnect(context, device)
+    }
+
+    private fun canAttemptAutomaticConnection(
+        context: Context,
+        client: SonyBatteryClient,
+        device: BluetoothDevice
+    ): Boolean {
+        val profileConnected = client.hasConnectedBluetoothProfile(device)
+        if (profileConnected != false) return true
+        return EarbudConnectionStateStore.current(context) == EarbudConnectionState.CONNECTED ||
+            SonyControlSessionManager.currentState() == SonySessionState.RECONNECT_WAIT
     }
 
     private suspend fun finishControlCommand(
