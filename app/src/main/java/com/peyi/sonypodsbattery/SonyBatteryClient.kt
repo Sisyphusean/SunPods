@@ -22,6 +22,9 @@ enum class ListeningMode(val label: String) {
     }
 }
 
+class SonyControlChannelUnavailableException(cause: Throwable?) :
+    IOException("Sony control channel unavailable", cause)
+
 class SonyBatteryClient(private val context: Context) {
     companion object {
         private val UUID_V2: UUID = UUID.fromString("956c7b26-d49a-4ba8-b03f-b17d393cb6e2")
@@ -84,7 +87,7 @@ class SonyBatteryClient(private val context: Context) {
                 try { socket?.close() } catch (_: Exception) {}
             }
         }
-        throw IOException("Sony control channel unavailable", lastError)
+        throw SonyControlChannelUnavailableException(lastError)
     }
 
     @SuppressLint("MissingPermission")
