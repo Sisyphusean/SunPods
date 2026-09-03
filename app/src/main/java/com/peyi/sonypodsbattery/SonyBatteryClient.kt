@@ -7,11 +7,15 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothSocket
 import android.content.Context
+import android.os.Build
 import java.io.EOFException
 import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class ListeningMode(val label: String) {
     NOISE_CANCELLING("Noise cancelling"),
@@ -25,6 +29,138 @@ enum class ListeningMode(val label: String) {
 
 class SonyControlChannelUnavailableException(cause: Throwable?) :
     IOException("Sony control channel unavailable", cause)
+
+enum class AudioProfileAvailability {
+    AVAILABLE,
+    DISCONNECTED,
+    UNKNOWN
+}
+
+data class AudioProfileSnapshot(
+    val states: Map<AudioProfile, AudioProfileConnectionState>,
+    val unresolved: Boolean
+) {
+    val availability: AudioProfileAvailability
+        get() = when {
+            states.values.any {
+                it == AudioProfileConnectionState.CONNECTED ||
+                    it == AudioProfileConnectionState.CONNECTING
+            } -> AudioProfileAvailability.AVAILABLE
+            unresolved -> AudioProfileAvailability.UNKNOWN
+            else -> AudioProfileAvailability.DISCONNECTED
+        }
+}
+
+object SonyAudioProfileQuery {
+    @SuppressLint("MissingPermission")
+    suspend fun snapshot(context: Context, device: BluetoothDevice): AudioProfileSnapshot {
+        val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
+            ?: return AudioProfileSnapshot(emptyMap(), unresolved = true)
+        val profiles = mutableListOf(
+            AudioProfile.A2DP to BluetoothProfile.A2DP,
+            AudioProfile.HEADSET to BluetoothProfile.HEADSET
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            profiles += AudioProfile.LE_AUDIO to BluetoothProfile.LE_AUDIO
+        }
+
+        val states = linkedMapOf<AudioProfile, AudioProfileConnectionState>()
+        var unresolved = false
+        for ((profile, profileId) in profiles) {
+            val result = queryProfile(context, adapter, profileId, device)
+            if (!result.available) continue
+            val state = result.state
+            if (state == null || state == AudioProfileConnectionState.UNKNOWN) {
+                unresolved = true
+            } else {
+                states[profile] = state
+                EarbudConnectionStateStore.markProfile(context, profile, state, device)
+            }
+        }
+        return AudioProfileSnapshot(states, unresolved)
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun queryProfile(
+        context: Context,
+        adapter: BluetoothAdapter,
+        profileId: Int,
+        device: BluetoothDevice
+    ): ProfileQueryResult {
+        val result = CompletableDeferred<BluetoothProfile?>()
+        val proxyReference = AtomicReference<BluetoothProfile?>(null)
+        val listener = object : BluetoothProfile.ServiceListener {
+            override fun onServiceConnected(profile: Int, service: BluetoothProfile) {
+                proxyReference.set(service)
+                if (!result.complete(service)) {
+                    closeProfileProxy(adapter, profile, service)
+                }
+            }
+
+            override fun onServiceDisconnected(profile: Int) {
+                result.complete(null)
+            }
+        }
+
+        val requested = try {
+            adapter.getProfileProxy(context, listener, profileId)
+        } catch (_: SecurityException) {
+            return ProfileQueryResult(available = true, state = null)
+        } catch (_: IllegalArgumentException) {
+            return ProfileQueryResult(available = false, state = null)
+        }
+        if (!requested) return ProfileQueryResult(available = false, state = null)
+
+        return try {
+            val service = withTimeoutOrNull(PROFILE_QUERY_TIMEOUT_MS) { result.await() }
+            if (service == null) return ProfileQueryResult(available = true, state = null)
+            val connected = try {
+                service.connectedDevices.any { connectedDevice ->
+                    connectedDevice.address == device.address
+                }
+            } catch (_: SecurityException) {
+                false
+            } catch (_: IllegalArgumentException) {
+                false
+            }
+            val state = try {
+                if (connected) BluetoothProfile.STATE_CONNECTED else service.getConnectionState(device)
+            } catch (_: SecurityException) {
+                return ProfileQueryResult(available = true, state = null)
+            } catch (_: IllegalArgumentException) {
+                return ProfileQueryResult(available = true, state = null)
+            }
+            val connectionState = when (state) {
+                BluetoothProfile.STATE_CONNECTED -> AudioProfileConnectionState.CONNECTED
+                BluetoothProfile.STATE_CONNECTING -> AudioProfileConnectionState.CONNECTING
+                BluetoothProfile.STATE_DISCONNECTED,
+                BluetoothProfile.STATE_DISCONNECTING -> AudioProfileConnectionState.DISCONNECTED
+                else -> AudioProfileConnectionState.UNKNOWN
+            }
+            ProfileQueryResult(available = true, state = connectionState)
+        } finally {
+            proxyReference.get()?.let { service -> closeProfileProxy(adapter, profileId, service) }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun closeProfileProxy(adapter: BluetoothAdapter, profileId: Int, service: BluetoothProfile) {
+        try {
+            adapter.closeProfileProxy(profileId, service)
+        } catch (_: SecurityException) {
+            // Profile cleanup is best effort when Bluetooth permission changes.
+        } catch (_: IllegalArgumentException) {
+            // Some platform implementations reject an already closed proxy.
+        }
+    }
+
+    private data class ProfileQueryResult(
+        val available: Boolean,
+        val state: AudioProfileConnectionState?
+    )
+
+    private const val PROFILE_QUERY_TIMEOUT_MS = 800L
+}
 
 enum class SonySessionState {
     DISCONNECTED,
