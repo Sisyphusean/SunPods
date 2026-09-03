@@ -55,14 +55,14 @@ class SonyBatteryClient(private val context: Context) {
         val manager = context.getSystemService(BluetoothManager::class.java) ?: return null
         return try {
             listOf(
-                BluetoothProfile.A2DP,
-                BluetoothProfile.HEADSET,
                 BluetoothProfile.GATT,
                 BluetoothProfile.GATT_SERVER
             ).any { profile ->
                 manager.getConnectionState(device, profile) == BluetoothProfile.STATE_CONNECTED
             }
         } catch (_: SecurityException) {
+            null
+        } catch (_: IllegalArgumentException) {
             null
         }
     }
