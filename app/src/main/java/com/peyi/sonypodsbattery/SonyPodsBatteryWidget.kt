@@ -18,6 +18,7 @@ import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.LinearProgressIndicator
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
@@ -444,7 +445,7 @@ private fun AmbientControls(ambientLevel: Int, compactWidth: Boolean, compactHei
             verticalAlignment = Alignment.CenterVertically
         ) {
             StepButton("−", -1)
-            AmbientSteps(ambientLevel, compactWidth, GlanceModifier.defaultWeight())
+            AmbientProgress(ambientLevel, GlanceModifier.defaultWeight())
             StepButton("+", 1)
         }
     }
@@ -466,19 +467,13 @@ private fun StepButton(symbol: String, delta: Int) {
 }
 
 @Composable
-private fun AmbientSteps(level: Int, compactWidth: Boolean, modifier: GlanceModifier) {
-    Row(
-        modifier = modifier.padding(horizontal = if (compactWidth) 2.dp else 5.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        for (step in 1..20) {
-            Box(
-                modifier = GlanceModifier.defaultWeight().height(3.dp)
-                    .cornerRadius(2.dp)
-                    .then(if (step <= level) GlanceModifier.background(GlanceTheme.colors.primaryContainer) else GlanceModifier.background(GlanceTheme.colors.onSurfaceVariant))
-            ) {}
-        }
-    }
+private fun AmbientProgress(level: Int, modifier: GlanceModifier) {
+    LinearProgressIndicator(
+        progress = level.coerceIn(1, 20) / 20f,
+        modifier = modifier.height(3.dp),
+        color = GlanceTheme.colors.primaryContainer,
+        backgroundColor = GlanceTheme.colors.onSurfaceVariant
+    )
 }
 
 @Composable

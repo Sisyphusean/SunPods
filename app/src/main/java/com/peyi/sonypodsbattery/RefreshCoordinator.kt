@@ -63,6 +63,10 @@ object RefreshCoordinator {
         )
     }
 
+    fun enqueuePostInteractionRefresh(context: Context) {
+        SonyCommandCoordinator.enqueuePostInteractionRefresh(context)
+    }
+
     suspend fun awaitRefresh(
         context: Context,
         device: BluetoothDevice? = null,
@@ -90,7 +94,8 @@ private sealed interface SonyCommand {
         val device: BluetoothDevice?,
         val startPolling: Boolean,
         val completion: CompletableDeferred<BatteryState>,
-        val onComplete: (() -> Unit)? = null
+        val onComplete: (() -> Unit)? = null,
+        val postInteraction: Boolean = false
     ) : SonyCommand
 
     data class SetMode(
@@ -116,6 +121,9 @@ private object SonyCommandCoordinator {
 
     @Volatile
     private var workerStarted = false
+
+    @Volatile
+    private var postInteractionRefreshQueued = false
 
     fun enqueueRefresh(
         context: Context,
@@ -172,6 +180,22 @@ private object SonyCommandCoordinator {
         startWorker()
     }
 
+    @Synchronized
+    fun enqueuePostInteractionRefresh(context: Context) {
+        if (postInteractionRefreshQueued) return
+        postInteractionRefreshQueued = true
+        commands.trySend(
+            SonyCommand.Refresh(
+                context.applicationContext,
+                null,
+                false,
+                CompletableDeferred(),
+                postInteraction = true
+            )
+        )
+        startWorker()
+    }
+
     suspend fun awaitRefresh(
         context: Context,
         device: BluetoothDevice?,
@@ -184,7 +208,8 @@ private object SonyCommandCoordinator {
                 device,
                 startPolling,
                 completion,
-                null
+                null,
+                false
             )
         )
         startWorker()
@@ -228,7 +253,13 @@ private object SonyCommandCoordinator {
                     deferredCommand = coalesced.deferredCommand
                     coalesced.command
                 } else {
-                    first
+                    if (first is SonyCommand.Refresh && first.postInteraction) {
+                        val coalesced = coalescePostInteractionRefresh(first)
+                        deferredCommand = coalesced.deferredCommand
+                        coalesced.command
+                    } else {
+                        first
+                    }
                 }
                 execute(command)
             }
@@ -252,6 +283,24 @@ private object SonyCommandCoordinator {
         }
     }
 
+    private data class RefreshCoalesced(
+        val command: SonyCommand.Refresh,
+        val deferredCommand: SonyCommand?
+    )
+
+    private fun coalescePostInteractionRefresh(first: SonyCommand.Refresh): RefreshCoalesced {
+        var latest = first
+        while (true) {
+            val next = commands.tryReceive().getOrNull()
+                ?: return RefreshCoalesced(latest, null)
+            if (next is SonyCommand.Refresh && next.postInteraction) {
+                latest = next
+            } else {
+                return RefreshCoalesced(latest, next)
+            }
+        }
+    }
+
     private suspend fun execute(command: SonyCommand) {
         when (command) {
             is SonyCommand.Refresh -> {
@@ -267,6 +316,7 @@ private object SonyCommandCoordinator {
     }
 
     private suspend fun executeRefresh(command: SonyCommand.Refresh): BatteryState {
+        if (command.postInteraction) postInteractionRefreshQueued = false
         val app = command.context.applicationContext
         val previous = BatteryStore.load(app)
         val client = SonyBatteryClient(app)
@@ -300,8 +350,16 @@ private object SonyCommandCoordinator {
 
         BatteryStore.save(app, state)
         SonyPodsBatteryWidgetUpdater.syncReportedMode(app, AudioMode.fromListeningMode(state.listeningMode))
-        if (state != previous) SonyPodsBatteryWidgetUpdater.updateAll(app)
-        BatteryNotifier.show(app, state)
+        val batteryDataChanged = state.left != previous.left ||
+            state.right != previous.right ||
+            state.case != previous.case ||
+            state.leftCharging != previous.leftCharging ||
+            state.rightCharging != previous.rightCharging ||
+            state.caseCharging != previous.caseCharging
+        if (!command.postInteraction || batteryDataChanged) {
+            SonyPodsBatteryWidgetUpdater.updateAll(app)
+        }
+        if (!command.postInteraction) BatteryNotifier.show(app, state)
         if (command.startPolling && state.status.startsWith("Updated")) BatteryPollingService.start(app)
         command.onComplete?.invoke()
         return state
@@ -317,6 +375,7 @@ private object SonyCommandCoordinator {
             previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
         } else try {
             client.setListeningMode(target, command.mode, command.ambientLevel, command.focusOnVoice)
+            SonyCommandCoordinator.enqueuePostInteractionRefresh(app)
             DiagnosticsStore.add(app, "Listening mode changed: ${command.mode.name}")
             previous.copy(
                 listeningMode = command.mode,
@@ -347,6 +406,7 @@ private object SonyCommandCoordinator {
             previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
         } else try {
             client.setListeningMode(target, ListeningMode.AMBIENT, level, command.focusOnVoice)
+            SonyCommandCoordinator.enqueuePostInteractionRefresh(app)
             DiagnosticsStore.add(app, "Ambient level changed: $level")
             previous.copy(
                 listeningMode = ListeningMode.AMBIENT,
