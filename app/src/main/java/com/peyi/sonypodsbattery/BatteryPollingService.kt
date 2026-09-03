@@ -11,24 +11,27 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.content.pm.ServiceInfo
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class BatteryPollingService : Service() {
     private val handler = Handler(Looper.getMainLooper())
+    private val pollingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var failures = 0
-    private val poll = object : Runnable {
+    private val poll: Runnable = object : Runnable {
         override fun run() {
-            Thread {
-                val state = RefreshCoordinator.refresh(applicationContext, startPolling = false)
-                runBlocking {
-                    SonyPodsBatteryWidgetUpdater.syncReportedMode(
-                        applicationContext,
-                        AudioMode.fromListeningMode(state.listeningMode)
-                    )
-                }
+            pollingScope.launch {
+                val state = RefreshCoordinator.awaitRefresh(applicationContext, startPolling = false)
                 failures = if (state.status.startsWith("Updated")) 0 else failures + 1
-                if (failures >= MAX_FAILURES) stopSelf() else handler.postDelayed(this, INTERVAL_MS)
-            }.start()
+                if (failures >= MAX_FAILURES) {
+                    stopSelf()
+                } else {
+                    handler.postDelayed(poll, INTERVAL_MS)
+                }
+            }
         }
     }
 
@@ -41,6 +44,7 @@ class BatteryPollingService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(poll)
+        pollingScope.cancel()
         super.onDestroy()
     }
 
