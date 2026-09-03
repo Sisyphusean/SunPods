@@ -3,8 +3,6 @@ package com.peyi.sonypodsbattery
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothHeadset
-import android.bluetooth.BluetoothLeAudio
 import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -22,15 +20,8 @@ enum class EarbudConnectionState {
     }
 }
 
-enum class AudioProfile {
-    A2DP,
-    HEADSET,
-    LE_AUDIO
-}
-
-enum class AudioProfileConnectionState {
+enum class A2dpConnectionState {
     CONNECTED,
-    CONNECTING,
     DISCONNECTED,
     UNKNOWN
 }
@@ -38,16 +29,20 @@ enum class AudioProfileConnectionState {
 object EarbudConnectionStateStore {
     private const val PREFS = "earbud_connection"
     private const val STATE_KEY = "state"
-    private const val TARGET_ADDRESS_KEY = "target_address"
     private const val A2DP_STATE_KEY = "a2dp_state"
-    private const val HEADSET_STATE_KEY = "headset_state"
-    private const val LE_AUDIO_STATE_KEY = "le_audio_state"
+    private const val TARGET_ADDRESS_KEY = "target_address"
 
     fun current(context: Context): EarbudConnectionState =
         EarbudConnectionState.fromStored(
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getString(STATE_KEY, null)
         )
+
+    fun a2dpState(context: Context): A2dpConnectionState =
+        A2dpConnectionState.entries.firstOrNull {
+            it.name == context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(A2DP_STATE_KEY, null)
+        } ?: A2dpConnectionState.UNKNOWN
 
     @SuppressLint("MissingPermission")
     fun mark(context: Context, state: EarbudConnectionState, device: BluetoothDevice?) {
@@ -73,53 +68,15 @@ object EarbudConnectionStateStore {
     }
 
     @SuppressLint("MissingPermission")
-    fun profileState(
-        context: Context,
-        profile: AudioProfile,
-        device: BluetoothDevice?
-    ): AudioProfileConnectionState {
-        val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val storedAddress = preferences.getString(TARGET_ADDRESS_KEY, null)
-        val deviceAddress = try { device?.address } catch (_: SecurityException) { null }
-        if (deviceAddress == null || storedAddress != deviceAddress) return AudioProfileConnectionState.UNKNOWN
-        val key = when (profile) {
-            AudioProfile.A2DP -> A2DP_STATE_KEY
-            AudioProfile.HEADSET -> HEADSET_STATE_KEY
-            AudioProfile.LE_AUDIO -> LE_AUDIO_STATE_KEY
-        }
-        return AudioProfileConnectionState.entries.firstOrNull {
-            it.name == preferences.getString(key, null)
-        } ?: AudioProfileConnectionState.UNKNOWN
-    }
-
-    @SuppressLint("MissingPermission")
-    fun markProfile(
-        context: Context,
-        profile: AudioProfile,
-        state: AudioProfileConnectionState,
-        device: BluetoothDevice
-    ) {
-        val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val key = when (profile) {
-            AudioProfile.A2DP -> A2DP_STATE_KEY
-            AudioProfile.HEADSET -> HEADSET_STATE_KEY
-            AudioProfile.LE_AUDIO -> LE_AUDIO_STATE_KEY
-        }
-        val editor = preferences.edit().putString(key, state.name)
+    fun markA2dp(context: Context, state: A2dpConnectionState, device: BluetoothDevice) {
+        val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(A2DP_STATE_KEY, state.name)
         try {
             editor.putString(TARGET_ADDRESS_KEY, device.address)
         } catch (_: SecurityException) {
             return
         }
         editor.apply()
-    }
-
-    fun markProfilesUnknown(context: Context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(A2DP_STATE_KEY, AudioProfileConnectionState.UNKNOWN.name)
-            .putString(HEADSET_STATE_KEY, AudioProfileConnectionState.UNKNOWN.name)
-            .putString(LE_AUDIO_STATE_KEY, AudioProfileConnectionState.UNKNOWN.name)
-            .apply()
     }
 
     @SuppressLint("MissingPermission")
@@ -138,93 +95,44 @@ object EarbudConnectionStateStore {
 class EarbudConnectionReceiver : BroadcastReceiver() {
     @SuppressLint("MissingPermission")
     override fun onReceive(context: Context, intent: Intent) {
-        val action = intent.action
-        val isAclAction = action == BluetoothDevice.ACTION_ACL_CONNECTED ||
-            action == BluetoothDevice.ACTION_ACL_DISCONNECTED ||
-            action == BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED
-        val profile = when (action) {
-            BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED -> AudioProfile.A2DP
-            BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> AudioProfile.HEADSET
-            BluetoothLeAudio.ACTION_LE_AUDIO_CONNECTION_STATE_CHANGED.takeIf {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-            } -> AudioProfile.LE_AUDIO
-            else -> null
-        }
-        if (!isAclAction && profile == null) return
+        if (intent.action != BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED) return
 
         val app = context.applicationContext
-        val device = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-        else @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+        val device = if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+        }
         val name = try { device?.name.orEmpty() } catch (_: SecurityException) { "" }
         val address = try { device?.address.orEmpty() } catch (_: SecurityException) { "" }
         val deviceLabel = "${name.ifBlank { "<unknown>" }} ${address.ifBlank { "<unknown>" }}"
-        if (isAclAction) {
-            val actionLabel = when (action) {
-                BluetoothDevice.ACTION_ACL_CONNECTED -> "ACL_CONNECTED"
-                BluetoothDevice.ACTION_ACL_DISCONNECTED -> "ACL_DISCONNECTED"
-                else -> "ACL_DISCONNECT_REQUESTED"
-            }
-            DiagnosticsStore.add(app, "$actionLabel received: $deviceLabel")
-        } else {
-            val profileState = profileState(intent)
-            DiagnosticsStore.add(app, "${profileLabel(profile!!)} state: ${profileState.name}")
-        }
-
-        if (!EarbudConnectionStateStore.isTargetDevice(app, device)) {
-            DiagnosticsStore.add(app, "Ignored ACL event: $deviceLabel")
-            return
-        }
-
-        if (profile != null) {
-            val state = profileState(intent)
-            EarbudConnectionStateStore.markProfile(app, profile, state, device!!)
-            RefreshCoordinator.handleAudioProfileEvent(app, device, profile, state)
-            return
-        }
-
-        if (action == BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED) {
-            EarbudConnectionStateStore.markProfilesUnknown(app)
-            EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.DISCONNECTED, device)
-            RefreshCoordinator.closeSessionForAclDisconnect(app)
-            BatteryPollingService.stop(app)
-            return
-        }
-
-        if (action == BluetoothDevice.ACTION_ACL_DISCONNECTED) {
-            EarbudConnectionStateStore.markProfilesUnknown(app)
-            EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.DISCONNECTED, device)
-            DiagnosticsStore.add(app, "Polling stopped: ACL disconnect")
-            RefreshCoordinator.closeSessionForAclDisconnect(app)
-            BatteryPollingService.stop(app)
-            return
-        }
-
-        RefreshCoordinator.prepareSessionForAclReconnect(app)
-        EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, device)
-        BatteryPollingService.start(app)
-        val pending = goAsync()
-        RefreshCoordinator.enqueueRefresh(
-            context = app,
-            device = device,
-            startPolling = false,
-            onComplete = { pending.finish() },
-            automatic = true
+        val state = intent.getIntExtra(
+            BluetoothProfile.EXTRA_STATE,
+            BluetoothProfile.STATE_DISCONNECTED
         )
-    }
 
-    private fun profileState(intent: Intent): AudioProfileConnectionState {
-        return when (intent.getIntExtra(BluetoothProfile.EXTRA_STATE, BluetoothProfile.STATE_DISCONNECTED)) {
-            BluetoothProfile.STATE_CONNECTED -> AudioProfileConnectionState.CONNECTED
-            BluetoothProfile.STATE_CONNECTING -> AudioProfileConnectionState.CONNECTING
-            BluetoothProfile.STATE_DISCONNECTED,
-            BluetoothProfile.STATE_DISCONNECTING -> AudioProfileConnectionState.DISCONNECTED
-            else -> AudioProfileConnectionState.UNKNOWN
+        val a2dpState = when (state) {
+            BluetoothProfile.STATE_CONNECTED -> A2dpConnectionState.CONNECTED
+            BluetoothProfile.STATE_DISCONNECTED -> A2dpConnectionState.DISCONNECTED
+            BluetoothProfile.STATE_CONNECTING,
+            BluetoothProfile.STATE_DISCONNECTING -> return
+            else -> return
         }
-    }
+        val stateLabel = a2dpState.name
+        DiagnosticsStore.add(app, "A2DP state: $stateLabel $deviceLabel")
+        if (!EarbudConnectionStateStore.isTargetDevice(app, device)) {
+            DiagnosticsStore.add(app, "Ignored A2DP event: $deviceLabel")
+            return
+        }
 
-    private fun profileLabel(profile: AudioProfile): String = when (profile) {
-        AudioProfile.A2DP -> "A2DP"
-        AudioProfile.HEADSET -> "HEADSET"
-        AudioProfile.LE_AUDIO -> "LE_AUDIO"
+        val target = device ?: return
+        if (a2dpState == A2dpConnectionState.CONNECTED) {
+            EarbudConnectionStateStore.markA2dp(app, a2dpState, target)
+            RefreshCoordinator.handleA2dpConnected(app, target)
+        } else {
+            EarbudConnectionStateStore.markA2dp(app, a2dpState, target)
+            RefreshCoordinator.handleA2dpDisconnected(app, target)
+        }
     }
 }

@@ -51,6 +51,21 @@ object BatteryStore {
             putString("status", state.status)
         }.apply()
     }
+
+    fun clearBatteryValues(context: Context, status: String = "Earbuds disconnected") {
+        save(
+            context,
+            load(context).copy(
+                left = null,
+                right = null,
+                case = null,
+                leftCharging = false,
+                rightCharging = false,
+                caseCharging = false,
+                status = status
+            )
+        )
+    }
 }
 
 object DiagnosticsStore {
