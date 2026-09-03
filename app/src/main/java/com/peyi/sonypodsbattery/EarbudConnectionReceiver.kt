@@ -44,6 +44,15 @@ object EarbudConnectionStateStore {
     }
 
     @SuppressLint("MissingPermission")
+    fun markWithDiagnostics(context: Context, state: EarbudConnectionState, device: BluetoothDevice?) {
+        val previous = current(context)
+        mark(context, state, device)
+        if (previous != state) {
+            DiagnosticsStore.add(context, "Connection state changed: $state")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
     fun isTargetDevice(context: Context, device: BluetoothDevice?): Boolean {
         if (device == null) return false
         val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -67,16 +76,24 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
         val app = context.applicationContext
         val device = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
         else @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+        val name = try { device?.name.orEmpty() } catch (_: SecurityException) { "" }
+        val address = try { device?.address.orEmpty() } catch (_: SecurityException) { "" }
+        val actionLabel = if (action == BluetoothDevice.ACTION_ACL_CONNECTED) "ACL_CONNECTED" else "ACL_DISCONNECTED"
+        DiagnosticsStore.add(app, "$actionLabel received: ${name.ifBlank { "<unknown>" }} ${address.ifBlank { "<unknown>" }}")
 
-        if (!EarbudConnectionStateStore.isTargetDevice(app, device)) return
+        if (!EarbudConnectionStateStore.isTargetDevice(app, device)) {
+            DiagnosticsStore.add(app, "Ignored ACL event: ${name.ifBlank { "<unknown>" }} ${address.ifBlank { "<unknown>" }}")
+            return
+        }
 
         if (action == BluetoothDevice.ACTION_ACL_DISCONNECTED) {
-            EarbudConnectionStateStore.mark(app, EarbudConnectionState.DISCONNECTED, device)
+            EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.DISCONNECTED, device)
+            DiagnosticsStore.add(app, "Polling stopped: ACL disconnect")
             BatteryPollingService.stop(app)
             return
         }
 
-        EarbudConnectionStateStore.mark(app, EarbudConnectionState.CONNECTED, device)
+        EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, device)
         BatteryPollingService.start(app)
         val pending = goAsync()
         RefreshCoordinator.enqueueRefresh(

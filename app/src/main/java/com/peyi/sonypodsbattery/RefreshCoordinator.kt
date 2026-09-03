@@ -330,9 +330,14 @@ private object SonyCommandCoordinator {
 
         if (command.postInteraction) postInteractionRefreshQueued = false
         if (command.automatic && EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) {
+            DiagnosticsStore.add(app, "Automatic refresh skipped: disconnected")
             command.onComplete?.invoke()
             return previous
         }
+
+        val manualReconnectAttempt = !command.automatic &&
+            EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED
+        if (manualReconnectAttempt) DiagnosticsStore.add(app, "Manual refresh attempting reconnect")
 
         DiagnosticsStore.add(app, "Refresh started")
         val target = command.device ?: client.findEarbuds()
@@ -348,6 +353,10 @@ private object SonyCommandCoordinator {
             previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
         } else try {
             val result = client.read(target)
+            if (!command.automatic) {
+                if (manualReconnectAttempt) DiagnosticsStore.add(app, "Manual refresh restored connection")
+                EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, target)
+            }
             DiagnosticsStore.add(app, "Refresh succeeded; case reported=${result.case != null}")
             BatteryState(
                 result.left,
@@ -362,6 +371,10 @@ private object SonyCommandCoordinator {
                 System.currentTimeMillis(),
                 if (result.case == null) "Updated. Open the case to refresh its battery." else "Updated"
             )
+        } catch (error: SonyControlChannelUnavailableException) {
+            markControlChannelUnavailable(app, target)
+            DiagnosticsStore.add(app, "Refresh failed: ${error.javaClass.simpleName}: ${error.message}")
+            previous.copy(status = "Could not connect. Close Sony Sound Connect and try again.")
         } catch (error: SecurityException) {
             DiagnosticsStore.add(app, "Refresh blocked: ${error.message ?: error.javaClass.simpleName}")
             previous.copy(status = "Android blocked a Bluetooth action. Share diagnostics.")
@@ -382,7 +395,9 @@ private object SonyCommandCoordinator {
             SonyPodsBatteryWidgetUpdater.updateAll(app)
         }
         if (!command.postInteraction) BatteryNotifier.show(app, state)
-        if (command.startPolling && state.status.startsWith("Updated")) BatteryPollingService.start(app)
+        if (command.startPolling && state.status.startsWith("Updated") &&
+            EarbudConnectionStateStore.current(app) != EarbudConnectionState.DISCONNECTED
+        ) BatteryPollingService.start(app)
         command.onComplete?.invoke()
         return state
     }
@@ -392,6 +407,14 @@ private object SonyCommandCoordinator {
         val previous = BatteryStore.load(app)
         val client = SonyBatteryClient(app)
         DiagnosticsStore.add(app, "Listening mode change requested: ${command.mode.name}")
+        if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) {
+            DiagnosticsStore.add(app, "Control command skipped: disconnected")
+            return finishControlCommand(
+                app,
+                previous.copy(status = "Could not change mode. Earbuds are disconnected."),
+                command.requestedAtMillis
+            )
+        }
         val target = client.findEarbuds()
         val state = if (target == null) {
             previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
@@ -406,15 +429,16 @@ private object SonyCommandCoordinator {
                 status = "${command.mode.label} enabled",
                 updatedAt = System.currentTimeMillis()
             )
+        } catch (error: SonyControlChannelUnavailableException) {
+            markControlChannelUnavailable(app, target)
+            DiagnosticsStore.add(app, "Listening mode failed: ${error.javaClass.simpleName}: ${error.message}")
+            previous.copy(status = "Could not change mode. Close Sony Sound Connect and try again.")
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Listening mode failed: ${error.javaClass.simpleName}: ${error.message}")
             previous.copy(status = "Could not change mode. Close Sony Sound Connect and try again.")
         }
 
-        BatteryStore.save(app, state)
-        SonyPodsBatteryWidgetUpdater.syncConfirmedState(app, state, command.requestedAtMillis)
-        BatteryNotifier.show(app, state)
-        return state
+        return finishControlCommand(app, state, command.requestedAtMillis)
     }
 
     private suspend fun executeAmbientLevel(command: SonyCommand.SetAmbientLevel): BatteryState {
@@ -423,6 +447,14 @@ private object SonyCommandCoordinator {
         val client = SonyBatteryClient(app)
         val level = command.ambientLevel.coerceIn(1, 20)
         DiagnosticsStore.add(app, "Ambient level change requested: $level")
+        if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) {
+            DiagnosticsStore.add(app, "Control command skipped: disconnected")
+            return finishControlCommand(
+                app,
+                previous.copy(status = "Could not change ambient level. Earbuds are disconnected."),
+                command.requestedAtMillis
+            )
+        }
         val target = client.findEarbuds()
         val state = if (target == null) {
             previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
@@ -437,14 +469,37 @@ private object SonyCommandCoordinator {
                 status = "Ambient sound enabled",
                 updatedAt = System.currentTimeMillis()
             )
+        } catch (error: SonyControlChannelUnavailableException) {
+            markControlChannelUnavailable(app, target)
+            DiagnosticsStore.add(app, "Ambient level failed: ${error.javaClass.simpleName}: ${error.message}")
+            previous.copy(status = "Could not change ambient level. Close Sony Sound Connect and try again.")
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Ambient level failed: ${error.javaClass.simpleName}: ${error.message}")
             previous.copy(status = "Could not change ambient level. Close Sony Sound Connect and try again.")
         }
 
-        BatteryStore.save(app, state)
-        SonyPodsBatteryWidgetUpdater.syncConfirmedState(app, state, command.requestedAtMillis)
-        BatteryNotifier.show(app, state)
+        return finishControlCommand(app, state, command.requestedAtMillis)
+    }
+
+    private fun markControlChannelUnavailable(context: Context, device: BluetoothDevice?) {
+        if (EarbudConnectionStateStore.current(context) == EarbudConnectionState.DISCONNECTED) return
+        DiagnosticsStore.add(context, "RFCOMM unavailable, marking disconnected")
+        EarbudConnectionStateStore.markWithDiagnostics(
+            context,
+            EarbudConnectionState.DISCONNECTED,
+            device
+        )
+        BatteryPollingService.stop(context)
+    }
+
+    private suspend fun finishControlCommand(
+        context: Context,
+        state: BatteryState,
+        requestedAtMillis: Long
+    ): BatteryState {
+        BatteryStore.save(context, state)
+        SonyPodsBatteryWidgetUpdater.syncConfirmedState(context, state, requestedAtMillis)
+        BatteryNotifier.show(context, state)
         return state
     }
 }
