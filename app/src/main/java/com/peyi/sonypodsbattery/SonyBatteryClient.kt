@@ -3,6 +3,8 @@ package com.peyi.sonypodsbattery
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothSocket
 import android.content.Context
 import java.io.IOException
@@ -25,6 +27,8 @@ class SonyBatteryClient(private val context: Context) {
         private val UUID_V2: UUID = UUID.fromString("956c7b26-d49a-4ba8-b03f-b17d393cb6e2")
         private val UUID_V1: UUID = UUID.fromString("96cc203e-5068-46ad-b32d-e316f5e069ba")
         private val MODEL = Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE)
+
+        fun isTargetModel(name: String): Boolean = MODEL.containsMatchIn(name)
     }
 
     data class Result(
@@ -44,6 +48,23 @@ class SonyBatteryClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun setListeningMode(device: BluetoothDevice, mode: ListeningMode, ambientLevel: Int = 20, focusOnVoice: Boolean = false) {
         withConnectedSession(device) { it.setAmbientSoundMode(mode, ambientLevel, focusOnVoice) }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun hasConnectedBluetoothProfile(device: BluetoothDevice): Boolean? {
+        val manager = context.getSystemService(BluetoothManager::class.java) ?: return null
+        return try {
+            listOf(
+                BluetoothProfile.A2DP,
+                BluetoothProfile.HEADSET,
+                BluetoothProfile.GATT,
+                BluetoothProfile.GATT_SERVER
+            ).any { profile ->
+                manager.getConnectionState(device, profile) == BluetoothProfile.STATE_CONNECTED
+            }
+        } catch (_: SecurityException) {
+            null
+        }
     }
 
     @SuppressLint("MissingPermission")

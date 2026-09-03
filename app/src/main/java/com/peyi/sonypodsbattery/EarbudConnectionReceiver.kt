@@ -7,17 +7,84 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 
+enum class EarbudConnectionState {
+    CONNECTED,
+    DISCONNECTED,
+    UNKNOWN;
+
+    companion object {
+        fun fromStored(value: String?): EarbudConnectionState =
+            entries.firstOrNull { it.name == value } ?: UNKNOWN
+    }
+}
+
+object EarbudConnectionStateStore {
+    private const val PREFS = "earbud_connection"
+    private const val STATE_KEY = "state"
+    private const val TARGET_ADDRESS_KEY = "target_address"
+
+    fun current(context: Context): EarbudConnectionState =
+        EarbudConnectionState.fromStored(
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(STATE_KEY, null)
+        )
+
+    @SuppressLint("MissingPermission")
+    fun mark(context: Context, state: EarbudConnectionState, device: BluetoothDevice?) {
+        val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val editor = preferences.edit().putString(STATE_KEY, state.name)
+        if (device != null) {
+            try {
+                editor.putString(TARGET_ADDRESS_KEY, device.address)
+            } catch (_: SecurityException) {
+                // The connection event is still useful even if the address is unavailable.
+            }
+        }
+        editor.apply()
+    }
+
+    @SuppressLint("MissingPermission")
+    fun isTargetDevice(context: Context, device: BluetoothDevice?): Boolean {
+        if (device == null) return false
+        val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val knownAddress = preferences.getString(TARGET_ADDRESS_KEY, null)
+        return try {
+            device.address == knownAddress || SonyBatteryClient.isTargetModel(device.name.orEmpty())
+        } catch (_: SecurityException) {
+            false
+        }
+    }
+}
+
 class EarbudConnectionReceiver : BroadcastReceiver() {
     @SuppressLint("MissingPermission")
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != BluetoothDevice.ACTION_ACL_CONNECTED) return
+        val action = intent.action
+        if (action != BluetoothDevice.ACTION_ACL_CONNECTED &&
+            action != BluetoothDevice.ACTION_ACL_DISCONNECTED
+        ) return
+
+        val app = context.applicationContext
         val device = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
         else @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-        val name = try { device?.name.orEmpty() } catch (_: SecurityException) { "" }
-        if (!Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE).containsMatchIn(name)) return
-        val pending = goAsync()
-        RefreshCoordinator.enqueueRefresh(context.applicationContext, device) {
-            pending.finish()
+
+        if (!EarbudConnectionStateStore.isTargetDevice(app, device)) return
+
+        if (action == BluetoothDevice.ACTION_ACL_DISCONNECTED) {
+            EarbudConnectionStateStore.mark(app, EarbudConnectionState.DISCONNECTED, device)
+            BatteryPollingService.stop(app)
+            return
         }
+
+        EarbudConnectionStateStore.mark(app, EarbudConnectionState.CONNECTED, device)
+        BatteryPollingService.start(app)
+        val pending = goAsync()
+        RefreshCoordinator.enqueueRefresh(
+            context = app,
+            device = device,
+            startPolling = false,
+            onComplete = { pending.finish() },
+            automatic = true
+        )
     }
 }

@@ -28,9 +28,10 @@ object RefreshCoordinator {
         context: Context,
         device: BluetoothDevice? = null,
         startPolling: Boolean = true,
-        onComplete: (() -> Unit)? = null
+        onComplete: (() -> Unit)? = null,
+        automatic: Boolean = false
     ) {
-        SonyCommandCoordinator.enqueueRefresh(context, device, startPolling, onComplete)
+        SonyCommandCoordinator.enqueueRefresh(context, device, startPolling, onComplete, automatic)
     }
 
     fun enqueueSetListeningMode(
@@ -70,8 +71,9 @@ object RefreshCoordinator {
     suspend fun awaitRefresh(
         context: Context,
         device: BluetoothDevice? = null,
-        startPolling: Boolean = true
-    ): BatteryState = SonyCommandCoordinator.awaitRefresh(context, device, startPolling)
+        startPolling: Boolean = true,
+        automatic: Boolean = false
+    ): BatteryState = SonyCommandCoordinator.awaitRefresh(context, device, startPolling, automatic)
 
     private suspend fun awaitSetListeningMode(
         context: Context,
@@ -95,7 +97,8 @@ private sealed interface SonyCommand {
         val startPolling: Boolean,
         val completion: CompletableDeferred<BatteryState>,
         val onComplete: (() -> Unit)? = null,
-        val postInteraction: Boolean = false
+        val postInteraction: Boolean = false,
+        val automatic: Boolean = false
     ) : SonyCommand
 
     data class SetMode(
@@ -129,7 +132,8 @@ private object SonyCommandCoordinator {
         context: Context,
         device: BluetoothDevice?,
         startPolling: Boolean,
-        onComplete: (() -> Unit)?
+        onComplete: (() -> Unit)?,
+        automatic: Boolean
     ) {
         commands.trySend(
             SonyCommand.Refresh(
@@ -137,7 +141,8 @@ private object SonyCommandCoordinator {
                 device,
                 startPolling,
                 CompletableDeferred(),
-                onComplete
+                onComplete,
+                automatic = automatic
             )
         )
         startWorker()
@@ -190,7 +195,8 @@ private object SonyCommandCoordinator {
                 null,
                 false,
                 CompletableDeferred(),
-                postInteraction = true
+                postInteraction = true,
+                automatic = true
             )
         )
         startWorker()
@@ -199,7 +205,8 @@ private object SonyCommandCoordinator {
     suspend fun awaitRefresh(
         context: Context,
         device: BluetoothDevice?,
-        startPolling: Boolean
+        startPolling: Boolean,
+        automatic: Boolean
     ): BatteryState {
         val completion = CompletableDeferred<BatteryState>()
         commands.send(
@@ -209,7 +216,8 @@ private object SonyCommandCoordinator {
                 startPolling,
                 completion,
                 null,
-                false
+                false,
+                automatic
             )
         )
         startWorker()
@@ -316,12 +324,26 @@ private object SonyCommandCoordinator {
     }
 
     private suspend fun executeRefresh(command: SonyCommand.Refresh): BatteryState {
-        if (command.postInteraction) postInteractionRefreshQueued = false
         val app = command.context.applicationContext
         val previous = BatteryStore.load(app)
         val client = SonyBatteryClient(app)
+
+        if (command.postInteraction) postInteractionRefreshQueued = false
+        if (command.automatic && EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) {
+            command.onComplete?.invoke()
+            return previous
+        }
+
         DiagnosticsStore.add(app, "Refresh started")
         val target = command.device ?: client.findEarbuds()
+        if (command.automatic && target == null) {
+            command.onComplete?.invoke()
+            return previous
+        }
+        if (command.automatic && client.hasConnectedBluetoothProfile(target!!) == false) {
+            command.onComplete?.invoke()
+            return previous
+        }
         val state = if (target == null) {
             previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
         } else try {
