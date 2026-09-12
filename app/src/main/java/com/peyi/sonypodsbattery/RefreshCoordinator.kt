@@ -342,18 +342,30 @@ private object SonyCommandCoordinator {
             while (isActive) {
                 val first = deferredCommand ?: commands.receive()
                 deferredCommand = null
+                if (first is SonyCommand.Refresh) {
+                    val batch = coalesceRefresh(first)
+                    deferredCommand = batch.deferredCommand
+                    if (batch.primary.postInteraction || batch.waiters.any { it.postInteraction }) {
+                        postInteractionRefreshQueued = false
+                    }
+                    if (batch.primary.a2dpTriggered || batch.waiters.any { it.a2dpTriggered }) {
+                        a2dpRefreshQueued = false
+                    }
+                    executeRefresh(batch.primary).also { state ->
+                        batch.primary.completion.complete(state)
+                        batch.waiters.forEach { waiter ->
+                            waiter.completion.complete(state)
+                            waiter.onComplete?.invoke()
+                        }
+                    }
+                    continue
+                }
                 val command = if (first is SonyCommand.SetAmbientLevel) {
                     val coalesced = coalesceAmbient(first)
                     deferredCommand = coalesced.deferredCommand
                     coalesced.command
                 } else {
-                    if (first is SonyCommand.Refresh && first.postInteraction) {
-                        val coalesced = coalescePostInteractionRefresh(first)
-                        deferredCommand = coalesced.deferredCommand
-                        coalesced.command
-                    } else {
-                        first
-                    }
+                    first
                 }
                 execute(command)
             }
@@ -377,22 +389,48 @@ private object SonyCommandCoordinator {
         }
     }
 
-    private data class RefreshCoalesced(
-        val command: SonyCommand.Refresh,
+    private data class RefreshBatch(
+        val primary: SonyCommand.Refresh,
+        val waiters: List<SonyCommand.Refresh>,
         val deferredCommand: SonyCommand?
     )
 
-    private fun coalescePostInteractionRefresh(first: SonyCommand.Refresh): RefreshCoalesced {
-        var latest = first
+    private fun coalesceRefresh(first: SonyCommand.Refresh): RefreshBatch {
+        val requests = mutableListOf(first)
         while (true) {
             val next = commands.tryReceive().getOrNull()
-                ?: return RefreshCoalesced(latest, null)
-            if (next is SonyCommand.Refresh && next.postInteraction) {
-                latest = next
+                ?: break
+            if (next is SonyCommand.Refresh) {
+                requests += next
             } else {
-                return RefreshCoalesced(latest, next)
+                val primaryRequest = requests.firstOrNull { !it.automatic } ?: first
+                val primary = primaryRequest.copy(
+                    context = first.context,
+                    device = requests.firstNotNullOfOrNull { it.device },
+                    startPolling = requests.any { it.startPolling },
+                    completion = first.completion,
+                    onComplete = first.onComplete,
+                    postInteraction = requests.all { it.postInteraction },
+                    automatic = requests.all { it.automatic },
+                    a2dpTriggered = requests.any { it.a2dpTriggered },
+                    automaticGeneration = primaryRequest.automaticGeneration
+                )
+                return RefreshBatch(primary, requests.drop(1), next)
             }
         }
+        val primaryRequest = requests.firstOrNull { !it.automatic } ?: first
+        val primary = primaryRequest.copy(
+            context = first.context,
+            device = requests.firstNotNullOfOrNull { it.device },
+            startPolling = requests.any { it.startPolling },
+            completion = first.completion,
+            onComplete = first.onComplete,
+            postInteraction = requests.all { it.postInteraction },
+            automatic = requests.all { it.automatic },
+            a2dpTriggered = requests.any { it.a2dpTriggered },
+            automaticGeneration = primaryRequest.automaticGeneration
+        )
+        return RefreshBatch(primary, requests.drop(1), null)
     }
 
     @Synchronized
@@ -491,6 +529,53 @@ private object SonyCommandCoordinator {
             }
             is SonyCommand.Reconnect -> {
                 executeReconnect(command)
+            }
+        }
+    }
+
+    private suspend fun executeConfirmedControlCommand(
+        context: Context,
+        device: BluetoothDevice,
+        operation: String,
+        action: () -> Unit
+    ) {
+        val app = context.applicationContext
+        val stateBeforePrepare = SonyControlSessionManager.currentState()
+        if (stateBeforePrepare != SonySessionState.CONNECTED) {
+            DiagnosticsStore.add(
+                app,
+                "$operation detected stale Sony session state=$stateBeforePrepare; reconnecting"
+            )
+            SonyControlSessionManager.prepareManualReconnect(app)
+            try {
+                SonyControlSessionManager.ensureConnected(app, device)
+                DiagnosticsStore.add(app, "$operation Sony control session reconnected")
+            } catch (error: SonyControlChannelUnavailableException) {
+                DiagnosticsStore.add(app, "$operation terminal failure during reconnect: ${error.message}")
+                throw error
+            }
+        }
+
+        try {
+            action()
+            DiagnosticsStore.add(app, "$operation Sony confirmation received")
+        } catch (error: SonyControlChannelUnavailableException) {
+            if (stateBeforePrepare != SonySessionState.CONNECTED) {
+                DiagnosticsStore.add(app, "$operation terminal failure after reconnect: ${error.message}")
+                throw error
+            }
+
+            DiagnosticsStore.add(app, "$operation detected stale connected Sony session; retry 1/1")
+            SonyControlSessionManager.closeForCommandRetry(app)
+            try {
+                SonyControlSessionManager.prepareManualReconnect(app)
+                DiagnosticsStore.add(app, "$operation recreating Sony control session")
+                SonyControlSessionManager.ensureConnected(app, device)
+                action()
+                DiagnosticsStore.add(app, "$operation Sony confirmation received after retry")
+            } catch (retryError: SonyControlChannelUnavailableException) {
+                DiagnosticsStore.add(app, "$operation terminal failure after retry: ${retryError.message}")
+                throw retryError
             }
         }
     }
@@ -619,14 +704,6 @@ private object SonyCommandCoordinator {
         val previous = BatteryStore.load(app)
         val client = SonyBatteryClient(app)
         DiagnosticsStore.add(app, "Listening mode change requested: ${command.mode.name}")
-        if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) {
-            DiagnosticsStore.add(app, "Control command skipped: disconnected")
-            return finishControlCommand(
-                app,
-                previous.copy(status = "Could not change mode. Earbuds are disconnected."),
-                command.requestedAtMillis
-            )
-        }
         val target = client.findEarbuds()
         if (target != null) {
             when (A2dpConnectionHelper.isConnected(app, target)) {
@@ -653,19 +730,24 @@ private object SonyCommandCoordinator {
         val state = if (target == null) {
             previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
         } else try {
-            client.setListeningMode(target, command.mode, command.ambientLevel, command.focusOnVoice)
+            executeConfirmedControlCommand(
+                app,
+                target,
+                "Listening mode ${command.mode.name}"
+            ) {
+                client.setListeningMode(target, command.mode, command.ambientLevel, command.focusOnVoice)
+            }
             SonyCommandCoordinator.enqueuePostInteractionRefresh(app)
             DiagnosticsStore.add(app, "Listening mode changed: ${command.mode.name}")
             previous.copy(
                 listeningMode = command.mode,
                 ambientLevel = command.ambientLevel,
                 focusOnVoice = command.focusOnVoice,
-                status = "${command.mode.label} enabled",
-                updatedAt = System.currentTimeMillis()
+                status = "${command.mode.label} enabled"
             )
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
-            DiagnosticsStore.add(app, "Listening mode failed: ${error.javaClass.simpleName}: ${error.message}")
+            DiagnosticsStore.add(app, "Listening mode terminal failure: ${error.javaClass.simpleName}: ${error.message}")
             previous.copy(status = "Could not change mode. Close Sony Sound Connect and try again.")
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Listening mode failed: ${error.javaClass.simpleName}: ${error.message}")
@@ -681,14 +763,6 @@ private object SonyCommandCoordinator {
         val client = SonyBatteryClient(app)
         val level = command.ambientLevel.coerceIn(1, 20)
         DiagnosticsStore.add(app, "Ambient level change requested: $level")
-        if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) {
-            DiagnosticsStore.add(app, "Control command skipped: disconnected")
-            return finishControlCommand(
-                app,
-                previous.copy(status = "Could not change ambient level. Earbuds are disconnected."),
-                command.requestedAtMillis
-            )
-        }
         val target = client.findEarbuds()
         if (target != null) {
             when (A2dpConnectionHelper.isConnected(app, target)) {
@@ -715,19 +789,24 @@ private object SonyCommandCoordinator {
         val state = if (target == null) {
             previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
         } else try {
-            client.setListeningMode(target, ListeningMode.AMBIENT, level, command.focusOnVoice)
+            executeConfirmedControlCommand(
+                app,
+                target,
+                "Ambient level $level"
+            ) {
+                client.setListeningMode(target, ListeningMode.AMBIENT, level, command.focusOnVoice)
+            }
             SonyCommandCoordinator.enqueuePostInteractionRefresh(app)
             DiagnosticsStore.add(app, "Ambient level changed: $level")
             previous.copy(
                 listeningMode = ListeningMode.AMBIENT,
                 ambientLevel = level,
                 focusOnVoice = command.focusOnVoice,
-                status = "Ambient sound enabled",
-                updatedAt = System.currentTimeMillis()
+                status = "Ambient sound enabled"
             )
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
-            DiagnosticsStore.add(app, "Ambient level failed: ${error.javaClass.simpleName}: ${error.message}")
+            DiagnosticsStore.add(app, "Ambient level terminal failure: ${error.javaClass.simpleName}: ${error.message}")
             previous.copy(status = "Could not change ambient level. Close Sony Sound Connect and try again.")
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Ambient level failed: ${error.javaClass.simpleName}: ${error.message}")

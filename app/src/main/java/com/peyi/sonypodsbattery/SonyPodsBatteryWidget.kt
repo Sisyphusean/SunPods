@@ -76,6 +76,7 @@ enum class AudioMode {
 
 private val CURRENT_AUDIO_MODE_KEY = stringPreferencesKey("current_audio_mode")
 private val DESIRED_AMBIENT_LEVEL_KEY = intPreferencesKey("desired_ambient_level")
+private val PENDING_AMBIENT_LEVEL_KEY = intPreferencesKey("pending_ambient_level")
 private val LAST_USER_ACTION_TIME = longPreferencesKey("last_user_action_time")
 private val AudioModeKey = ActionParameters.Key<String>("audio_mode_action")
 private const val MODE_SYNC_GRACE_PERIOD_MS = 4_000L
@@ -162,6 +163,7 @@ object SonyPodsBatteryWidgetUpdater {
                 updateAppWidgetState(context, glanceId) { state ->
                     state[CURRENT_AUDIO_MODE_KEY] = confirmedMode
                     state[DESIRED_AMBIENT_LEVEL_KEY] = confirmedState.ambientLevel
+                    state.remove(PENDING_AMBIENT_LEVEL_KEY)
                     state[LAST_USER_ACTION_TIME] = 0L
                 }
                 if (shouldRedraw) widget.update(context, glanceId)
@@ -518,11 +520,11 @@ class SetListeningModeAction : ActionCallback {
         val app = context.applicationContext
         val current = BatteryStore.load(app)
         val preferences = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
-        val ambientLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY] ?: current.ambientLevel
+        val ambientLevel = preferences[PENDING_AMBIENT_LEVEL_KEY]
+            ?: preferences[DESIRED_AMBIENT_LEVEL_KEY]
+            ?: current.ambientLevel
         val actionTime = nextUserActionTime(preferences)
         updateAppWidgetState(context, glanceId) { preferences ->
-            preferences[CURRENT_AUDIO_MODE_KEY] = mode.name
-            preferences[DESIRED_AMBIENT_LEVEL_KEY] = ambientLevel
             preferences[LAST_USER_ACTION_TIME] = actionTime
         }
         SonyPodsBatteryWidget().update(context, glanceId)
@@ -543,11 +545,13 @@ class AdjustAmbientAction : ActionCallback {
         val app = context.applicationContext
         val current = BatteryStore.load(app)
         val preferences = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
-        val currentLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY] ?: current.ambientLevel
+        val currentLevel = preferences[PENDING_AMBIENT_LEVEL_KEY]
+            ?: preferences[DESIRED_AMBIENT_LEVEL_KEY]
+            ?: current.ambientLevel
         val ambientLevel = (currentLevel + delta).coerceIn(1, 20)
         val actionTime = nextUserActionTime(preferences)
         updateAppWidgetState(context, glanceId) { state ->
-            state[DESIRED_AMBIENT_LEVEL_KEY] = ambientLevel
+            state[PENDING_AMBIENT_LEVEL_KEY] = ambientLevel
             state[LAST_USER_ACTION_TIME] = actionTime
         }
         SonyPodsBatteryWidget().update(context, glanceId)
