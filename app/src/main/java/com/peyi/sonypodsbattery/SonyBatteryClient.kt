@@ -87,6 +87,10 @@ object SonyControlSessionManager {
         close(context, "A2DP disconnect")
     }
 
+    fun closeForCommandRetry(context: Context) {
+        close(context, "stale session command retry")
+    }
+
     fun closeForServiceStop(context: Context) {
         if (currentState() != SonySessionState.RECONNECT_WAIT) {
             close(context, "polling service stopped")
