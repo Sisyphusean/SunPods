@@ -4,6 +4,7 @@
 /local.properties
 /.signing/
 /signing.properties
+/local-signing/
 /**/build/
 *.iml
 .idea/

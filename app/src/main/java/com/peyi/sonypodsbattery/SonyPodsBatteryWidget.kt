@@ -49,7 +49,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import java.text.DateFormat
+import android.text.format.DateFormat
 import java.util.Date
 
 enum class AudioMode {
@@ -197,7 +197,7 @@ private fun WidgetContent(state: BatteryState, currentMode: AudioMode, ambientLe
             .padding(horizontal = horizontalPadding, vertical = verticalPadding)
     ) {
         Column(modifier = GlanceModifier.fillMaxWidth().fillMaxHeight()) {
-            Header(state, compactWidth)
+            Header(state, compactWidth, context)
             Spacer(modifier = GlanceModifier.height(bodyGap))
             Row(
                 modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
@@ -258,7 +258,8 @@ private fun WidgetContent(state: BatteryState, currentMode: AudioMode, ambientLe
 }
 
 @Composable
-private fun Header(state: BatteryState, compactWidth: Boolean) {
+private fun Header(state: BatteryState, compactWidth: Boolean, context: Context) {
+    val timestamp = state.lastCheckedAt.takeIf { it != 0L } ?: state.updatedAt
     Row(
         modifier = GlanceModifier.fillMaxWidth().height(48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -278,7 +279,7 @@ private fun Header(state: BatteryState, compactWidth: Boolean) {
         }
         Spacer(modifier = GlanceModifier.defaultWeight())
         Text(
-            text = if (state.updatedAt == 0L) "Not updated" else "Updated ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(state.updatedAt))}",
+            text = if (timestamp == 0L) "Not updated" else "Updated ${DateFormat.getTimeFormat(context).format(Date(timestamp))}",
             style = labelText.copy(
                 color = GlanceTheme.colors.onSurfaceVariant,
                 fontSize = if (compactWidth) 11.sp else 13.sp

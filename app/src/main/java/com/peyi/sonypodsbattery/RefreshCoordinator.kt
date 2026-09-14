@@ -78,6 +78,10 @@ object RefreshCoordinator {
         SonyCommandCoordinator.handleA2dpDisconnected(context, device)
     }
 
+    suspend fun handleDeviceDisconnected(context: Context, device: BluetoothDevice) {
+        SonyCommandCoordinator.handleDeviceDisconnected(context, device)
+    }
+
     fun closeSessionForServiceStop(context: Context) {
         SonyCommandCoordinator.closeSessionForServiceStop(context)
     }
@@ -268,6 +272,17 @@ private object SonyCommandCoordinator {
 
     @Synchronized
     fun handleA2dpDisconnected(context: Context, device: BluetoothDevice) {
+        handleDeviceDisconnectedInternal(context, device)
+        scope.launch { SonyPodsBatteryWidgetUpdater.updateAll(context.applicationContext) }
+    }
+
+    suspend fun handleDeviceDisconnected(context: Context, device: BluetoothDevice) {
+        handleDeviceDisconnectedInternal(context, device)
+        SonyPodsBatteryWidgetUpdater.updateAll(context.applicationContext)
+    }
+
+    @Synchronized
+    private fun handleDeviceDisconnectedInternal(context: Context, device: BluetoothDevice) {
         cancelReconnectLocked()
         automaticWorkGeneration += 1L
         postInteractionRefreshQueued = false
@@ -279,7 +294,6 @@ private object SonyCommandCoordinator {
             device
         )
         BatteryStore.clearBatteryValues(context)
-        scope.launch { SonyPodsBatteryWidgetUpdater.updateAll(context) }
         BatteryPollingService.stop(context)
     }
 
@@ -584,13 +598,21 @@ private object SonyCommandCoordinator {
         val app = command.context.applicationContext
         val previous = BatteryStore.load(app)
         val client = SonyBatteryClient(app)
+        val checkedAt = if (!command.automatic) System.currentTimeMillis() else 0L
+        fun checkedState(state: BatteryState): BatteryState =
+            if (checkedAt == 0L) state else state.copy(lastCheckedAt = checkedAt)
+        fun persistCheckedState(state: BatteryState): BatteryState {
+            val checked = checkedState(state)
+            if (checkedAt != 0L) BatteryStore.save(app, checked)
+            return checked
+        }
 
         if (command.postInteraction) postInteractionRefreshQueued = false
         if (command.a2dpTriggered) a2dpRefreshQueued = false
         if (command.automatic && command.automaticGeneration != automaticWorkGeneration) {
             DiagnosticsStore.add(app, "Automatic refresh skipped: stale disconnect work")
             command.onComplete?.invoke()
-            return previous
+            return persistCheckedState(previous)
         }
 
         val manualReconnectAttempt = !command.automatic &&
@@ -616,31 +638,31 @@ private object SonyCommandCoordinator {
                     DiagnosticsStore.add(app, "A2DP disconnected; refresh skipped")
                     handleA2dpDisconnected(app, target)
                     command.onComplete?.invoke()
-                    return BatteryStore.load(app)
+                    return persistCheckedState(BatteryStore.load(app))
                 }
                 null -> {
                     DiagnosticsStore.add(app, "A2DP state unavailable; refresh skipped")
                     command.onComplete?.invoke()
-                    return previous.copy(status = "Could not verify the earbud connection.")
+                    return persistCheckedState(previous.copy(status = "Could not verify the earbud connection."))
                 }
             }
         }
         if (command.automatic && EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) {
             DiagnosticsStore.add(app, "Automatic refresh skipped: disconnected")
             command.onComplete?.invoke()
-            return previous
+            return persistCheckedState(previous)
         }
         if (command.automatic && SonyControlSessionManager.currentState() == SonySessionState.RECONNECT_WAIT) {
             DiagnosticsStore.add(app, "Automatic refresh skipped: reconnect pending")
             command.onComplete?.invoke()
-            return previous
+            return persistCheckedState(previous)
         }
         if (command.automatic && target == null) {
             command.onComplete?.invoke()
-            return previous
+            return persistCheckedState(previous)
         }
         val state = if (target == null) {
-            previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
+            persistCheckedState(previous.copy(status = "Pair your WF-1000XM5 in Android settings first"))
         } else try {
             val result = client.read(target)
             if (!command.automatic) {
@@ -659,18 +681,19 @@ private object SonyCommandCoordinator {
                 previous.ambientLevel,
                 previous.focusOnVoice,
                 System.currentTimeMillis(),
+                checkedAt,
                 if (result.case == null) "Updated. Open the case to refresh its battery." else "Updated"
             )
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
             DiagnosticsStore.add(app, "Refresh failed: ${error.javaClass.simpleName}: ${error.message}")
-            previous.copy(status = "Could not connect. Close Sony Sound Connect and try again.")
+            persistCheckedState(previous.copy(status = "Could not connect. Close Sony Sound Connect and try again."))
         } catch (error: SecurityException) {
             DiagnosticsStore.add(app, "Refresh blocked: ${error.message ?: error.javaClass.simpleName}")
-            previous.copy(status = "Android blocked a Bluetooth action. Share diagnostics.")
+            persistCheckedState(previous.copy(status = "Android blocked a Bluetooth action. Share diagnostics."))
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Refresh failed: ${error.javaClass.simpleName}: ${error.message}")
-            previous.copy(status = "Could not connect. Close Sony Sound Connect and try again.")
+            persistCheckedState(previous.copy(status = "Could not connect. Close Sony Sound Connect and try again."))
         }
 
         if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED &&
