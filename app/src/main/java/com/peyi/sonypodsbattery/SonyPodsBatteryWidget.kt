@@ -94,6 +94,7 @@ class SonyPodsBatteryWidget : GlanceAppWidget() {
                 val desiredAmbientLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY]
                     ?: storedState.ambientLevel
                 WidgetContent(
+                    context = context,
                     state = storedState,
                     currentMode = AudioMode.fromStored(currentMode),
                     ambientLevel = desiredAmbientLevel
@@ -179,7 +180,12 @@ private val statusSubtitleText = TextStyle(fontSize = 12.sp, fontWeight = FontWe
 private val valueText = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
 @Composable
-private fun WidgetContent(state: BatteryState, currentMode: AudioMode, ambientLevel: Int) {
+private fun WidgetContent(
+    context: Context,
+    state: BatteryState,
+    currentMode: AudioMode,
+    ambientLevel: Int
+) {
     val size = LocalSize.current
     val compactWidth = size.width < 320.dp
     val compactHeight = size.height < 190.dp
