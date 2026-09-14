@@ -13,6 +13,7 @@ data class BatteryState(
     val ambientLevel: Int = 20,
     val focusOnVoice: Boolean = false,
     val updatedAt: Long = 0L,
+    val lastCheckedAt: Long = 0L,
     val status: String = "Ready"
 )
 
@@ -31,6 +32,7 @@ object BatteryStore {
             ambientLevel = p.getInt("ambient_level", 20).coerceIn(1, 20),
             focusOnVoice = p.getBoolean("focus_on_voice", false),
             updatedAt = p.getLong("updated_at", 0L),
+            lastCheckedAt = p.getLong("last_checked_at", 0L),
             status = p.getString("status", "Ready") ?: "Ready"
         )
     }
@@ -48,6 +50,7 @@ object BatteryStore {
             putInt("ambient_level", state.ambientLevel)
             putBoolean("focus_on_voice", state.focusOnVoice)
             putLong("updated_at", state.updatedAt)
+            putLong("last_checked_at", state.lastCheckedAt)
             putString("status", state.status)
         }.apply()
     }
