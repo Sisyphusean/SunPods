@@ -46,10 +46,12 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import android.text.format.DateFormat
+import kotlinx.coroutines.sync.Mutex
 import java.util.Date
 
 enum class AudioMode {
@@ -78,8 +80,18 @@ private val CURRENT_AUDIO_MODE_KEY = stringPreferencesKey("current_audio_mode")
 private val DESIRED_AMBIENT_LEVEL_KEY = intPreferencesKey("desired_ambient_level")
 private val PENDING_AMBIENT_LEVEL_KEY = intPreferencesKey("pending_ambient_level")
 private val LAST_USER_ACTION_TIME = longPreferencesKey("last_user_action_time")
+private val REFRESH_IN_PROGRESS_KEY = booleanPreferencesKey("refresh_in_progress")
+private val REFRESH_STARTED_AT_KEY = longPreferencesKey("refresh_started_at")
 private val AudioModeKey = ActionParameters.Key<String>("audio_mode_action")
 private const val MODE_SYNC_GRACE_PERIOD_MS = 4_000L
+private const val REFRESH_STALE_TIMEOUT_MS = 60_000L
+private val refreshActionMutex = Mutex()
+
+private fun isRefreshInProgress(preferences: Preferences, now: Long = System.currentTimeMillis()): Boolean {
+    if (preferences[REFRESH_IN_PROGRESS_KEY] != true) return false
+    val startedAt = preferences[REFRESH_STARTED_AT_KEY] ?: return false
+    return now - startedAt < REFRESH_STALE_TIMEOUT_MS
+}
 
 class SonyPodsBatteryWidget : GlanceAppWidget() {
     override val stateDefinition = PreferencesGlanceStateDefinition
@@ -97,7 +109,8 @@ class SonyPodsBatteryWidget : GlanceAppWidget() {
                     context = context,
                     state = storedState,
                     currentMode = AudioMode.fromStored(currentMode),
-                    ambientLevel = desiredAmbientLevel
+                    ambientLevel = desiredAmbientLevel,
+                    refreshing = isRefreshInProgress(preferences)
                 )
             }
         }
@@ -184,7 +197,8 @@ private fun WidgetContent(
     context: Context,
     state: BatteryState,
     currentMode: AudioMode,
-    ambientLevel: Int
+    ambientLevel: Int,
+    refreshing: Boolean
 ) {
     val size = LocalSize.current
     val compactWidth = size.width < 320.dp
@@ -203,7 +217,7 @@ private fun WidgetContent(
             .padding(horizontal = horizontalPadding, vertical = verticalPadding)
     ) {
         Column(modifier = GlanceModifier.fillMaxWidth().fillMaxHeight()) {
-            Header(state, compactWidth, context)
+            Header(state, compactWidth, context, refreshing)
             Spacer(modifier = GlanceModifier.height(bodyGap))
             Row(
                 modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
@@ -264,7 +278,12 @@ private fun WidgetContent(
 }
 
 @Composable
-private fun Header(state: BatteryState, compactWidth: Boolean, context: Context) {
+private fun Header(
+    state: BatteryState,
+    compactWidth: Boolean,
+    context: Context,
+    refreshing: Boolean
+) {
     val timestamp = state.lastCheckedAt.takeIf { it != 0L } ?: state.updatedAt
     Row(
         modifier = GlanceModifier.fillMaxWidth().height(48.dp),
@@ -285,7 +304,11 @@ private fun Header(state: BatteryState, compactWidth: Boolean, context: Context)
         }
         Spacer(modifier = GlanceModifier.defaultWeight())
         Text(
-            text = if (timestamp == 0L) "Not updated" else "Updated ${DateFormat.getTimeFormat(context).format(Date(timestamp))}",
+            text = when {
+                refreshing -> "Refreshing…"
+                timestamp == 0L -> "Not updated"
+                else -> "Updated ${DateFormat.getTimeFormat(context).format(Date(timestamp))}"
+            },
             style = labelText.copy(
                 color = GlanceTheme.colors.onSurfaceVariant,
                 fontSize = if (compactWidth) 11.sp else 13.sp
@@ -293,14 +316,23 @@ private fun Header(state: BatteryState, compactWidth: Boolean, context: Context)
         )
         Spacer(modifier = GlanceModifier.defaultWeight())
         Box(
-            modifier = GlanceModifier.size(48.dp)
-                .clickable(actionRunCallback<RefreshWidgetAction>()),
+            modifier = if (refreshing) {
+                GlanceModifier.size(48.dp)
+                    .background(GlanceTheme.colors.primaryContainer)
+                    .cornerRadius(16.dp)
+            } else {
+                GlanceModifier.size(48.dp)
+                    .clickable(actionRunCallback<RefreshWidgetAction>())
+            },
             contentAlignment = Alignment.Center
         ) {
             Image(
                 provider = ImageProvider(R.drawable.ic_refresh),
                 contentDescription = "Refresh",
-                colorFilter = ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant),
+                colorFilter = ColorFilter.tint(
+                    if (refreshing) GlanceTheme.colors.onPrimaryContainer
+                    else GlanceTheme.colors.onSurfaceVariant
+                ),
                 modifier = GlanceModifier.size(if (compactWidth) 20.dp else 22.dp)
             )
         }
@@ -516,8 +548,32 @@ private fun StatusContent(icon: Int, title: String, subtitle: String, compactWid
 
 class RefreshWidgetAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        RefreshCoordinator.enqueueRefresh(context.applicationContext)
-        SonyPodsBatteryWidget().update(context, glanceId)
+        if (!refreshActionMutex.tryLock()) return
+
+        val app = context.applicationContext
+        try {
+            val now = System.currentTimeMillis()
+            val preferences = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
+            if (isRefreshInProgress(preferences, now)) return
+
+            updateAppWidgetState(context, glanceId) { state ->
+                state[REFRESH_IN_PROGRESS_KEY] = true
+                state[REFRESH_STARTED_AT_KEY] = now
+            }
+
+            try {
+                SonyPodsBatteryWidget().update(context, glanceId)
+                RefreshCoordinator.awaitRefresh(app, startPolling = true, automatic = false)
+            } finally {
+                updateAppWidgetState(context, glanceId) { state ->
+                    state.remove(REFRESH_IN_PROGRESS_KEY)
+                    state.remove(REFRESH_STARTED_AT_KEY)
+                }
+                SonyPodsBatteryWidget().update(context, glanceId)
+            }
+        } finally {
+            refreshActionMutex.unlock()
+        }
     }
 }
 
@@ -593,3 +649,4 @@ private fun nextUserActionTime(preferences: Preferences): Long = maxOf(
     System.currentTimeMillis(),
     (preferences[LAST_USER_ACTION_TIME] ?: 0L) + 1L
 )
+
