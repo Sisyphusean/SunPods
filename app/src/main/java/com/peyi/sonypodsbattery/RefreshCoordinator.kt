@@ -3,7 +3,9 @@ package com.peyi.sonypodsbattery
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -150,8 +152,10 @@ private object SonyCommandCoordinator {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val commands = Channel<SonyCommand>(Channel.UNLIMITED)
 
+    private var workerJob: Job? = null
+
     @Volatile
-    private var workerStarted = false
+    private var lastWorkerContext: Context? = null
 
     @Volatile
     private var postInteractionRefreshQueued = false
@@ -349,40 +353,101 @@ private object SonyCommandCoordinator {
 
     @Synchronized
     private fun startWorker() {
-        if (workerStarted) return
-        workerStarted = true
-        scope.launch {
+        if (workerJob?.isActive == true) return
+
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             var deferredCommand: SonyCommand? = null
-            while (isActive) {
-                val first = deferredCommand ?: commands.receive()
-                deferredCommand = null
-                if (first is SonyCommand.Refresh) {
-                    val batch = coalesceRefresh(first)
-                    deferredCommand = batch.deferredCommand
-                    if (batch.primary.postInteraction || batch.waiters.any { it.postInteraction }) {
-                        postInteractionRefreshQueued = false
-                    }
-                    if (batch.primary.a2dpTriggered || batch.waiters.any { it.a2dpTriggered }) {
-                        a2dpRefreshQueued = false
-                    }
-                    executeRefresh(batch.primary).also { state ->
-                        batch.primary.completion.complete(state)
-                        batch.waiters.forEach { waiter ->
-                            waiter.completion.complete(state)
-                            waiter.onComplete?.invoke()
+            try {
+                while (isActive) {
+                    val first = deferredCommand ?: commands.receive()
+                    deferredCommand = null
+                    lastWorkerContext = commandContext(first)
+                    try {
+                        if (first is SonyCommand.Refresh) {
+                            val batch = coalesceRefresh(first)
+                            deferredCommand = batch.deferredCommand
+                            if (batch.primary.postInteraction || batch.waiters.any { it.postInteraction }) {
+                                postInteractionRefreshQueued = false
+                            }
+                            if (batch.primary.a2dpTriggered || batch.waiters.any { it.a2dpTriggered }) {
+                                a2dpRefreshQueued = false
+                            }
+                            executeRefreshBatch(batch)
+                            continue
                         }
+                        val command = if (first is SonyCommand.SetAmbientLevel) {
+                            val coalesced = coalesceAmbient(first)
+                            deferredCommand = coalesced.deferredCommand
+                            coalesced.command
+                        } else {
+                            first
+                        }
+                        execute(command)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        recordWorkerFailure(commandContext(first), error)
+                        failCommand(first, error)
                     }
-                    continue
                 }
-                val command = if (first is SonyCommand.SetAmbientLevel) {
-                    val coalesced = coalesceAmbient(first)
-                    deferredCommand = coalesced.deferredCommand
-                    coalesced.command
-                } else {
-                    first
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                recordWorkerFailure(lastWorkerContext, error)
+            } finally {
+                synchronized(SonyCommandCoordinator) {
+                    if (workerJob === kotlin.coroutines.coroutineContext[Job]) {
+                        workerJob = null
+                    }
                 }
-                execute(command)
             }
+        }
+        workerJob = job
+        job.start()
+    }
+
+    private fun commandContext(command: SonyCommand): Context = when (command) {
+        is SonyCommand.Refresh -> command.context
+        is SonyCommand.SetMode -> command.context
+        is SonyCommand.SetAmbientLevel -> command.context
+        is SonyCommand.Reconnect -> command.context
+    }
+
+    private fun recordWorkerFailure(context: Context?, error: Throwable) {
+        context ?: return
+        DiagnosticsStore.add(
+            context.applicationContext,
+            "Unexpected Sony command worker failure: ${error.javaClass.simpleName}: ${error.message}"
+        )
+    }
+
+    private fun failCommand(command: SonyCommand, error: Throwable) {
+        when (command) {
+            is SonyCommand.Refresh -> {
+                command.completion.completeExceptionally(error)
+                runCatching { command.onComplete?.invoke() }
+            }
+            is SonyCommand.SetMode -> command.completion.completeExceptionally(error)
+            is SonyCommand.SetAmbientLevel -> Unit
+            is SonyCommand.Reconnect -> Unit
+        }
+    }
+
+    private suspend fun executeRefreshBatch(batch: RefreshBatch) {
+        try {
+            executeRefresh(batch.primary).also { state ->
+                batch.primary.completion.complete(state)
+                batch.waiters.forEach { waiter ->
+                    waiter.completion.complete(state)
+                    waiter.onComplete?.invoke()
+                }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            recordWorkerFailure(batch.primary.context, error)
+            failCommand(batch.primary, error)
+            batch.waiters.forEach { waiter -> failCommand(waiter, error) }
         }
     }
 
@@ -606,6 +671,18 @@ private object SonyCommandCoordinator {
             if (checkedAt != 0L) BatteryStore.save(app, checked)
             return checked
         }
+        suspend fun finishManualRefresh(state: BatteryState): BatteryState {
+            val checked = persistCheckedState(state)
+            if (!command.automatic) {
+                SonyPodsBatteryWidgetUpdater.syncReportedMode(
+                    app,
+                    AudioMode.fromListeningMode(checked.listeningMode)
+                )
+                SonyPodsBatteryWidgetUpdater.updateAll(app)
+            }
+            command.onComplete?.invoke()
+            return checked
+        }
 
         if (command.postInteraction) postInteractionRefreshQueued = false
         if (command.a2dpTriggered) a2dpRefreshQueued = false
@@ -637,13 +714,11 @@ private object SonyCommandCoordinator {
                 false -> {
                     DiagnosticsStore.add(app, "A2DP disconnected; refresh skipped")
                     handleA2dpDisconnected(app, target)
-                    command.onComplete?.invoke()
-                    return persistCheckedState(BatteryStore.load(app))
+                    return finishManualRefresh(BatteryStore.load(app))
                 }
                 null -> {
                     DiagnosticsStore.add(app, "A2DP state unavailable; refresh skipped")
-                    command.onComplete?.invoke()
-                    return persistCheckedState(previous.copy(status = "Could not verify the earbud connection."))
+                    return finishManualRefresh(previous.copy(status = "Could not verify the earbud connection."))
                 }
             }
         }
@@ -699,8 +774,12 @@ private object SonyCommandCoordinator {
         if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED &&
             EarbudConnectionStateStore.a2dpState(app) == A2dpConnectionState.DISCONNECTED
         ) {
-            command.onComplete?.invoke()
-            return BatteryStore.load(app)
+            return if (command.automatic) {
+                command.onComplete?.invoke()
+                BatteryStore.load(app)
+            } else {
+                finishManualRefresh(BatteryStore.load(app))
+            }
         }
 
         BatteryStore.save(app, state)
@@ -872,3 +951,4 @@ private object SonyCommandCoordinator {
     @Synchronized
     private fun currentAutomaticWorkGeneration(): Long = automaticWorkGeneration
 }
+
