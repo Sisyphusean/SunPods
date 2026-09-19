@@ -211,7 +211,8 @@ class MainActivity : Activity() {
             if (EarbudCompanionManager.isSupported(this) &&
                 !EarbudCompanionManager.isAssociated(this)
             ) {
-                setupCompanionAssociation()
+                status.text = "Put your earbuds in pairing mode, then continue below."
+                updateCompanionUi()
                 return
             }
         }
@@ -305,7 +306,11 @@ class MainActivity : Activity() {
         val associated = EarbudCompanionManager.isAssociated(this)
         companionSetup.visibility = if (visible) View.VISIBLE else View.GONE
         companionInstructions.visibility = if (visible && !associated) View.VISIBLE else View.GONE
-        companionInstructions.text = "One-time setup: place both earbuds in the open charging case, then hold the pairing button on the back for about 5 seconds until the blue light flashes. Select WF-1000XM5 and tap Connect in Android."
+        companionInstructions.text = if (companionAssociationInFlight) {
+            "The Android device picker is open. Select WF-1000XM5 and tap Connect."
+        } else {
+            "Before continuing: place both earbuds in the open charging case, then hold the pairing button on the back for about 5 seconds until the blue light flashes blue. Only then continue so Android can find them."
+        }
         if (associated) {
             companionSetup.text = "AUTOMATIC BACKGROUND REFRESH ENABLED"
             companionSetup.isEnabled = false
@@ -313,7 +318,7 @@ class MainActivity : Activity() {
             companionSetup.text = "FOLLOW THE ANDROID SETUP DIALOG"
             companionSetup.isEnabled = false
         } else {
-            companionSetup.text = "SET UP AUTOMATIC BACKGROUND REFRESH"
+            companionSetup.text = "I'M READY — OPEN DEVICE PICKER"
             companionSetup.isEnabled = true
         }
     }
