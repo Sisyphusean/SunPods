@@ -20,7 +20,7 @@ import android.widget.TextView
 import java.text.DateFormat
 import java.util.Date
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     private lateinit var status: TextView
     private lateinit var left: TextView
     private lateinit var right: TextView
@@ -41,6 +41,7 @@ class MainActivity : Activity() {
     private var permissionRequestInFlight = false
     private var companionAssociationInFlight = false
     private var showingCompanionSetup = false
+    private var showingWelcome = false
     private var initialSetupStage: InitialSetupStage? = null
     private val modeButtons = mutableMapOf<ListeningMode, Button>()
 
@@ -53,7 +54,9 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         EarbudCompanionManager.startObservingPresence(this)
-        if (requiresCompanionSetup()) {
+        if (requiresCompanionSetup() && shouldShowWelcome()) {
+            showWelcomeScreen()
+        } else if (requiresCompanionSetup()) {
             showInitialSetupFlow()
         } else {
             showDashboard()
@@ -66,7 +69,7 @@ class MainActivity : Activity() {
             render(BatteryStore.load(this))
             updatePermissionUi()
             updateCompanionUi()
-        } else if (showingCompanionSetup && initialSetupStage != InitialSetupStage.PAIRING) {
+        } else if (showingCompanionSetup && !showingWelcome && initialSetupStage != InitialSetupStage.PAIRING) {
             showInitialSetupFlow()
         }
     }
@@ -186,6 +189,26 @@ class MainActivity : Activity() {
         return ScrollView(this).apply { setBackgroundColor(getColor(R.color.black)); addView(body) }
     }
 
+    private fun shouldShowWelcome() =
+        !getPreferences(MODE_PRIVATE).getBoolean(WELCOME_SEEN, false)
+
+    private fun showWelcomeScreen() {
+        showingCompanionSetup = true
+        showingWelcome = true
+        initialSetupStage = null
+        setContent {
+            OnboardingWelcomeScreen(
+                onContinue = {
+                    getPreferences(MODE_PRIVATE).edit()
+                        .putBoolean(WELCOME_SEEN, true)
+                        .apply()
+                    showingWelcome = false
+                    showInitialSetupFlow()
+                }
+            )
+        }
+    }
+
     private fun showCompanionSetupScreen() {
         showingCompanionSetup = true
         initialSetupStage = InitialSetupStage.PAIRING
@@ -193,6 +216,7 @@ class MainActivity : Activity() {
     }
 
     private fun showInitialSetupFlow() {
+        showingWelcome = false
         when {
             !hasBluetoothPermission() -> showPermissionSetupScreen(InitialSetupStage.NEARBY_DEVICES)
             !hasNotificationPermission() -> showPermissionSetupScreen(InitialSetupStage.NOTIFICATIONS)
@@ -340,6 +364,7 @@ class MainActivity : Activity() {
     }
 
     private fun showDashboard() {
+        showingWelcome = false
         showingCompanionSetup = false
         setContentView(buildContent())
         render(BatteryStore.load(this))
@@ -607,5 +632,6 @@ class MainActivity : Activity() {
         private const val REQUEST_BLUETOOTH = 100
         private const val REQUEST_NOTIFICATIONS = 101
         private const val NOTIFICATION_REQUESTED = "notification_permission_requested"
+        private const val WELCOME_SEEN = "onboarding_welcome_seen"
     }
 }
