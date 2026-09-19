@@ -41,15 +41,20 @@ class MainActivity : Activity() {
     private var permissionRequestInFlight = false
     private var companionAssociationInFlight = false
     private var showingCompanionSetup = false
-    private var pendingCompanionPicker = false
-    private var pendingDashboardAfterNotification = false
+    private var initialSetupStage: InitialSetupStage? = null
     private val modeButtons = mutableMapOf<ListeningMode, Button>()
+
+    private enum class InitialSetupStage {
+        NEARBY_DEVICES,
+        NOTIFICATIONS,
+        PAIRING,
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         EarbudCompanionManager.startObservingPresence(this)
         if (requiresCompanionSetup()) {
-            showCompanionSetupScreen()
+            showInitialSetupFlow()
         } else {
             showDashboard()
         }
@@ -61,6 +66,8 @@ class MainActivity : Activity() {
             render(BatteryStore.load(this))
             updatePermissionUi()
             updateCompanionUi()
+        } else if (showingCompanionSetup && initialSetupStage != InitialSetupStage.PAIRING) {
+            showInitialSetupFlow()
         }
     }
 
@@ -181,7 +188,99 @@ class MainActivity : Activity() {
 
     private fun showCompanionSetupScreen() {
         showingCompanionSetup = true
+        initialSetupStage = InitialSetupStage.PAIRING
         setContentView(buildCompanionSetupContent())
+    }
+
+    private fun showInitialSetupFlow() {
+        when {
+            !hasBluetoothPermission() -> showPermissionSetupScreen(InitialSetupStage.NEARBY_DEVICES)
+            !hasNotificationPermission() -> showPermissionSetupScreen(InitialSetupStage.NOTIFICATIONS)
+            else -> showCompanionSetupScreen()
+        }
+    }
+
+    private fun showPermissionSetupScreen(stage: InitialSetupStage) {
+        showingCompanionSetup = true
+        initialSetupStage = stage
+        val isNearby = stage == InitialSetupStage.NEARBY_DEVICES
+        val permissionName = if (isNearby) "Nearby devices" else "Notifications"
+        val title = if (isNearby) "Allow Nearby devices" else "Allow notifications"
+        val explanation = if (isNearby) {
+            "Sony Pods needs Nearby devices permission to communicate with your WF-1000XM5 and to let Android find it during setup."
+        } else {
+            "Sony Pods uses notifications to keep automatic background refresh reliable and to show its status when your earbuds connect."
+        }
+        val density = resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt()
+        fun text(value: String, size: Float, color: Int = getColor(R.color.white)) = TextView(this).apply {
+            this.text = value
+            textSize = size
+            setTextColor(color)
+        }
+
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(28), dp(20), dp(28))
+            setBackgroundColor(getColor(R.color.black))
+        }
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        body.addView(text("SONY PODS", 12f, getColor(R.color.accent)).apply { letterSpacing = .16f })
+        body.addView(text(title, 28f).apply { setTypeface(typeface, Typeface.BOLD) },
+            LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(10), 0, dp(22)) })
+        body.addView(text(explanation, 16f, getColor(R.color.muted)).apply { setLineSpacing(0f, 1.25f) },
+            LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, dp(18)) })
+        setupStatus = text("", 14f, getColor(R.color.muted)).apply {
+            setLineSpacing(0f, 1.2f)
+            visibility = View.GONE
+        }
+        body.addView(setupStatus, LinearLayout.LayoutParams(-1, -2))
+        page.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        setupContinue = Button(this).apply {
+            text = "ALLOW ${permissionName.uppercase()}"
+            textSize = 14f
+            setTextColor(Color.BLACK)
+            background = getDrawable(R.drawable.button_background)
+            isAllCaps = false
+            setOnClickListener { requestInitialSetupPermission(stage) }
+        }
+        page.addView(setupContinue, LinearLayout.LayoutParams(-1, dp(56)).apply {
+            setMargins(0, dp(16), 0, 0)
+        })
+        setContentView(page)
+    }
+
+    private fun requestInitialSetupPermission(stage: InitialSetupStage) {
+        val alreadyGranted = when (stage) {
+            InitialSetupStage.NEARBY_DEVICES -> hasBluetoothPermission()
+            InitialSetupStage.NOTIFICATIONS -> hasNotificationPermission()
+            InitialSetupStage.PAIRING -> false
+        }
+        if (alreadyGranted) {
+            showInitialSetupFlow()
+            return
+        }
+        permissionRequestInFlight = true
+        val permission = if (stage == InitialSetupStage.NEARBY_DEVICES) {
+            Manifest.permission.BLUETOOTH_CONNECT
+        } else {
+            Manifest.permission.POST_NOTIFICATIONS
+        }
+        val requestCode = if (stage == InitialSetupStage.NEARBY_DEVICES) {
+            REQUEST_BLUETOOTH
+        } else {
+            REQUEST_NOTIFICATIONS
+        }
+        setupStatus.visibility = View.GONE
+        requestPermissions(arrayOf(permission), requestCode)
+    }
+
+    private fun showInitialPermissionDenied(permissionName: String) {
+        setupStatus.text = "$permissionName permission is required to continue setup. Enable it in App info, then return here."
+        setupStatus.visibility = View.VISIBLE
+        setupContinue.text = "OPEN APP SETTINGS"
+        setupContinue.isEnabled = true
+        setupContinue.setOnClickListener { openPermissionSettings() }
     }
 
     private fun buildCompanionSetupContent(): View {
@@ -329,6 +428,9 @@ class MainActivity : Activity() {
     private fun hasBluetoothPermission() = Build.VERSION.SDK_INT < 31 ||
         checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
+    private fun hasNotificationPermission() = Build.VERSION.SDK_INT < 33 ||
+        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
     private fun shouldRequestNotifications() =
         Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
@@ -338,26 +440,31 @@ class MainActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         permissionRequestInFlight = false
         if (requestCode == REQUEST_BLUETOOTH) {
+            if (showingCompanionSetup) {
+                if (hasBluetoothPermission()) {
+                    showInitialSetupFlow()
+                } else {
+                    showInitialPermissionDenied("Nearby devices")
+                }
+                return
+            }
             updatePermissionUi()
             updateCompanionUi()
             if (hasBluetoothPermission()) {
-                if (pendingCompanionPicker) {
-                    pendingCompanionPicker = false
-                    setupCompanionAssociation()
-                } else if (::status.isInitialized) {
+                if (::status.isInitialized) {
                     status.text = "Bluetooth access granted"
                     continuePermissionFlow()
                 }
-            } else if (showingCompanionSetup) {
-                setupStatus.text = "Nearby devices permission is required before Android can look for your earbuds."
-                setupStatus.visibility = View.VISIBLE
             } else {
                 status.text = "Nearby devices is blocked. Open Bluetooth permission settings below."
             }
         } else if (requestCode == REQUEST_NOTIFICATIONS) {
-            if (pendingDashboardAfterNotification) {
-                pendingDashboardAfterNotification = false
-                showDashboard()
+            if (showingCompanionSetup) {
+                if (hasNotificationPermission()) {
+                    showInitialSetupFlow()
+                } else {
+                    showInitialPermissionDenied("Notifications")
+                }
             } else {
                 continuePermissionFlow()
             }
@@ -400,11 +507,7 @@ class MainActivity : Activity() {
     private fun setupCompanionAssociation() {
         if (!hasBluetoothPermission()) {
             if (showingCompanionSetup) {
-                pendingCompanionPicker = true
-                permissionRequestInFlight = true
-                setupStatus.text = "Allow Nearby devices so Android can look for your earbuds."
-                setupStatus.visibility = View.VISIBLE
-                requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BLUETOOTH)
+                showInitialSetupFlow()
             } else {
                 status.text = "Allow Nearby devices first."
                 requestRefresh()
@@ -479,13 +582,6 @@ class MainActivity : Activity() {
     }
 
     private fun requestNotificationsThenShowDashboard() {
-        if (shouldRequestNotifications()) {
-            pendingDashboardAfterNotification = true
-            permissionRequestInFlight = true
-            getPreferences(MODE_PRIVATE).edit().putBoolean(NOTIFICATION_REQUESTED, true).apply()
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
-            return
-        }
         showDashboard()
     }
 
