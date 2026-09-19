@@ -83,9 +83,16 @@ object DiagnosticsStore {
     }
 
     fun text(context: Context): String = buildString {
+        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        @Suppress("DEPRECATION")
+        val versionCode = if (android.os.Build.VERSION.SDK_INT >= 28) {
+            packageInfo.longVersionCode
+        } else {
+            packageInfo.versionCode.toLong()
+        }
         appendLine("Sony Pods Battery diagnostics")
         appendLine("Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
-        appendLine("App 0.3.2")
+        appendLine("App ${packageInfo.versionName} (versionCode $versionCode)")
         append(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "No events yet"))
     }
 }
