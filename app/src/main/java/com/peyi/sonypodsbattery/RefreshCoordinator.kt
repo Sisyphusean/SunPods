@@ -168,8 +168,11 @@ private object SonyCommandCoordinator {
 
     private var reconnectJob: Job? = null
     private var reconnectGeneration = 0L
+    private var connectionRefreshJob: Job? = null
+    private var connectionRefreshGeneration = 0L
 
     private val reconnectDelaysMillis = longArrayOf(1_000L, 2_000L, 5_000L, 15_000L, 30_000L)
+    private val connectionRefreshDelaysMillis = longArrayOf(750L, 2_000L, 5_000L)
 
     fun enqueueRefresh(
         context: Context,
@@ -257,21 +260,8 @@ private object SonyCommandCoordinator {
             device
         )
         BatteryPollingService.start(context)
-        if (!a2dpRefreshQueued) {
-            a2dpRefreshQueued = true
-            commands.trySend(
-                SonyCommand.Refresh(
-                    context.applicationContext,
-                    device,
-                    startPolling = false,
-                    completion = CompletableDeferred(),
-                    automatic = true,
-                    a2dpTriggered = true,
-                    automaticGeneration = currentAutomaticWorkGeneration()
-                )
-            )
-        }
-        startWorker()
+        if (!a2dpRefreshQueued) scheduleConnectionRefreshLocked(context, device)
+        scope.launch { SonyPodsBatteryWidgetUpdater.updateAll(context.applicationContext) }
     }
 
     @Synchronized
@@ -288,6 +278,7 @@ private object SonyCommandCoordinator {
     @Synchronized
     private fun handleDeviceDisconnectedInternal(context: Context, device: BluetoothDevice) {
         cancelReconnectLocked()
+        cancelConnectionRefreshLocked()
         automaticWorkGeneration += 1L
         postInteractionRefreshQueued = false
         a2dpRefreshQueued = false
@@ -311,6 +302,7 @@ private object SonyCommandCoordinator {
         startPolling: Boolean,
         automatic: Boolean
     ): BatteryState {
+        if (!automatic) cancelConnectionRefresh()
         val completion = CompletableDeferred<BatteryState>()
         commands.send(
             SonyCommand.Refresh(
@@ -521,6 +513,68 @@ private object SonyCommandCoordinator {
         reconnectGeneration += 1L
         reconnectJob?.cancel()
         reconnectJob = null
+    }
+
+    @Synchronized
+    private fun cancelConnectionRefresh() {
+        cancelConnectionRefreshLocked()
+    }
+
+    private fun cancelConnectionRefreshLocked() {
+        connectionRefreshGeneration += 1L
+        connectionRefreshJob?.cancel()
+        connectionRefreshJob = null
+        a2dpRefreshQueued = false
+    }
+
+    @Synchronized
+    private fun isConnectionRefreshCurrent(generation: Long, context: Context): Boolean =
+        generation == connectionRefreshGeneration &&
+            EarbudConnectionStateStore.current(context) !=
+            EarbudConnectionState.DISCONNECTED
+
+    private fun scheduleConnectionRefreshLocked(context: Context, device: BluetoothDevice) {
+        connectionRefreshGeneration += 1L
+        val generation = connectionRefreshGeneration
+        connectionRefreshJob?.cancel()
+        a2dpRefreshQueued = true
+        val app = context.applicationContext
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            try {
+                for ((attempt, delayMillis) in connectionRefreshDelaysMillis.withIndex()) {
+                    delay(delayMillis)
+                    if (!isConnectionRefreshCurrent(generation, app)) return@launch
+                    DiagnosticsStore.add(
+                        app,
+                        "Connection refresh attempt ${attempt + 1}/${connectionRefreshDelaysMillis.size}"
+                    )
+                    val state = awaitRefresh(
+                        app,
+                        device,
+                        startPolling = false,
+                        automatic = true
+                    )
+                    if (state.status.startsWith("Updated")) return@launch
+                }
+                DiagnosticsStore.add(app, "Connection refresh exhausted retry window")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                DiagnosticsStore.add(
+                    app,
+                    "Connection refresh failed: ${error.javaClass.simpleName}: ${error.message}"
+                )
+            } finally {
+                synchronized(SonyCommandCoordinator) {
+                    if (connectionRefreshJob === kotlin.coroutines.coroutineContext[Job]) {
+                        connectionRefreshJob = null
+                        a2dpRefreshQueued = false
+                    }
+                }
+            }
+        }
+        connectionRefreshJob = job
+        job.start()
     }
 
     @Synchronized
@@ -951,4 +1005,3 @@ private object SonyCommandCoordinator {
     @Synchronized
     private fun currentAutomaticWorkGeneration(): Long = automaticWorkGeneration
 }
-
