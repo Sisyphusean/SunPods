@@ -22,7 +22,7 @@ android {
         applicationId = "com.peyi.sonypodsbattery"
         minSdk = 29
         targetSdk = 35
-        versionCode = 14
+        versionCode = 15
         versionName = "0.3.7"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
@@ -71,4 +71,3 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     testImplementation("junit:junit:4.13.2")
 }
-

@@ -105,12 +105,16 @@ class SonyPodsBatteryWidget : GlanceAppWidget() {
                 val currentMode = preferences[CURRENT_AUDIO_MODE_KEY] ?: AudioMode.NC.name
                 val desiredAmbientLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY]
                     ?: storedState.ambientLevel
+                val isDisconnected = EarbudConnectionStateStore.current(context) ==
+                    EarbudConnectionState.DISCONNECTED
                 WidgetContent(
                     context = context,
                     state = storedState,
                     currentMode = AudioMode.fromStored(currentMode),
                     ambientLevel = desiredAmbientLevel,
-                    refreshing = isRefreshInProgress(preferences)
+                    refreshing = isRefreshInProgress(preferences),
+                    isDisconnected = isDisconnected,
+                    controlsEnabled = !isDisconnected
                 )
             }
         }
@@ -198,7 +202,9 @@ private fun WidgetContent(
     state: BatteryState,
     currentMode: AudioMode,
     ambientLevel: Int,
-    refreshing: Boolean
+    refreshing: Boolean,
+    isDisconnected: Boolean,
+    controlsEnabled: Boolean
 ) {
     val size = LocalSize.current
     val compactWidth = size.width < 320.dp
@@ -261,7 +267,11 @@ private fun WidgetContent(
                         .fillMaxHeight()
                         .padding(start = bodyGap)
                 ) {
-                    ModeTrack(currentMode)
+                    ModeTrack(
+                        activeMode = currentMode,
+                        isDisconnected = isDisconnected,
+                        controlsEnabled = controlsEnabled
+                    )
                     Spacer(modifier = GlanceModifier.height(bodyGap))
                     ContextCard(
                         state = state,
@@ -269,6 +279,8 @@ private fun WidgetContent(
                         ambientLevel = ambientLevel,
                         compactWidth = compactWidth,
                         compactHeight = compactHeight,
+                        isDisconnected = isDisconnected,
+                        controlsEnabled = controlsEnabled,
                         modifier = GlanceModifier.fillMaxWidth().defaultWeight()
                     )
                 }
@@ -389,7 +401,11 @@ private fun BatteryCard(
 }
 
 @Composable
-private fun ModeTrack(activeMode: AudioMode) {
+private fun ModeTrack(
+    activeMode: AudioMode,
+    isDisconnected: Boolean,
+    controlsEnabled: Boolean
+) {
     Row(
         modifier = GlanceModifier.fillMaxWidth()
             .background(GlanceTheme.colors.surfaceVariant)
@@ -398,27 +414,46 @@ private fun ModeTrack(activeMode: AudioMode) {
             .padding(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ModeButton("NC", AudioMode.NC, activeMode, GlanceModifier.defaultWeight())
-        ModeButton("Ambient", AudioMode.AMBIENT, activeMode, GlanceModifier.defaultWeight())
-        ModeButton("Off", AudioMode.OFF, activeMode, GlanceModifier.defaultWeight())
+        ModeButton("NC", AudioMode.NC, activeMode, isDisconnected, controlsEnabled, GlanceModifier.defaultWeight())
+        ModeButton("Ambient", AudioMode.AMBIENT, activeMode, isDisconnected, controlsEnabled, GlanceModifier.defaultWeight())
+        ModeButton("Off", AudioMode.OFF, activeMode, isDisconnected, controlsEnabled, GlanceModifier.defaultWeight())
     }
 }
 
 @Composable
-private fun ModeButton(label: String, mode: AudioMode, activeMode: AudioMode, modifier: GlanceModifier) {
-    val isActive = mode == activeMode
+private fun ModeButton(
+    label: String,
+    mode: AudioMode,
+    activeMode: AudioMode,
+    isDisconnected: Boolean,
+    controlsEnabled: Boolean,
+    modifier: GlanceModifier
+) {
+    val isActive = controlsEnabled && mode == activeMode
     val colors = GlanceTheme.colors
     Box(
         modifier = modifier
             .cornerRadius(18.dp)
             .background(if (isActive) colors.primary else colors.surfaceVariant)
             .fillMaxHeight()
-            .clickable(actionRunCallback<SetListeningModeAction>(actionParametersOf(AudioModeKey.to(mode.name)))),
+            .let {
+                if (controlsEnabled) {
+                    it.clickable(actionRunCallback<SetListeningModeAction>(actionParametersOf(AudioModeKey.to(mode.name))))
+                } else {
+                    it
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            style = labelText.copy(color = if (isActive) colors.onPrimary else colors.onSurfaceVariant)
+            style = labelText.copy(
+                color = when {
+                    isActive -> colors.onPrimary
+                    isDisconnected -> colors.outline
+                    else -> colors.onSurfaceVariant
+                }
+            )
         )
     }
 }
@@ -430,11 +465,21 @@ private fun ContextCard(
     ambientLevel: Int,
     compactWidth: Boolean,
     compactHeight: Boolean,
+    isDisconnected: Boolean,
+    controlsEnabled: Boolean,
     modifier: GlanceModifier
 ) {
+    val contentColor = if (isDisconnected) {
+        GlanceTheme.colors.outline
+    } else {
+        GlanceTheme.colors.onSecondaryContainer
+    }
     Box(
         modifier = modifier
-            .background(GlanceTheme.colors.secondaryContainer)
+            .background(
+                if (isDisconnected) GlanceTheme.colors.surfaceVariant
+                else GlanceTheme.colors.secondaryContainer
+            )
             .cornerRadius(16.dp)
             .padding(
                 horizontal = if (compactWidth) 8.dp else 12.dp,
@@ -443,31 +488,49 @@ private fun ContextCard(
         contentAlignment = Alignment.Center
     ) {
         when (currentMode) {
-            AudioMode.AMBIENT -> AmbientControls(ambientLevel, compactWidth, compactHeight)
+            AudioMode.AMBIENT -> AmbientControls(
+                ambientLevel = ambientLevel,
+                compactWidth = compactWidth,
+                compactHeight = compactHeight,
+                isDisconnected = isDisconnected,
+                controlsEnabled = controlsEnabled,
+                contentColor = contentColor
+            )
             AudioMode.NC -> StatusContent(
                 R.drawable.ic_noise_cancelling,
                 "Noise Cancelling",
                 "Active",
-                compactWidth
+                compactWidth,
+                isDisconnected,
+                contentColor
             )
             AudioMode.OFF -> StatusContent(
                 R.drawable.ic_sound_off,
                 "Sound Control Off",
                 "Passive Isolation",
-                compactWidth
+                compactWidth,
+                isDisconnected,
+                contentColor
             )
         }
     }
 }
 
 @Composable
-private fun AmbientControls(ambientLevel: Int, compactWidth: Boolean, compactHeight: Boolean) {
+private fun AmbientControls(
+    ambientLevel: Int,
+    compactWidth: Boolean,
+    compactHeight: Boolean,
+    isDisconnected: Boolean,
+    controlsEnabled: Boolean,
+    contentColor: androidx.glance.unit.ColorProvider
+) {
     Column(modifier = GlanceModifier.fillMaxWidth()) {
         Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "Ambient level",
                 style = labelText.copy(
-                    color = GlanceTheme.colors.onSecondaryContainer,
+                    color = contentColor,
                     fontSize = if (compactWidth) 11.sp else 13.sp
                 ),
                 modifier = GlanceModifier.defaultWeight()
@@ -475,7 +538,7 @@ private fun AmbientControls(ambientLevel: Int, compactWidth: Boolean, compactHei
             Text(
                 text = "$ambientLevel",
                 style = bodyText.copy(
-                    color = GlanceTheme.colors.onSecondaryContainer,
+                    color = contentColor,
                     fontSize = if (compactWidth) 12.sp else 13.sp
                 )
             )
@@ -485,59 +548,76 @@ private fun AmbientControls(ambientLevel: Int, compactWidth: Boolean, compactHei
                 .padding(top = if (compactHeight) 0.dp else 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            StepButton("−", -1)
-            AmbientProgress(ambientLevel, GlanceModifier.defaultWeight())
-            StepButton("+", 1)
+            StepButton("−", -1, controlsEnabled, isDisconnected)
+            AmbientProgress(ambientLevel, GlanceModifier.defaultWeight(), isDisconnected)
+            StepButton("+", 1, controlsEnabled, isDisconnected)
         }
     }
 }
 
 @Composable
-private fun StepButton(symbol: String, delta: Int) {
+private fun StepButton(symbol: String, delta: Int, controlsEnabled: Boolean, isDisconnected: Boolean) {
     Box(
         modifier = GlanceModifier.size(48.dp)
             .cornerRadius(16.dp)
-            .clickable(actionRunCallback<AdjustAmbientAction>(actionParametersOf(AdjustAmbientAction.deltaKey.to(delta)))),
+            .let {
+                if (controlsEnabled) {
+                    it.clickable(actionRunCallback<AdjustAmbientAction>(actionParametersOf(AdjustAmbientAction.deltaKey.to(delta))))
+                } else {
+                    it
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = symbol,
-            style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Medium, color = GlanceTheme.colors.onSurfaceVariant)
+            style = TextStyle(
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (isDisconnected) GlanceTheme.colors.outline else GlanceTheme.colors.onSurfaceVariant
+            )
         )
     }
 }
 
 @Composable
-private fun AmbientProgress(level: Int, modifier: GlanceModifier) {
+private fun AmbientProgress(level: Int, modifier: GlanceModifier, isDisconnected: Boolean) {
     LinearProgressIndicator(
         progress = level.coerceIn(1, 20) / 20f,
         modifier = modifier.height(3.dp),
-        color = GlanceTheme.colors.primaryContainer,
-        backgroundColor = GlanceTheme.colors.onSurfaceVariant
+        color = if (isDisconnected) GlanceTheme.colors.outline else GlanceTheme.colors.primaryContainer,
+        backgroundColor = if (isDisconnected) GlanceTheme.colors.outline else GlanceTheme.colors.onSurfaceVariant
     )
 }
 
 @Composable
-private fun StatusContent(icon: Int, title: String, subtitle: String, compactWidth: Boolean) {
+private fun StatusContent(
+    icon: Int,
+    title: String,
+    subtitle: String,
+    compactWidth: Boolean,
+    isDisconnected: Boolean,
+    contentColor: androidx.glance.unit.ColorProvider
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Image(
             provider = ImageProvider(icon),
             contentDescription = title,
-            colorFilter = ColorFilter.tint(GlanceTheme.colors.onSecondaryContainer),
+            colorFilter = ColorFilter.tint(contentColor),
             modifier = GlanceModifier.size(if (compactWidth) 20.dp else 24.dp)
         )
         Column(modifier = GlanceModifier.padding(start = 8.dp)) {
             Text(
                 text = title,
                 style = statusTitleText.copy(
-                    color = GlanceTheme.colors.onSecondaryContainer,
+                    color = contentColor,
                     fontSize = if (compactWidth) 13.sp else 14.sp
                 )
             )
             Text(
                 text = subtitle,
                 style = statusSubtitleText.copy(
-                    color = GlanceTheme.colors.onSecondaryContainer,
+                    color = contentColor,
                     fontSize = if (compactWidth) 11.sp else 12.sp
                 ),
                 modifier = GlanceModifier.padding(top = 2.dp)
@@ -579,8 +659,9 @@ class RefreshWidgetAction : ActionCallback {
 
 class SetListeningModeAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val mode = parameters[AudioModeKey]?.let(AudioMode::fromStored) ?: return
         val app = context.applicationContext
+        if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) return
+        val mode = parameters[AudioModeKey]?.let(AudioMode::fromStored) ?: return
         val current = BatteryStore.load(app)
         val preferences = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
         val ambientLevel = preferences[PENDING_AMBIENT_LEVEL_KEY]
@@ -606,6 +687,7 @@ class AdjustAmbientAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val delta = parameters[deltaKey] ?: return
         val app = context.applicationContext
+        if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) return
         val current = BatteryStore.load(app)
         val preferences = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
         val currentLevel = preferences[PENDING_AMBIENT_LEVEL_KEY]
@@ -634,6 +716,7 @@ class AdjustAmbientAction : ActionCallback {
 class ToggleFocusOnVoiceAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val app = context.applicationContext
+        if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) return
         val current = BatteryStore.load(app)
         RefreshCoordinator.enqueueSetListeningMode(
             app,
@@ -649,4 +732,3 @@ private fun nextUserActionTime(preferences: Preferences): Long = maxOf(
     System.currentTimeMillis(),
     (preferences[LAST_USER_ACTION_TIME] ?: 0L) + 1L
 )
-
