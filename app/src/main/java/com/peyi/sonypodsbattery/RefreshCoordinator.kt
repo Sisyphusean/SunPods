@@ -778,7 +778,7 @@ private object SonyCommandCoordinator {
                 false -> {
                     if (command.automatic) {
                         DiagnosticsStore.add(app, "A2DP not ready; automatic refresh deferred")
-                        return persistCheckedState(previous)
+                        return persistCheckedState(previous.copy(status = "Waiting for Bluetooth connection"))
                     }
                     DiagnosticsStore.add(app, "A2DP disconnected; refresh skipped")
                     handleA2dpDisconnected(app, target)
