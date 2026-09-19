@@ -28,21 +28,27 @@ class MainActivity : Activity() {
     private lateinit var updated: TextView
     private lateinit var refresh: Button
     private lateinit var permissionSettings: Button
+    private lateinit var companionSetup: Button
     private lateinit var ambientSlider: SeekBar
     private lateinit var ambientValue: TextView
     private lateinit var voiceFocus: CheckBox
     private var currentMode: ListeningMode? = null
     private var rendering = false
+    private var pendingRefresh = false
+    private var permissionRequestInFlight = false
     private val modeButtons = mutableMapOf<ListeningMode, Button>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildContent())
         render(BatteryStore.load(this))
-        refresh.setOnClickListener { ensurePermissionsAndRefresh() }
+        refresh.setOnClickListener { requestRefresh() }
         permissionSettings.setOnClickListener { openPermissionSettings() }
+        companionSetup.setOnClickListener { setupCompanionAssociation() }
         findViewById<Button>(ID_DIAGNOSTICS).setOnClickListener { shareDiagnostics() }
-        if (hasBluetoothPermission()) ensurePermissionsAndRefresh() else requestBluetoothPermission()
+        EarbudCompanionManager.startObservingPresence(this)
+        requestRefresh()
+        updateCompanionUi()
     }
 
     override fun onResume() {
@@ -50,6 +56,7 @@ class MainActivity : Activity() {
         if (::status.isInitialized) {
             render(BatteryStore.load(this))
             updatePermissionUi()
+            updateCompanionUi()
         }
     }
 
@@ -141,6 +148,11 @@ class MainActivity : Activity() {
             setTextColor(getColor(R.color.white)); setBackgroundColor(getColor(R.color.surface_2)); isAllCaps = false
         }
         body.addView(permissionSettings, LinearLayout.LayoutParams(-1, dp(50)).apply { setMargins(0, dp(10), 0, 0) })
+        companionSetup = Button(this).apply {
+            text = "ENABLE AUTOMATIC BACKGROUND REFRESH"; textSize = 13f
+            setTextColor(getColor(R.color.white)); setBackgroundColor(getColor(R.color.surface_2)); isAllCaps = false
+        }
+        body.addView(companionSetup, LinearLayout.LayoutParams(-1, dp(50)).apply { setMargins(0, dp(10), 0, 0) })
         updated = text("Never updated", 12f, getColor(R.color.muted)).also {
             it.gravity = Gravity.CENTER
             body.addView(it, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(12), 0, dp(26)) })
@@ -156,12 +168,28 @@ class MainActivity : Activity() {
         return ScrollView(this).apply { setBackgroundColor(getColor(R.color.black)); addView(body) }
     }
 
-    private fun ensurePermissionsAndRefresh() {
+    private fun requestRefresh() {
+        pendingRefresh = true
+        continuePermissionFlow()
+    }
+
+    private fun continuePermissionFlow() {
+        if (permissionRequestInFlight) return
         if (!hasBluetoothPermission()) {
-            requestBluetoothPermission()
+            permissionRequestInFlight = true
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BLUETOOTH)
             status.text = "Allow Nearby devices. If no prompt appears, use the settings button."
             return
         }
+        if (shouldRequestNotifications()) {
+            permissionRequestInFlight = true
+            getPreferences(MODE_PRIVATE).edit().putBoolean(NOTIFICATION_REQUESTED, true).apply()
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+            status.text = "Allow notifications so background refresh can show its status."
+            return
+        }
+        if (!pendingRefresh) return
+        pendingRefresh = false
         refresh.isEnabled = false
         refresh.text = "Reading..."
         status.text = "Connecting briefly to your earbuds"
@@ -198,7 +226,8 @@ class MainActivity : Activity() {
 
     private fun changeListeningMode(mode: ListeningMode) {
         if (!hasBluetoothPermission()) {
-            requestBluetoothPermission()
+            permissionRequestInFlight = true
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BLUETOOTH)
             return
         }
         modeButtons.values.forEach { it.isEnabled = false }
@@ -215,38 +244,67 @@ class MainActivity : Activity() {
     private fun hasBluetoothPermission() = Build.VERSION.SDK_INT < 31 ||
         checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
-    private fun requestBluetoothPermission() {
-        if (Build.VERSION.SDK_INT >= 31 && !hasBluetoothPermission()) {
-            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BLUETOOTH)
-        } else {
-            updatePermissionUi()
-            requestNotificationPermission()
-        }
-    }
-
-    private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
-        }
-    }
+    private fun shouldRequestNotifications() =
+        Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !getPreferences(MODE_PRIVATE).getBoolean(NOTIFICATION_REQUESTED, false)
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        permissionRequestInFlight = false
         if (requestCode == REQUEST_BLUETOOTH) {
             updatePermissionUi()
+            updateCompanionUi()
             if (hasBluetoothPermission()) {
                 status.text = "Bluetooth access granted"
-                requestNotificationPermission()
-                ensurePermissionsAndRefresh()
+                continuePermissionFlow()
             } else {
                 status.text = "Nearby devices is blocked. Open Bluetooth permission settings below."
             }
+        } else if (requestCode == REQUEST_NOTIFICATIONS) {
+            continuePermissionFlow()
         }
     }
 
     private fun updatePermissionUi() {
         if (!::permissionSettings.isInitialized) return
         permissionSettings.visibility = if (hasBluetoothPermission()) View.GONE else View.VISIBLE
+    }
+
+    private fun updateCompanionUi() {
+        if (!::companionSetup.isInitialized) return
+        val supported = EarbudCompanionManager.isSupported(this)
+        companionSetup.visibility = if (supported && hasBluetoothPermission()) View.VISIBLE else View.GONE
+        if (EarbudCompanionManager.isAssociated(this)) {
+            companionSetup.text = "AUTOMATIC BACKGROUND REFRESH ENABLED"
+            companionSetup.isEnabled = false
+        } else {
+            companionSetup.text = "ENABLE AUTOMATIC BACKGROUND REFRESH"
+            companionSetup.isEnabled = true
+        }
+    }
+
+    private fun setupCompanionAssociation() {
+        if (!hasBluetoothPermission()) {
+            status.text = "Allow Nearby devices first."
+            requestRefresh()
+            return
+        }
+        EarbudCompanionManager.associate(this) { message ->
+            status.text = message
+        }
+    }
+
+    @Deprecated("Deprecated in Android 16; retained for Android 12-15 companion picker compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != EarbudCompanionManager.REQUEST_ASSOCIATION) return
+        if (EarbudCompanionManager.handleAssociationResult(this, resultCode, data)) {
+            status.text = "Automatic background refresh enabled"
+            updateCompanionUi()
+        } else {
+            status.text = "Automatic background refresh setup was cancelled"
+        }
     }
 
     private fun openPermissionSettings() {
@@ -270,5 +328,6 @@ class MainActivity : Activity() {
         private const val ID_DIAGNOSTICS = 1004
         private const val REQUEST_BLUETOOTH = 100
         private const val REQUEST_NOTIFICATIONS = 101
+        private const val NOTIFICATION_REQUESTED = "notification_permission_requested"
     }
 }
