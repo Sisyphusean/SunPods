@@ -30,8 +30,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var permissionSettings: Button
     private lateinit var companionSetup: Button
     private lateinit var companionInstructions: TextView
-    private lateinit var setupStatus: TextView
-    private lateinit var setupContinue: Button
     private lateinit var ambientSlider: SeekBar
     private lateinit var ambientValue: TextView
     private lateinit var voiceFocus: CheckBox
@@ -42,6 +40,10 @@ class MainActivity : ComponentActivity() {
     private var companionAssociationInFlight = false
     private var showingCompanionSetup = false
     private var showingWelcome = false
+    private val setupMessage = mutableStateOf<String?>(null)
+    private val setupActionLabel = mutableStateOf("")
+    private val setupActionEnabled = mutableStateOf(true)
+    private var setupActionOpensSettings = false
     private var initialSetupStage: InitialSetupStage? = null
     private val modeButtons = mutableMapOf<ListeningMode, Button>()
 
@@ -211,8 +213,17 @@ class MainActivity : ComponentActivity() {
 
     private fun showCompanionSetupScreen() {
         showingCompanionSetup = true
+        showingWelcome = false
         initialSetupStage = InitialSetupStage.PAIRING
-        setContentView(buildCompanionSetupContent())
+        setupMessage.value = null
+        setupActionEnabled.value = true
+        setContent {
+            OnboardingPairingScreen(
+                message = setupMessage.value,
+                actionEnabled = setupActionEnabled.value,
+                onAction = { setupCompanionAssociation() },
+            )
+        }
     }
 
     private fun showInitialSetupFlow() {
@@ -226,52 +237,29 @@ class MainActivity : ComponentActivity() {
 
     private fun showPermissionSetupScreen(stage: InitialSetupStage) {
         showingCompanionSetup = true
+        showingWelcome = false
         initialSetupStage = stage
-        val isNearby = stage == InitialSetupStage.NEARBY_DEVICES
-        val permissionName = if (isNearby) "Nearby devices" else "Notifications"
-        val title = if (isNearby) "Allow Nearby devices" else "Allow notifications"
-        val explanation = if (isNearby) {
-            "Sony Pods needs Nearby devices permission to communicate with your WF-1000XM5 and to let Android find it during setup."
-        } else {
-            "Sony Pods uses notifications to keep automatic background refresh reliable and to show its status when your earbuds connect."
+        setupMessage.value = null
+        setupActionEnabled.value = true
+        setupActionOpensSettings = false
+        val nearby = stage == InitialSetupStage.NEARBY_DEVICES
+        setupActionLabel.value = if (nearby) "Allow Nearby devices" else "Allow notifications"
+        setContent {
+            OnboardingPermissionScreen(
+                nearby = nearby,
+                message = setupMessage.value,
+                actionLabel = setupActionLabel.value,
+                actionEnabled = setupActionEnabled.value,
+                onAction = {
+                    if (setupActionOpensSettings) {
+                        openPermissionSettings()
+                    } else {
+                        requestInitialSetupPermission(stage)
+                    }
+                },
+                onOpenSettings = { openPermissionSettings() },
+            )
         }
-        val density = resources.displayMetrics.density
-        fun dp(value: Int) = (value * density).toInt()
-        fun text(value: String, size: Float, color: Int = getColor(R.color.white)) = TextView(this).apply {
-            this.text = value
-            textSize = size
-            setTextColor(color)
-        }
-
-        val page = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(28), dp(20), dp(28))
-            setBackgroundColor(getColor(R.color.black))
-        }
-        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        body.addView(text("SONY PODS", 12f, getColor(R.color.accent)).apply { letterSpacing = .16f })
-        body.addView(text(title, 28f).apply { setTypeface(typeface, Typeface.BOLD) },
-            LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(10), 0, dp(22)) })
-        body.addView(text(explanation, 16f, getColor(R.color.muted)).apply { setLineSpacing(0f, 1.25f) },
-            LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, dp(18)) })
-        setupStatus = text("", 14f, getColor(R.color.muted)).apply {
-            setLineSpacing(0f, 1.2f)
-            visibility = View.GONE
-        }
-        body.addView(setupStatus, LinearLayout.LayoutParams(-1, -2))
-        page.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        setupContinue = Button(this).apply {
-            text = "ALLOW ${permissionName.uppercase()}"
-            textSize = 14f
-            setTextColor(Color.BLACK)
-            background = getDrawable(R.drawable.button_background)
-            isAllCaps = false
-            setOnClickListener { requestInitialSetupPermission(stage) }
-        }
-        page.addView(setupContinue, LinearLayout.LayoutParams(-1, dp(56)).apply {
-            setMargins(0, dp(16), 0, 0)
-        })
-        setContentView(page)
     }
 
     private fun requestInitialSetupPermission(stage: InitialSetupStage) {
@@ -295,72 +283,15 @@ class MainActivity : ComponentActivity() {
         } else {
             REQUEST_NOTIFICATIONS
         }
-        setupStatus.visibility = View.GONE
+        setupMessage.value = null
         requestPermissions(arrayOf(permission), requestCode)
     }
 
     private fun showInitialPermissionDenied(permissionName: String) {
-        setupStatus.text = "$permissionName permission is required to continue setup. Enable it in App info, then return here."
-        setupStatus.visibility = View.VISIBLE
-        setupContinue.text = "OPEN APP SETTINGS"
-        setupContinue.isEnabled = true
-        setupContinue.setOnClickListener { openPermissionSettings() }
-    }
-
-    private fun buildCompanionSetupContent(): View {
-        val density = resources.displayMetrics.density
-        fun dp(value: Int) = (value * density).toInt()
-        fun text(value: String, size: Float, color: Int = getColor(R.color.white)) = TextView(this).apply {
-            this.text = value
-            textSize = size
-            setTextColor(color)
-        }
-
-        val page = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(28), dp(20), dp(28))
-            setBackgroundColor(getColor(R.color.black))
-        }
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        body.addView(text("SONY PODS", 12f, getColor(R.color.accent)).apply { letterSpacing = .16f })
-        body.addView(text("Set up your WF-1000XM5", 28f).apply {
-            setTypeface(typeface, Typeface.BOLD)
-        }, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(10), 0, dp(22)) })
-        body.addView(text("Before we look for your earbuds", 18f).apply {
-            setTypeface(typeface, Typeface.BOLD)
-        })
-        body.addView(text(
-            "Android can only find the earbuds while they are in pairing mode.\n\n" +
-                "1. Put both earbuds in the open charging case.\n" +
-                "2. Hold the pairing button on the back for about 5 seconds.\n" +
-                "3. Wait until the blue indicator starts flashing.\n\n" +
-                "When the blue light is flashing, tap the button below.",
-            16f,
-            getColor(R.color.muted)
-        ).apply { setLineSpacing(0f, 1.25f) }, LinearLayout.LayoutParams(-1, -2).apply {
-            setMargins(0, dp(10), 0, dp(18))
-        })
-        setupStatus = text("", 14f, getColor(R.color.muted)).apply {
-            setLineSpacing(0f, 1.2f)
-            visibility = View.GONE
-        }
-        body.addView(setupStatus, LinearLayout.LayoutParams(-1, -2))
-
-        page.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        setupContinue = Button(this).apply {
-            text = "DEVICE IN PAIRING MODE"
-            textSize = 14f
-            setTextColor(Color.BLACK)
-            background = getDrawable(R.drawable.button_background)
-            isAllCaps = false
-            setOnClickListener { setupCompanionAssociation() }
-        }
-        page.addView(setupContinue, LinearLayout.LayoutParams(-1, dp(56)).apply {
-            setMargins(0, dp(16), 0, 0)
-        })
-        return page
+        setupMessage.value = "$permissionName permission is required to continue setup. Try again, or enable it from App info if Android no longer shows the prompt."
+        setupActionLabel.value = "Try again"
+        setupActionEnabled.value = true
+        setupActionOpensSettings = false
     }
 
     private fun showDashboard() {
@@ -542,9 +473,8 @@ class MainActivity : ComponentActivity() {
         if (companionAssociationInFlight) return
         companionAssociationInFlight = true
         if (showingCompanionSetup) {
-            setupContinue.isEnabled = false
-            setupStatus.text = "Looking for a device in Android…"
-            setupStatus.visibility = View.VISIBLE
+            setupActionEnabled.value = false
+            setupMessage.value = "Looking for a device in Android…"
         } else {
             status.text = "Follow the one-time Android setup to enable automatic refresh."
             updateCompanionUi()
@@ -554,8 +484,7 @@ class MainActivity : ComponentActivity() {
             onStatus = { message ->
                 runOnUiThread {
                     if (showingCompanionSetup) {
-                        setupStatus.text = message
-                        setupStatus.visibility = View.VISIBLE
+                        setupMessage.value = message
                     } else {
                         status.text = message
                     }
@@ -566,10 +495,9 @@ class MainActivity : ComponentActivity() {
                     companionAssociationInFlight = false
                     if (showingCompanionSetup) {
                         if (!success) {
-                            setupStatus.text = "Android could not open the device picker. Put the earbuds in pairing mode and try again."
-                            setupStatus.visibility = View.VISIBLE
+                            setupMessage.value = "Android could not open the device picker. Put the earbuds in pairing mode and try again."
                         }
-                        setupContinue.isEnabled = true
+                        setupActionEnabled.value = true
                     } else {
                         if (!success) status.text = "Automatic refresh setup could not be completed."
                         updateCompanionUi()
@@ -586,8 +514,8 @@ class MainActivity : ComponentActivity() {
         companionAssociationInFlight = false
         if (EarbudCompanionManager.handleAssociationResult(this, resultCode, data)) {
             if (showingCompanionSetup) {
-                setupStatus.text = "Automatic background refresh enabled."
-                setupStatus.visibility = View.VISIBLE
+                setupMessage.value = "Automatic background refresh enabled."
+                setupActionEnabled.value = true
                 requestNotificationsThenShowDashboard()
             } else {
                 status.text = "Automatic background refresh enabled"
@@ -596,9 +524,8 @@ class MainActivity : ComponentActivity() {
             }
         } else {
             if (showingCompanionSetup) {
-                setupStatus.text = "Setup cancelled. Put the earbuds in pairing mode and try again."
-                setupStatus.visibility = View.VISIBLE
-                setupContinue.isEnabled = true
+                setupMessage.value = "Setup cancelled. Put the earbuds in pairing mode and try again."
+                setupActionEnabled.value = true
             } else {
                 status.text = "Automatic background refresh setup was cancelled"
                 updateCompanionUi()
