@@ -76,6 +76,11 @@ object RefreshCoordinator {
         SonyCommandCoordinator.handleA2dpConnected(context, device)
     }
 
+    fun handleCompanionDeviceConnected(context: Context, device: BluetoothDevice) {
+        EarbudConnectionStateStore.markA2dp(context, A2dpConnectionState.CONNECTED, device)
+        SonyCommandCoordinator.handleA2dpConnected(context, device)
+    }
+
     fun handleA2dpDisconnected(context: Context, device: BluetoothDevice) {
         SonyCommandCoordinator.handleA2dpDisconnected(context, device)
     }
