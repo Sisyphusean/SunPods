@@ -51,6 +51,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import android.text.format.DateFormat
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.Date
 
 enum class AudioMode {
@@ -82,6 +83,7 @@ private val LAST_USER_ACTION_TIME = longPreferencesKey("last_user_action_time")
 private val AudioModeKey = ActionParameters.Key<String>("audio_mode_action")
 private const val MODE_SYNC_GRACE_PERIOD_MS = 4_000L
 private val refreshActionMutex = Mutex()
+private val widgetRenderMutex = Mutex()
 
 class SonyPodsBatteryWidget : GlanceAppWidget() {
     override val stateDefinition = PreferencesGlanceStateDefinition
@@ -116,31 +118,44 @@ class SonyPodsBatteryWidgetReceiver : GlanceAppWidgetReceiver() {
 
 object SonyPodsBatteryWidgetUpdater {
     suspend fun updateAll(context: Context) {
-        SonyPodsBatteryWidget().updateAll(context)
+        // Connection callbacks and refresh completions can arrive out of order. Keep
+        // Glance/RemoteViews renders serialized so the final render observes the newest
+        // persisted battery and connection state instead of overwriting it with a stale one.
+        widgetRenderMutex.withLock {
+            SonyPodsBatteryWidget().updateAll(context.applicationContext)
+        }
+    }
+
+    suspend fun update(context: Context, glanceId: GlanceId) {
+        widgetRenderMutex.withLock {
+            SonyPodsBatteryWidget().update(context.applicationContext, glanceId)
+        }
     }
 
     suspend fun syncReportedMode(context: Context, reportedMode: AudioMode): Boolean {
-        val manager = GlanceAppWidgetManager(context)
-        val glanceIds = manager.getGlanceIds(SonyPodsBatteryWidget::class.java)
-        var changed = false
-        for (glanceId in glanceIds) {
-            val preferences: Preferences = getAppWidgetState(
-                context,
-                PreferencesGlanceStateDefinition,
-                glanceId
-            )
-            val lastTap = preferences[LAST_USER_ACTION_TIME] ?: 0L
-            if (System.currentTimeMillis() - lastTap > MODE_SYNC_GRACE_PERIOD_MS) {
-                val currentMode = preferences[CURRENT_AUDIO_MODE_KEY] ?: AudioMode.NC.name
-                if (currentMode != reportedMode.name) {
-                    updateAppWidgetState(context, glanceId) { state ->
-                        state[CURRENT_AUDIO_MODE_KEY] = reportedMode.name
+        return widgetRenderMutex.withLock {
+            val manager = GlanceAppWidgetManager(context.applicationContext)
+            val glanceIds = manager.getGlanceIds(SonyPodsBatteryWidget::class.java)
+            var changed = false
+            for (glanceId in glanceIds) {
+                val preferences: Preferences = getAppWidgetState(
+                    context,
+                    PreferencesGlanceStateDefinition,
+                    glanceId
+                )
+                val lastTap = preferences[LAST_USER_ACTION_TIME] ?: 0L
+                if (System.currentTimeMillis() - lastTap > MODE_SYNC_GRACE_PERIOD_MS) {
+                    val currentMode = preferences[CURRENT_AUDIO_MODE_KEY] ?: AudioMode.NC.name
+                    if (currentMode != reportedMode.name) {
+                        updateAppWidgetState(context, glanceId) { state ->
+                            state[CURRENT_AUDIO_MODE_KEY] = reportedMode.name
+                        }
+                        changed = true
                     }
-                    changed = true
                 }
             }
+            changed
         }
-        return changed
     }
 
     suspend fun syncConfirmedState(
@@ -148,32 +163,34 @@ object SonyPodsBatteryWidgetUpdater {
         confirmedState: BatteryState,
         requestedAtMillis: Long
     ) {
-        val manager = GlanceAppWidgetManager(context)
-        val widget = SonyPodsBatteryWidget()
-        val glanceIds = manager.getGlanceIds(SonyPodsBatteryWidget::class.java)
-        val confirmedMode = AudioMode.fromListeningMode(confirmedState.listeningMode).name
-        for (glanceId in glanceIds) {
-            val preferences: Preferences = getAppWidgetState(
-                context,
-                PreferencesGlanceStateDefinition,
-                glanceId
-            )
-            val lastTap = preferences[LAST_USER_ACTION_TIME] ?: 0L
-            if (lastTap > requestedAtMillis) continue
+        widgetRenderMutex.withLock {
+            val manager = GlanceAppWidgetManager(context.applicationContext)
+            val widget = SonyPodsBatteryWidget()
+            val glanceIds = manager.getGlanceIds(SonyPodsBatteryWidget::class.java)
+            val confirmedMode = AudioMode.fromListeningMode(confirmedState.listeningMode).name
+            for (glanceId in glanceIds) {
+                val preferences: Preferences = getAppWidgetState(
+                    context,
+                    PreferencesGlanceStateDefinition,
+                    glanceId
+                )
+                val lastTap = preferences[LAST_USER_ACTION_TIME] ?: 0L
+                if (lastTap > requestedAtMillis) continue
 
-            val currentMode = preferences[CURRENT_AUDIO_MODE_KEY] ?: AudioMode.NC.name
-            val currentAmbientLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY]
-                ?: confirmedState.ambientLevel
-            val shouldRedraw = currentMode != confirmedMode ||
-                currentAmbientLevel != confirmedState.ambientLevel
-            if (shouldRedraw || lastTap != 0L) {
-                updateAppWidgetState(context, glanceId) { state ->
-                    state[CURRENT_AUDIO_MODE_KEY] = confirmedMode
-                    state[DESIRED_AMBIENT_LEVEL_KEY] = confirmedState.ambientLevel
-                    state.remove(PENDING_AMBIENT_LEVEL_KEY)
-                    state[LAST_USER_ACTION_TIME] = 0L
+                val currentMode = preferences[CURRENT_AUDIO_MODE_KEY] ?: AudioMode.NC.name
+                val currentAmbientLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY]
+                    ?: confirmedState.ambientLevel
+                val shouldRedraw = currentMode != confirmedMode ||
+                    currentAmbientLevel != confirmedState.ambientLevel
+                if (shouldRedraw || lastTap != 0L) {
+                    updateAppWidgetState(context, glanceId) { state ->
+                        state[CURRENT_AUDIO_MODE_KEY] = confirmedMode
+                        state[DESIRED_AMBIENT_LEVEL_KEY] = confirmedState.ambientLevel
+                        state.remove(PENDING_AMBIENT_LEVEL_KEY)
+                        state[LAST_USER_ACTION_TIME] = 0L
+                    }
+                    if (shouldRedraw) widget.update(context.applicationContext, glanceId)
                 }
-                if (shouldRedraw) widget.update(context, glanceId)
             }
         }
     }
@@ -632,7 +649,7 @@ class SetListeningModeAction : ActionCallback {
         updateAppWidgetState(context, glanceId) { preferences ->
             preferences[LAST_USER_ACTION_TIME] = actionTime
         }
-        SonyPodsBatteryWidget().update(context, glanceId)
+        SonyPodsBatteryWidgetUpdater.update(context, glanceId)
 
         RefreshCoordinator.enqueueSetListeningMode(
             app,
@@ -660,7 +677,7 @@ class AdjustAmbientAction : ActionCallback {
             state[PENDING_AMBIENT_LEVEL_KEY] = ambientLevel
             state[LAST_USER_ACTION_TIME] = actionTime
         }
-        SonyPodsBatteryWidget().update(context, glanceId)
+        SonyPodsBatteryWidgetUpdater.update(context, glanceId)
         RefreshCoordinator.enqueueAmbientLevel(
             app,
             ambientLevel,
