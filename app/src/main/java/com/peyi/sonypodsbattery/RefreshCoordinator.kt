@@ -82,7 +82,12 @@ object RefreshCoordinator {
     }
 
     fun handleA2dpDisconnected(context: Context, device: BluetoothDevice) {
+        EarbudConnectionStateStore.markA2dp(context, A2dpConnectionState.DISCONNECTED, device)
         SonyCommandCoordinator.handleA2dpDisconnected(context, device)
+    }
+
+    fun handleCompanionDeviceDisconnected(context: Context, device: BluetoothDevice) {
+        handleA2dpDisconnected(context, device)
     }
 
     suspend fun handleDeviceDisconnected(context: Context, device: BluetoothDevice) {
@@ -771,6 +776,10 @@ private object SonyCommandCoordinator {
                     )
                 }
                 false -> {
+                    if (command.automatic) {
+                        DiagnosticsStore.add(app, "A2DP not ready; automatic refresh deferred")
+                        return persistCheckedState(previous)
+                    }
                     DiagnosticsStore.add(app, "A2DP disconnected; refresh skipped")
                     handleA2dpDisconnected(app, target)
                     return finishManualRefresh(BatteryStore.load(app))

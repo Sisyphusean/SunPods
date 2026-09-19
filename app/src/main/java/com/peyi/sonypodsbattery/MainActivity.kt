@@ -29,6 +29,7 @@ class MainActivity : Activity() {
     private lateinit var refresh: Button
     private lateinit var permissionSettings: Button
     private lateinit var companionSetup: Button
+    private lateinit var companionInstructions: TextView
     private lateinit var ambientSlider: SeekBar
     private lateinit var ambientValue: TextView
     private lateinit var voiceFocus: CheckBox
@@ -36,6 +37,8 @@ class MainActivity : Activity() {
     private var rendering = false
     private var pendingRefresh = false
     private var permissionRequestInFlight = false
+    private var companionAssociationInFlight = false
+    private var onboardingSetupPending = false
     private val modeButtons = mutableMapOf<ListeningMode, Button>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,8 +50,16 @@ class MainActivity : Activity() {
         companionSetup.setOnClickListener { setupCompanionAssociation() }
         findViewById<Button>(ID_DIAGNOSTICS).setOnClickListener { shareDiagnostics() }
         EarbudCompanionManager.startObservingPresence(this)
-        requestRefresh()
+        if (shouldStartFirstRunSetup()) {
+            getPreferences(MODE_PRIVATE).edit()
+                .putBoolean(COMPANION_ONBOARDING_STARTED, true)
+                .apply()
+            onboardingSetupPending = true
+        } else {
+            requestRefresh()
+        }
         updateCompanionUi()
+        continuePermissionFlow()
     }
 
     override fun onResume() {
@@ -149,10 +160,17 @@ class MainActivity : Activity() {
         }
         body.addView(permissionSettings, LinearLayout.LayoutParams(-1, dp(50)).apply { setMargins(0, dp(10), 0, 0) })
         companionSetup = Button(this).apply {
-            text = "ENABLE AUTOMATIC BACKGROUND REFRESH"; textSize = 13f
+            text = "SET UP AUTOMATIC BACKGROUND REFRESH"; textSize = 13f
             setTextColor(getColor(R.color.white)); setBackgroundColor(getColor(R.color.surface_2)); isAllCaps = false
         }
         body.addView(companionSetup, LinearLayout.LayoutParams(-1, dp(50)).apply { setMargins(0, dp(10), 0, 0) })
+        companionInstructions = text("", 13f, getColor(R.color.muted)).apply {
+            setLineSpacing(0f, 1.2f)
+            visibility = View.GONE
+        }
+        body.addView(companionInstructions, LinearLayout.LayoutParams(-1, -2).apply {
+            setMargins(0, dp(8), 0, 0)
+        })
         updated = text("Never updated", 12f, getColor(R.color.muted)).also {
             it.gravity = Gravity.CENTER
             body.addView(it, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(12), 0, dp(26)) })
@@ -187,6 +205,15 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
             status.text = "Allow notifications so background refresh can show its status."
             return
+        }
+        if (onboardingSetupPending) {
+            onboardingSetupPending = false
+            if (EarbudCompanionManager.isSupported(this) &&
+                !EarbudCompanionManager.isAssociated(this)
+            ) {
+                setupCompanionAssociation()
+                return
+            }
         }
         if (!pendingRefresh) return
         pendingRefresh = false
@@ -272,17 +299,29 @@ class MainActivity : Activity() {
     }
 
     private fun updateCompanionUi() {
-        if (!::companionSetup.isInitialized) return
+        if (!::companionSetup.isInitialized || !::companionInstructions.isInitialized) return
         val supported = EarbudCompanionManager.isSupported(this)
-        companionSetup.visibility = if (supported && hasBluetoothPermission()) View.VISIBLE else View.GONE
-        if (EarbudCompanionManager.isAssociated(this)) {
+        val visible = supported && hasBluetoothPermission()
+        val associated = EarbudCompanionManager.isAssociated(this)
+        companionSetup.visibility = if (visible) View.VISIBLE else View.GONE
+        companionInstructions.visibility = if (visible && !associated) View.VISIBLE else View.GONE
+        companionInstructions.text = "One-time setup: place both earbuds in the open charging case, then hold the pairing button on the back for about 5 seconds until the blue light flashes. Select WF-1000XM5 and tap Connect in Android."
+        if (associated) {
             companionSetup.text = "AUTOMATIC BACKGROUND REFRESH ENABLED"
             companionSetup.isEnabled = false
+        } else if (companionAssociationInFlight) {
+            companionSetup.text = "FOLLOW THE ANDROID SETUP DIALOG"
+            companionSetup.isEnabled = false
         } else {
-            companionSetup.text = "ENABLE AUTOMATIC BACKGROUND REFRESH"
+            companionSetup.text = "SET UP AUTOMATIC BACKGROUND REFRESH"
             companionSetup.isEnabled = true
         }
     }
+
+    private fun shouldStartFirstRunSetup() =
+        EarbudCompanionManager.isSupported(this) &&
+            !EarbudCompanionManager.isAssociated(this) &&
+            !getPreferences(MODE_PRIVATE).getBoolean(COMPANION_ONBOARDING_STARTED, false)
 
     private fun setupCompanionAssociation() {
         if (!hasBluetoothPermission()) {
@@ -290,20 +329,35 @@ class MainActivity : Activity() {
             requestRefresh()
             return
         }
-        EarbudCompanionManager.associate(this) { message ->
-            status.text = message
-        }
+        if (companionAssociationInFlight) return
+        companionAssociationInFlight = true
+        status.text = "Follow the one-time Android setup to enable automatic refresh."
+        updateCompanionUi()
+        EarbudCompanionManager.associate(
+            this,
+            onStatus = { message -> status.text = message },
+            onFinished = { success ->
+                runOnUiThread {
+                    companionAssociationInFlight = false
+                    if (!success) status.text = "Automatic refresh setup could not be completed."
+                    updateCompanionUi()
+                }
+            }
+        )
     }
 
     @Deprecated("Deprecated in Android 16; retained for Android 12-15 companion picker compatibility")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != EarbudCompanionManager.REQUEST_ASSOCIATION) return
+        companionAssociationInFlight = false
         if (EarbudCompanionManager.handleAssociationResult(this, resultCode, data)) {
             status.text = "Automatic background refresh enabled"
             updateCompanionUi()
+            requestRefresh()
         } else {
             status.text = "Automatic background refresh setup was cancelled"
+            updateCompanionUi()
         }
     }
 
@@ -329,5 +383,6 @@ class MainActivity : Activity() {
         private const val REQUEST_BLUETOOTH = 100
         private const val REQUEST_NOTIFICATIONS = 101
         private const val NOTIFICATION_REQUESTED = "notification_permission_requested"
+        private const val COMPANION_ONBOARDING_STARTED = "companion_onboarding_started"
     }
 }

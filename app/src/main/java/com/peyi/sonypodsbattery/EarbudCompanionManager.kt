@@ -30,9 +30,14 @@ object EarbudCompanionManager {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(ADDRESS_KEY, null)
 
-    fun associate(activity: Activity, onStatus: (String) -> Unit) {
+    fun associate(
+        activity: Activity,
+        onStatus: (String) -> Unit,
+        onFinished: (Boolean) -> Unit = {}
+    ) {
         if (!isSupported(activity)) {
             onStatus("Companion device setup is not available on this phone")
+            onFinished(false)
             return
         }
 
@@ -62,12 +67,14 @@ object EarbudCompanionManager {
                         )
                     } catch (error: IntentSender.SendIntentException) {
                         onStatus("Could not open the companion device picker")
+                        onFinished(false)
                     }
                 }
 
                 override fun onFailure(error: CharSequence?) {
                     onStatus(error?.toString()?.ifBlank { "Companion association failed" }
                         ?: "Companion association failed")
+                    onFinished(false)
                 }
             }
         )
@@ -135,6 +142,14 @@ object EarbudCompanionManager {
         val associated = associatedAddress(context) ?: return
         if (associated.equals(address, ignoreCase = true)) {
             DiagnosticsStore.add(context, "Companion device disconnected")
+            val device = runCatching {
+                context.getSystemService(android.bluetooth.BluetoothManager::class.java)
+                    ?.adapter
+                    ?.getRemoteDevice(address)
+            }.getOrNull()
+            if (device != null) {
+                RefreshCoordinator.handleCompanionDeviceDisconnected(context, device)
+            }
         }
     }
 }
