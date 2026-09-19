@@ -3,7 +3,9 @@ package com.peyi.sonypodsbattery
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -74,8 +76,22 @@ object RefreshCoordinator {
         SonyCommandCoordinator.handleA2dpConnected(context, device)
     }
 
+    fun handleCompanionDeviceConnected(context: Context, device: BluetoothDevice) {
+        EarbudConnectionStateStore.markA2dp(context, A2dpConnectionState.CONNECTED, device)
+        SonyCommandCoordinator.handleA2dpConnected(context, device)
+    }
+
     fun handleA2dpDisconnected(context: Context, device: BluetoothDevice) {
+        EarbudConnectionStateStore.markA2dp(context, A2dpConnectionState.DISCONNECTED, device)
         SonyCommandCoordinator.handleA2dpDisconnected(context, device)
+    }
+
+    fun handleCompanionDeviceDisconnected(context: Context, device: BluetoothDevice) {
+        handleA2dpDisconnected(context, device)
+    }
+
+    suspend fun handleDeviceDisconnected(context: Context, device: BluetoothDevice) {
+        SonyCommandCoordinator.handleDeviceDisconnected(context, device)
     }
 
     fun closeSessionForServiceStop(context: Context) {
@@ -146,8 +162,10 @@ private object SonyCommandCoordinator {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val commands = Channel<SonyCommand>(Channel.UNLIMITED)
 
+    private var workerJob: Job? = null
+
     @Volatile
-    private var workerStarted = false
+    private var lastWorkerContext: Context? = null
 
     @Volatile
     private var postInteractionRefreshQueued = false
@@ -160,8 +178,11 @@ private object SonyCommandCoordinator {
 
     private var reconnectJob: Job? = null
     private var reconnectGeneration = 0L
+    private var connectionRefreshJob: Job? = null
+    private var connectionRefreshGeneration = 0L
 
     private val reconnectDelaysMillis = longArrayOf(1_000L, 2_000L, 5_000L, 15_000L, 30_000L)
+    private val connectionRefreshDelaysMillis = longArrayOf(750L, 2_000L, 5_000L)
 
     fun enqueueRefresh(
         context: Context,
@@ -249,26 +270,25 @@ private object SonyCommandCoordinator {
             device
         )
         BatteryPollingService.start(context)
-        if (!a2dpRefreshQueued) {
-            a2dpRefreshQueued = true
-            commands.trySend(
-                SonyCommand.Refresh(
-                    context.applicationContext,
-                    device,
-                    startPolling = false,
-                    completion = CompletableDeferred(),
-                    automatic = true,
-                    a2dpTriggered = true,
-                    automaticGeneration = currentAutomaticWorkGeneration()
-                )
-            )
-        }
-        startWorker()
+        if (!a2dpRefreshQueued) scheduleConnectionRefreshLocked(context, device)
+        scope.launch { SonyPodsBatteryWidgetUpdater.updateAll(context.applicationContext) }
     }
 
     @Synchronized
     fun handleA2dpDisconnected(context: Context, device: BluetoothDevice) {
+        handleDeviceDisconnectedInternal(context, device)
+        scope.launch { SonyPodsBatteryWidgetUpdater.updateAll(context.applicationContext) }
+    }
+
+    suspend fun handleDeviceDisconnected(context: Context, device: BluetoothDevice) {
+        handleDeviceDisconnectedInternal(context, device)
+        SonyPodsBatteryWidgetUpdater.updateAll(context.applicationContext)
+    }
+
+    @Synchronized
+    private fun handleDeviceDisconnectedInternal(context: Context, device: BluetoothDevice) {
         cancelReconnectLocked()
+        cancelConnectionRefreshLocked()
         automaticWorkGeneration += 1L
         postInteractionRefreshQueued = false
         a2dpRefreshQueued = false
@@ -279,7 +299,6 @@ private object SonyCommandCoordinator {
             device
         )
         BatteryStore.clearBatteryValues(context)
-        scope.launch { SonyPodsBatteryWidgetUpdater.updateAll(context) }
         BatteryPollingService.stop(context)
     }
 
@@ -293,6 +312,7 @@ private object SonyCommandCoordinator {
         startPolling: Boolean,
         automatic: Boolean
     ): BatteryState {
+        if (!automatic) cancelConnectionRefresh()
         val completion = CompletableDeferred<BatteryState>()
         commands.send(
             SonyCommand.Refresh(
@@ -335,28 +355,101 @@ private object SonyCommandCoordinator {
 
     @Synchronized
     private fun startWorker() {
-        if (workerStarted) return
-        workerStarted = true
-        scope.launch {
+        if (workerJob?.isActive == true) return
+
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             var deferredCommand: SonyCommand? = null
-            while (isActive) {
-                val first = deferredCommand ?: commands.receive()
-                deferredCommand = null
-                val command = if (first is SonyCommand.SetAmbientLevel) {
-                    val coalesced = coalesceAmbient(first)
-                    deferredCommand = coalesced.deferredCommand
-                    coalesced.command
-                } else {
-                    if (first is SonyCommand.Refresh && first.postInteraction) {
-                        val coalesced = coalescePostInteractionRefresh(first)
-                        deferredCommand = coalesced.deferredCommand
-                        coalesced.command
-                    } else {
-                        first
+            try {
+                while (isActive) {
+                    val first = deferredCommand ?: commands.receive()
+                    deferredCommand = null
+                    lastWorkerContext = commandContext(first)
+                    try {
+                        if (first is SonyCommand.Refresh) {
+                            val batch = coalesceRefresh(first)
+                            deferredCommand = batch.deferredCommand
+                            if (batch.primary.postInteraction || batch.waiters.any { it.postInteraction }) {
+                                postInteractionRefreshQueued = false
+                            }
+                            if (batch.primary.a2dpTriggered || batch.waiters.any { it.a2dpTriggered }) {
+                                a2dpRefreshQueued = false
+                            }
+                            executeRefreshBatch(batch)
+                            continue
+                        }
+                        val command = if (first is SonyCommand.SetAmbientLevel) {
+                            val coalesced = coalesceAmbient(first)
+                            deferredCommand = coalesced.deferredCommand
+                            coalesced.command
+                        } else {
+                            first
+                        }
+                        execute(command)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        recordWorkerFailure(commandContext(first), error)
+                        failCommand(first, error)
                     }
                 }
-                execute(command)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                recordWorkerFailure(lastWorkerContext, error)
+            } finally {
+                synchronized(SonyCommandCoordinator) {
+                    if (workerJob === kotlin.coroutines.coroutineContext[Job]) {
+                        workerJob = null
+                    }
+                }
             }
+        }
+        workerJob = job
+        job.start()
+    }
+
+    private fun commandContext(command: SonyCommand): Context = when (command) {
+        is SonyCommand.Refresh -> command.context
+        is SonyCommand.SetMode -> command.context
+        is SonyCommand.SetAmbientLevel -> command.context
+        is SonyCommand.Reconnect -> command.context
+    }
+
+    private fun recordWorkerFailure(context: Context?, error: Throwable) {
+        context ?: return
+        DiagnosticsStore.add(
+            context.applicationContext,
+            "Unexpected Sony command worker failure: ${error.javaClass.simpleName}: ${error.message}"
+        )
+    }
+
+    private fun failCommand(command: SonyCommand, error: Throwable) {
+        when (command) {
+            is SonyCommand.Refresh -> {
+                command.completion.completeExceptionally(error)
+                runCatching { command.onComplete?.invoke() }
+            }
+            is SonyCommand.SetMode -> command.completion.completeExceptionally(error)
+            is SonyCommand.SetAmbientLevel -> Unit
+            is SonyCommand.Reconnect -> Unit
+        }
+    }
+
+    private suspend fun executeRefreshBatch(batch: RefreshBatch) {
+        try {
+            executeRefresh(batch.primary).also { state ->
+                batch.primary.completion.complete(state)
+                batch.waiters.forEach { waiter ->
+                    waiter.completion.complete(state)
+                    waiter.onComplete?.invoke()
+                }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            recordWorkerFailure(batch.primary.context, error)
+            failCommand(batch.primary, error)
+            batch.waiters.forEach { waiter -> failCommand(waiter, error) }
         }
     }
 
@@ -377,22 +470,48 @@ private object SonyCommandCoordinator {
         }
     }
 
-    private data class RefreshCoalesced(
-        val command: SonyCommand.Refresh,
+    private data class RefreshBatch(
+        val primary: SonyCommand.Refresh,
+        val waiters: List<SonyCommand.Refresh>,
         val deferredCommand: SonyCommand?
     )
 
-    private fun coalescePostInteractionRefresh(first: SonyCommand.Refresh): RefreshCoalesced {
-        var latest = first
+    private fun coalesceRefresh(first: SonyCommand.Refresh): RefreshBatch {
+        val requests = mutableListOf(first)
         while (true) {
             val next = commands.tryReceive().getOrNull()
-                ?: return RefreshCoalesced(latest, null)
-            if (next is SonyCommand.Refresh && next.postInteraction) {
-                latest = next
+                ?: break
+            if (next is SonyCommand.Refresh) {
+                requests += next
             } else {
-                return RefreshCoalesced(latest, next)
+                val primaryRequest = requests.firstOrNull { !it.automatic } ?: first
+                val primary = primaryRequest.copy(
+                    context = first.context,
+                    device = requests.firstNotNullOfOrNull { it.device },
+                    startPolling = requests.any { it.startPolling },
+                    completion = first.completion,
+                    onComplete = first.onComplete,
+                    postInteraction = requests.all { it.postInteraction },
+                    automatic = requests.all { it.automatic },
+                    a2dpTriggered = requests.any { it.a2dpTriggered },
+                    automaticGeneration = primaryRequest.automaticGeneration
+                )
+                return RefreshBatch(primary, requests.drop(1), next)
             }
         }
+        val primaryRequest = requests.firstOrNull { !it.automatic } ?: first
+        val primary = primaryRequest.copy(
+            context = first.context,
+            device = requests.firstNotNullOfOrNull { it.device },
+            startPolling = requests.any { it.startPolling },
+            completion = first.completion,
+            onComplete = first.onComplete,
+            postInteraction = requests.all { it.postInteraction },
+            automatic = requests.all { it.automatic },
+            a2dpTriggered = requests.any { it.a2dpTriggered },
+            automaticGeneration = primaryRequest.automaticGeneration
+        )
+        return RefreshBatch(primary, requests.drop(1), null)
     }
 
     @Synchronized
@@ -404,6 +523,68 @@ private object SonyCommandCoordinator {
         reconnectGeneration += 1L
         reconnectJob?.cancel()
         reconnectJob = null
+    }
+
+    @Synchronized
+    private fun cancelConnectionRefresh() {
+        cancelConnectionRefreshLocked()
+    }
+
+    private fun cancelConnectionRefreshLocked() {
+        connectionRefreshGeneration += 1L
+        connectionRefreshJob?.cancel()
+        connectionRefreshJob = null
+        a2dpRefreshQueued = false
+    }
+
+    @Synchronized
+    private fun isConnectionRefreshCurrent(generation: Long, context: Context): Boolean =
+        generation == connectionRefreshGeneration &&
+            EarbudConnectionStateStore.current(context) !=
+            EarbudConnectionState.DISCONNECTED
+
+    private fun scheduleConnectionRefreshLocked(context: Context, device: BluetoothDevice) {
+        connectionRefreshGeneration += 1L
+        val generation = connectionRefreshGeneration
+        connectionRefreshJob?.cancel()
+        a2dpRefreshQueued = true
+        val app = context.applicationContext
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            try {
+                for ((attempt, delayMillis) in connectionRefreshDelaysMillis.withIndex()) {
+                    delay(delayMillis)
+                    if (!isConnectionRefreshCurrent(generation, app)) return@launch
+                    DiagnosticsStore.add(
+                        app,
+                        "Connection refresh attempt ${attempt + 1}/${connectionRefreshDelaysMillis.size}"
+                    )
+                    val state = awaitRefresh(
+                        app,
+                        device,
+                        startPolling = false,
+                        automatic = true
+                    )
+                    if (state.status.startsWith("Updated")) return@launch
+                }
+                DiagnosticsStore.add(app, "Connection refresh exhausted retry window")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                DiagnosticsStore.add(
+                    app,
+                    "Connection refresh failed: ${error.javaClass.simpleName}: ${error.message}"
+                )
+            } finally {
+                synchronized(SonyCommandCoordinator) {
+                    if (connectionRefreshJob === kotlin.coroutines.coroutineContext[Job]) {
+                        connectionRefreshJob = null
+                        a2dpRefreshQueued = false
+                    }
+                }
+            }
+        }
+        connectionRefreshJob = job
+        job.start()
     }
 
     @Synchronized
@@ -495,17 +676,84 @@ private object SonyCommandCoordinator {
         }
     }
 
+    private suspend fun executeConfirmedControlCommand(
+        context: Context,
+        device: BluetoothDevice,
+        operation: String,
+        action: () -> Unit
+    ) {
+        val app = context.applicationContext
+        val stateBeforePrepare = SonyControlSessionManager.currentState()
+        if (stateBeforePrepare != SonySessionState.CONNECTED) {
+            DiagnosticsStore.add(
+                app,
+                "$operation detected stale Sony session state=$stateBeforePrepare; reconnecting"
+            )
+            SonyControlSessionManager.prepareManualReconnect(app)
+            try {
+                SonyControlSessionManager.ensureConnected(app, device)
+                DiagnosticsStore.add(app, "$operation Sony control session reconnected")
+            } catch (error: SonyControlChannelUnavailableException) {
+                DiagnosticsStore.add(app, "$operation terminal failure during reconnect: ${error.message}")
+                throw error
+            }
+        }
+
+        try {
+            action()
+            DiagnosticsStore.add(app, "$operation Sony confirmation received")
+        } catch (error: SonyControlChannelUnavailableException) {
+            if (stateBeforePrepare != SonySessionState.CONNECTED) {
+                DiagnosticsStore.add(app, "$operation terminal failure after reconnect: ${error.message}")
+                throw error
+            }
+
+            DiagnosticsStore.add(app, "$operation detected stale connected Sony session; retry 1/1")
+            SonyControlSessionManager.closeForCommandRetry(app)
+            try {
+                SonyControlSessionManager.prepareManualReconnect(app)
+                DiagnosticsStore.add(app, "$operation recreating Sony control session")
+                SonyControlSessionManager.ensureConnected(app, device)
+                action()
+                DiagnosticsStore.add(app, "$operation Sony confirmation received after retry")
+            } catch (retryError: SonyControlChannelUnavailableException) {
+                DiagnosticsStore.add(app, "$operation terminal failure after retry: ${retryError.message}")
+                throw retryError
+            }
+        }
+    }
+
     private suspend fun executeRefresh(command: SonyCommand.Refresh): BatteryState {
         val app = command.context.applicationContext
         val previous = BatteryStore.load(app)
         val client = SonyBatteryClient(app)
+        val checkedAt = if (!command.automatic) System.currentTimeMillis() else 0L
+        fun checkedState(state: BatteryState): BatteryState =
+            if (checkedAt == 0L) state else state.copy(lastCheckedAt = checkedAt)
+        fun persistCheckedState(state: BatteryState): BatteryState {
+            val checked = checkedState(state)
+            if (checkedAt != 0L) BatteryStore.save(app, checked)
+            return checked
+        }
+        suspend fun finishManualRefresh(state: BatteryState): BatteryState {
+            val checked = persistCheckedState(state)
+            if (!command.automatic) {
+                SonyPodsBatteryWidgetUpdater.syncReportedMode(
+                    app,
+                    AudioMode.fromListeningMode(checked.listeningMode)
+                )
+                SonyPodsBatteryWidgetUpdater.updateAll(app)
+            }
+            command.onComplete?.invoke()
+            return checked
+        }
 
         if (command.postInteraction) postInteractionRefreshQueued = false
         if (command.a2dpTriggered) a2dpRefreshQueued = false
         if (command.automatic && command.automaticGeneration != automaticWorkGeneration) {
             DiagnosticsStore.add(app, "Automatic refresh skipped: stale disconnect work")
             command.onComplete?.invoke()
-            return previous
+            return persistCheckedState(previous)
         }
 
         val manualReconnectAttempt = !command.automatic &&
@@ -528,34 +776,36 @@ private object SonyCommandCoordinator {
                     )
                 }
                 false -> {
+                    if (command.automatic) {
+                        DiagnosticsStore.add(app, "A2DP not ready; automatic refresh deferred")
+                        return persistCheckedState(previous.copy(status = "Waiting for Bluetooth connection"))
+                    }
                     DiagnosticsStore.add(app, "A2DP disconnected; refresh skipped")
                     handleA2dpDisconnected(app, target)
-                    command.onComplete?.invoke()
-                    return BatteryStore.load(app)
+                    return finishManualRefresh(BatteryStore.load(app))
                 }
                 null -> {
                     DiagnosticsStore.add(app, "A2DP state unavailable; refresh skipped")
-                    command.onComplete?.invoke()
-                    return previous.copy(status = "Could not verify the earbud connection.")
+                    return finishManualRefresh(previous.copy(status = "Could not verify the earbud connection."))
                 }
             }
         }
         if (command.automatic && EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) {
             DiagnosticsStore.add(app, "Automatic refresh skipped: disconnected")
             command.onComplete?.invoke()
-            return previous
+            return persistCheckedState(previous)
         }
         if (command.automatic && SonyControlSessionManager.currentState() == SonySessionState.RECONNECT_WAIT) {
             DiagnosticsStore.add(app, "Automatic refresh skipped: reconnect pending")
             command.onComplete?.invoke()
-            return previous
+            return persistCheckedState(previous)
         }
         if (command.automatic && target == null) {
             command.onComplete?.invoke()
-            return previous
+            return persistCheckedState(previous)
         }
         val state = if (target == null) {
-            previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
+            persistCheckedState(previous.copy(status = "Pair your WF-1000XM5 in Android settings first"))
         } else try {
             val result = client.read(target)
             if (!command.automatic) {
@@ -574,25 +824,30 @@ private object SonyCommandCoordinator {
                 previous.ambientLevel,
                 previous.focusOnVoice,
                 System.currentTimeMillis(),
+                checkedAt,
                 if (result.case == null) "Updated. Open the case to refresh its battery." else "Updated"
             )
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
             DiagnosticsStore.add(app, "Refresh failed: ${error.javaClass.simpleName}: ${error.message}")
-            previous.copy(status = "Could not connect. Close Sony Sound Connect and try again.")
+            persistCheckedState(previous.copy(status = "Could not connect. Close Sony Sound Connect and try again."))
         } catch (error: SecurityException) {
             DiagnosticsStore.add(app, "Refresh blocked: ${error.message ?: error.javaClass.simpleName}")
-            previous.copy(status = "Android blocked a Bluetooth action. Share diagnostics.")
+            persistCheckedState(previous.copy(status = "Android blocked a Bluetooth action. Share diagnostics."))
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Refresh failed: ${error.javaClass.simpleName}: ${error.message}")
-            previous.copy(status = "Could not connect. Close Sony Sound Connect and try again.")
+            persistCheckedState(previous.copy(status = "Could not connect. Close Sony Sound Connect and try again."))
         }
 
         if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED &&
             EarbudConnectionStateStore.a2dpState(app) == A2dpConnectionState.DISCONNECTED
         ) {
-            command.onComplete?.invoke()
-            return BatteryStore.load(app)
+            return if (command.automatic) {
+                command.onComplete?.invoke()
+                BatteryStore.load(app)
+            } else {
+                finishManualRefresh(BatteryStore.load(app))
+            }
         }
 
         BatteryStore.save(app, state)
@@ -619,14 +874,6 @@ private object SonyCommandCoordinator {
         val previous = BatteryStore.load(app)
         val client = SonyBatteryClient(app)
         DiagnosticsStore.add(app, "Listening mode change requested: ${command.mode.name}")
-        if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) {
-            DiagnosticsStore.add(app, "Control command skipped: disconnected")
-            return finishControlCommand(
-                app,
-                previous.copy(status = "Could not change mode. Earbuds are disconnected."),
-                command.requestedAtMillis
-            )
-        }
         val target = client.findEarbuds()
         if (target != null) {
             when (A2dpConnectionHelper.isConnected(app, target)) {
@@ -653,19 +900,24 @@ private object SonyCommandCoordinator {
         val state = if (target == null) {
             previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
         } else try {
-            client.setListeningMode(target, command.mode, command.ambientLevel, command.focusOnVoice)
+            executeConfirmedControlCommand(
+                app,
+                target,
+                "Listening mode ${command.mode.name}"
+            ) {
+                client.setListeningMode(target, command.mode, command.ambientLevel, command.focusOnVoice)
+            }
             SonyCommandCoordinator.enqueuePostInteractionRefresh(app)
             DiagnosticsStore.add(app, "Listening mode changed: ${command.mode.name}")
             previous.copy(
                 listeningMode = command.mode,
                 ambientLevel = command.ambientLevel,
                 focusOnVoice = command.focusOnVoice,
-                status = "${command.mode.label} enabled",
-                updatedAt = System.currentTimeMillis()
+                status = "${command.mode.label} enabled"
             )
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
-            DiagnosticsStore.add(app, "Listening mode failed: ${error.javaClass.simpleName}: ${error.message}")
+            DiagnosticsStore.add(app, "Listening mode terminal failure: ${error.javaClass.simpleName}: ${error.message}")
             previous.copy(status = "Could not change mode. Close Sony Sound Connect and try again.")
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Listening mode failed: ${error.javaClass.simpleName}: ${error.message}")
@@ -681,14 +933,6 @@ private object SonyCommandCoordinator {
         val client = SonyBatteryClient(app)
         val level = command.ambientLevel.coerceIn(1, 20)
         DiagnosticsStore.add(app, "Ambient level change requested: $level")
-        if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) {
-            DiagnosticsStore.add(app, "Control command skipped: disconnected")
-            return finishControlCommand(
-                app,
-                previous.copy(status = "Could not change ambient level. Earbuds are disconnected."),
-                command.requestedAtMillis
-            )
-        }
         val target = client.findEarbuds()
         if (target != null) {
             when (A2dpConnectionHelper.isConnected(app, target)) {
@@ -715,19 +959,24 @@ private object SonyCommandCoordinator {
         val state = if (target == null) {
             previous.copy(status = "Pair your WF-1000XM5 in Android settings first")
         } else try {
-            client.setListeningMode(target, ListeningMode.AMBIENT, level, command.focusOnVoice)
+            executeConfirmedControlCommand(
+                app,
+                target,
+                "Ambient level $level"
+            ) {
+                client.setListeningMode(target, ListeningMode.AMBIENT, level, command.focusOnVoice)
+            }
             SonyCommandCoordinator.enqueuePostInteractionRefresh(app)
             DiagnosticsStore.add(app, "Ambient level changed: $level")
             previous.copy(
                 listeningMode = ListeningMode.AMBIENT,
                 ambientLevel = level,
                 focusOnVoice = command.focusOnVoice,
-                status = "Ambient sound enabled",
-                updatedAt = System.currentTimeMillis()
+                status = "Ambient sound enabled"
             )
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
-            DiagnosticsStore.add(app, "Ambient level failed: ${error.javaClass.simpleName}: ${error.message}")
+            DiagnosticsStore.add(app, "Ambient level terminal failure: ${error.javaClass.simpleName}: ${error.message}")
             previous.copy(status = "Could not change ambient level. Close Sony Sound Connect and try again.")
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Ambient level failed: ${error.javaClass.simpleName}: ${error.message}")

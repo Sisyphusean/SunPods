@@ -8,6 +8,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 enum class EarbudConnectionState {
     CONNECTED,
@@ -95,7 +98,10 @@ object EarbudConnectionStateStore {
 class EarbudConnectionReceiver : BroadcastReceiver() {
     @SuppressLint("MissingPermission")
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED) return
+        val action = intent.action ?: return
+        if (action != BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED &&
+            action != BluetoothDevice.ACTION_ACL_DISCONNECTED
+        ) return
 
         val app = context.applicationContext
         val device = if (Build.VERSION.SDK_INT >= 33) {
@@ -107,6 +113,25 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
         val name = try { device?.name.orEmpty() } catch (_: SecurityException) { "" }
         val address = try { device?.address.orEmpty() } catch (_: SecurityException) { "" }
         val deviceLabel = "${name.ifBlank { "<unknown>" }} ${address.ifBlank { "<unknown>" }}"
+        if (!EarbudConnectionStateStore.isTargetDevice(context.applicationContext, device)) {
+            DiagnosticsStore.add(context.applicationContext, "Ignored Bluetooth event: $deviceLabel")
+            return
+        }
+
+        if (action == BluetoothDevice.ACTION_ACL_DISCONNECTED) {
+            val target = device ?: return
+            DiagnosticsStore.add(context.applicationContext, "ACL disconnected fallback: $deviceLabel")
+            val pendingResult = goAsync()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    RefreshCoordinator.handleDeviceDisconnected(context.applicationContext, target)
+                } finally {
+                    pendingResult.finish()
+                }
+            }
+            return
+        }
+
         val state = intent.getIntExtra(
             BluetoothProfile.EXTRA_STATE,
             BluetoothProfile.STATE_DISCONNECTED
@@ -121,18 +146,20 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
         }
         val stateLabel = a2dpState.name
         DiagnosticsStore.add(app, "A2DP state: $stateLabel $deviceLabel")
-        if (!EarbudConnectionStateStore.isTargetDevice(app, device)) {
-            DiagnosticsStore.add(app, "Ignored A2DP event: $deviceLabel")
-            return
-        }
-
         val target = device ?: return
         if (a2dpState == A2dpConnectionState.CONNECTED) {
             EarbudConnectionStateStore.markA2dp(app, a2dpState, target)
             RefreshCoordinator.handleA2dpConnected(app, target)
         } else {
             EarbudConnectionStateStore.markA2dp(app, a2dpState, target)
-            RefreshCoordinator.handleA2dpDisconnected(app, target)
+            val pendingResult = goAsync()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    RefreshCoordinator.handleDeviceDisconnected(app, target)
+                } finally {
+                    pendingResult.finish()
+                }
+            }
         }
     }
 }

@@ -49,7 +49,9 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import java.text.DateFormat
+import android.text.format.DateFormat
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.Date
 
 enum class AudioMode {
@@ -76,9 +78,12 @@ enum class AudioMode {
 
 private val CURRENT_AUDIO_MODE_KEY = stringPreferencesKey("current_audio_mode")
 private val DESIRED_AMBIENT_LEVEL_KEY = intPreferencesKey("desired_ambient_level")
+private val PENDING_AMBIENT_LEVEL_KEY = intPreferencesKey("pending_ambient_level")
 private val LAST_USER_ACTION_TIME = longPreferencesKey("last_user_action_time")
 private val AudioModeKey = ActionParameters.Key<String>("audio_mode_action")
 private const val MODE_SYNC_GRACE_PERIOD_MS = 4_000L
+private val refreshActionMutex = Mutex()
+private val widgetRenderMutex = Mutex()
 
 class SonyPodsBatteryWidget : GlanceAppWidget() {
     override val stateDefinition = PreferencesGlanceStateDefinition
@@ -92,10 +97,15 @@ class SonyPodsBatteryWidget : GlanceAppWidget() {
                 val currentMode = preferences[CURRENT_AUDIO_MODE_KEY] ?: AudioMode.NC.name
                 val desiredAmbientLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY]
                     ?: storedState.ambientLevel
+                val isDisconnected = EarbudConnectionStateStore.current(context) ==
+                    EarbudConnectionState.DISCONNECTED
                 WidgetContent(
+                    context = context,
                     state = storedState,
                     currentMode = AudioMode.fromStored(currentMode),
-                    ambientLevel = desiredAmbientLevel
+                    ambientLevel = desiredAmbientLevel,
+                    isDisconnected = isDisconnected,
+                    controlsEnabled = !isDisconnected
                 )
             }
         }
@@ -108,31 +118,44 @@ class SonyPodsBatteryWidgetReceiver : GlanceAppWidgetReceiver() {
 
 object SonyPodsBatteryWidgetUpdater {
     suspend fun updateAll(context: Context) {
-        SonyPodsBatteryWidget().updateAll(context)
+        // Connection callbacks and refresh completions can arrive out of order. Keep
+        // Glance/RemoteViews renders serialized so the final render observes the newest
+        // persisted battery and connection state instead of overwriting it with a stale one.
+        widgetRenderMutex.withLock {
+            SonyPodsBatteryWidget().updateAll(context.applicationContext)
+        }
+    }
+
+    suspend fun update(context: Context, glanceId: GlanceId) {
+        widgetRenderMutex.withLock {
+            SonyPodsBatteryWidget().update(context.applicationContext, glanceId)
+        }
     }
 
     suspend fun syncReportedMode(context: Context, reportedMode: AudioMode): Boolean {
-        val manager = GlanceAppWidgetManager(context)
-        val glanceIds = manager.getGlanceIds(SonyPodsBatteryWidget::class.java)
-        var changed = false
-        for (glanceId in glanceIds) {
-            val preferences: Preferences = getAppWidgetState(
-                context,
-                PreferencesGlanceStateDefinition,
-                glanceId
-            )
-            val lastTap = preferences[LAST_USER_ACTION_TIME] ?: 0L
-            if (System.currentTimeMillis() - lastTap > MODE_SYNC_GRACE_PERIOD_MS) {
-                val currentMode = preferences[CURRENT_AUDIO_MODE_KEY] ?: AudioMode.NC.name
-                if (currentMode != reportedMode.name) {
-                    updateAppWidgetState(context, glanceId) { state ->
-                        state[CURRENT_AUDIO_MODE_KEY] = reportedMode.name
+        return widgetRenderMutex.withLock {
+            val manager = GlanceAppWidgetManager(context.applicationContext)
+            val glanceIds = manager.getGlanceIds(SonyPodsBatteryWidget::class.java)
+            var changed = false
+            for (glanceId in glanceIds) {
+                val preferences: Preferences = getAppWidgetState(
+                    context,
+                    PreferencesGlanceStateDefinition,
+                    glanceId
+                )
+                val lastTap = preferences[LAST_USER_ACTION_TIME] ?: 0L
+                if (System.currentTimeMillis() - lastTap > MODE_SYNC_GRACE_PERIOD_MS) {
+                    val currentMode = preferences[CURRENT_AUDIO_MODE_KEY] ?: AudioMode.NC.name
+                    if (currentMode != reportedMode.name) {
+                        updateAppWidgetState(context, glanceId) { state ->
+                            state[CURRENT_AUDIO_MODE_KEY] = reportedMode.name
+                        }
+                        changed = true
                     }
-                    changed = true
                 }
             }
+            changed
         }
-        return changed
     }
 
     suspend fun syncConfirmedState(
@@ -140,31 +163,34 @@ object SonyPodsBatteryWidgetUpdater {
         confirmedState: BatteryState,
         requestedAtMillis: Long
     ) {
-        val manager = GlanceAppWidgetManager(context)
-        val widget = SonyPodsBatteryWidget()
-        val glanceIds = manager.getGlanceIds(SonyPodsBatteryWidget::class.java)
-        val confirmedMode = AudioMode.fromListeningMode(confirmedState.listeningMode).name
-        for (glanceId in glanceIds) {
-            val preferences: Preferences = getAppWidgetState(
-                context,
-                PreferencesGlanceStateDefinition,
-                glanceId
-            )
-            val lastTap = preferences[LAST_USER_ACTION_TIME] ?: 0L
-            if (lastTap > requestedAtMillis) continue
+        widgetRenderMutex.withLock {
+            val manager = GlanceAppWidgetManager(context.applicationContext)
+            val widget = SonyPodsBatteryWidget()
+            val glanceIds = manager.getGlanceIds(SonyPodsBatteryWidget::class.java)
+            val confirmedMode = AudioMode.fromListeningMode(confirmedState.listeningMode).name
+            for (glanceId in glanceIds) {
+                val preferences: Preferences = getAppWidgetState(
+                    context,
+                    PreferencesGlanceStateDefinition,
+                    glanceId
+                )
+                val lastTap = preferences[LAST_USER_ACTION_TIME] ?: 0L
+                if (lastTap > requestedAtMillis) continue
 
-            val currentMode = preferences[CURRENT_AUDIO_MODE_KEY] ?: AudioMode.NC.name
-            val currentAmbientLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY]
-                ?: confirmedState.ambientLevel
-            val shouldRedraw = currentMode != confirmedMode ||
-                currentAmbientLevel != confirmedState.ambientLevel
-            if (shouldRedraw || lastTap != 0L) {
-                updateAppWidgetState(context, glanceId) { state ->
-                    state[CURRENT_AUDIO_MODE_KEY] = confirmedMode
-                    state[DESIRED_AMBIENT_LEVEL_KEY] = confirmedState.ambientLevel
-                    state[LAST_USER_ACTION_TIME] = 0L
+                val currentMode = preferences[CURRENT_AUDIO_MODE_KEY] ?: AudioMode.NC.name
+                val currentAmbientLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY]
+                    ?: confirmedState.ambientLevel
+                val shouldRedraw = currentMode != confirmedMode ||
+                    currentAmbientLevel != confirmedState.ambientLevel
+                if (shouldRedraw || lastTap != 0L) {
+                    updateAppWidgetState(context, glanceId) { state ->
+                        state[CURRENT_AUDIO_MODE_KEY] = confirmedMode
+                        state[DESIRED_AMBIENT_LEVEL_KEY] = confirmedState.ambientLevel
+                        state.remove(PENDING_AMBIENT_LEVEL_KEY)
+                        state[LAST_USER_ACTION_TIME] = 0L
+                    }
+                    if (shouldRedraw) widget.update(context.applicationContext, glanceId)
                 }
-                if (shouldRedraw) widget.update(context, glanceId)
             }
         }
     }
@@ -177,7 +203,14 @@ private val statusSubtitleText = TextStyle(fontSize = 12.sp, fontWeight = FontWe
 private val valueText = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
 @Composable
-private fun WidgetContent(state: BatteryState, currentMode: AudioMode, ambientLevel: Int) {
+private fun WidgetContent(
+    context: Context,
+    state: BatteryState,
+    currentMode: AudioMode,
+    ambientLevel: Int,
+    isDisconnected: Boolean,
+    controlsEnabled: Boolean
+) {
     val size = LocalSize.current
     val compactWidth = size.width < 320.dp
     val compactHeight = size.height < 190.dp
@@ -195,7 +228,7 @@ private fun WidgetContent(state: BatteryState, currentMode: AudioMode, ambientLe
             .padding(horizontal = horizontalPadding, vertical = verticalPadding)
     ) {
         Column(modifier = GlanceModifier.fillMaxWidth().fillMaxHeight()) {
-            Header(state, compactWidth)
+            Header(state, compactWidth, context)
             Spacer(modifier = GlanceModifier.height(bodyGap))
             Row(
                 modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
@@ -239,7 +272,11 @@ private fun WidgetContent(state: BatteryState, currentMode: AudioMode, ambientLe
                         .fillMaxHeight()
                         .padding(start = bodyGap)
                 ) {
-                    ModeTrack(currentMode)
+                    ModeTrack(
+                        activeMode = currentMode,
+                        isDisconnected = isDisconnected,
+                        controlsEnabled = controlsEnabled
+                    )
                     Spacer(modifier = GlanceModifier.height(bodyGap))
                     ContextCard(
                         state = state,
@@ -247,6 +284,8 @@ private fun WidgetContent(state: BatteryState, currentMode: AudioMode, ambientLe
                         ambientLevel = ambientLevel,
                         compactWidth = compactWidth,
                         compactHeight = compactHeight,
+                        isDisconnected = isDisconnected,
+                        controlsEnabled = controlsEnabled,
                         modifier = GlanceModifier.fillMaxWidth().defaultWeight()
                     )
                 }
@@ -256,7 +295,12 @@ private fun WidgetContent(state: BatteryState, currentMode: AudioMode, ambientLe
 }
 
 @Composable
-private fun Header(state: BatteryState, compactWidth: Boolean) {
+private fun Header(
+    state: BatteryState,
+    compactWidth: Boolean,
+    context: Context
+) {
+    val timestamp = state.lastCheckedAt.takeIf { it != 0L } ?: state.updatedAt
     Row(
         modifier = GlanceModifier.fillMaxWidth().height(48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -276,7 +320,8 @@ private fun Header(state: BatteryState, compactWidth: Boolean) {
         }
         Spacer(modifier = GlanceModifier.defaultWeight())
         Text(
-            text = if (state.updatedAt == 0L) "Not updated" else "Updated ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(state.updatedAt))}",
+            text = if (timestamp == 0L) "Not updated"
+            else "Updated ${DateFormat.getTimeFormat(context).format(Date(timestamp))}",
             style = labelText.copy(
                 color = GlanceTheme.colors.onSurfaceVariant,
                 fontSize = if (compactWidth) 11.sp else 13.sp
@@ -348,7 +393,11 @@ private fun BatteryCard(
 }
 
 @Composable
-private fun ModeTrack(activeMode: AudioMode) {
+private fun ModeTrack(
+    activeMode: AudioMode,
+    isDisconnected: Boolean,
+    controlsEnabled: Boolean
+) {
     Row(
         modifier = GlanceModifier.fillMaxWidth()
             .background(GlanceTheme.colors.surfaceVariant)
@@ -357,27 +406,46 @@ private fun ModeTrack(activeMode: AudioMode) {
             .padding(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ModeButton("NC", AudioMode.NC, activeMode, GlanceModifier.defaultWeight())
-        ModeButton("Ambient", AudioMode.AMBIENT, activeMode, GlanceModifier.defaultWeight())
-        ModeButton("Off", AudioMode.OFF, activeMode, GlanceModifier.defaultWeight())
+        ModeButton("NC", AudioMode.NC, activeMode, isDisconnected, controlsEnabled, GlanceModifier.defaultWeight())
+        ModeButton("Ambient", AudioMode.AMBIENT, activeMode, isDisconnected, controlsEnabled, GlanceModifier.defaultWeight())
+        ModeButton("Off", AudioMode.OFF, activeMode, isDisconnected, controlsEnabled, GlanceModifier.defaultWeight())
     }
 }
 
 @Composable
-private fun ModeButton(label: String, mode: AudioMode, activeMode: AudioMode, modifier: GlanceModifier) {
-    val isActive = mode == activeMode
+private fun ModeButton(
+    label: String,
+    mode: AudioMode,
+    activeMode: AudioMode,
+    isDisconnected: Boolean,
+    controlsEnabled: Boolean,
+    modifier: GlanceModifier
+) {
+    val isActive = controlsEnabled && mode == activeMode
     val colors = GlanceTheme.colors
     Box(
         modifier = modifier
             .cornerRadius(18.dp)
             .background(if (isActive) colors.primary else colors.surfaceVariant)
             .fillMaxHeight()
-            .clickable(actionRunCallback<SetListeningModeAction>(actionParametersOf(AudioModeKey.to(mode.name)))),
+            .let {
+                if (controlsEnabled) {
+                    it.clickable(actionRunCallback<SetListeningModeAction>(actionParametersOf(AudioModeKey.to(mode.name))))
+                } else {
+                    it
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            style = labelText.copy(color = if (isActive) colors.onPrimary else colors.onSurfaceVariant)
+            style = labelText.copy(
+                color = when {
+                    isActive -> colors.onPrimary
+                    isDisconnected -> colors.outline
+                    else -> colors.onSurfaceVariant
+                }
+            )
         )
     }
 }
@@ -389,11 +457,21 @@ private fun ContextCard(
     ambientLevel: Int,
     compactWidth: Boolean,
     compactHeight: Boolean,
+    isDisconnected: Boolean,
+    controlsEnabled: Boolean,
     modifier: GlanceModifier
 ) {
+    val contentColor = if (isDisconnected) {
+        GlanceTheme.colors.outline
+    } else {
+        GlanceTheme.colors.onSecondaryContainer
+    }
     Box(
         modifier = modifier
-            .background(GlanceTheme.colors.secondaryContainer)
+            .background(
+                if (isDisconnected) GlanceTheme.colors.surfaceVariant
+                else GlanceTheme.colors.secondaryContainer
+            )
             .cornerRadius(16.dp)
             .padding(
                 horizontal = if (compactWidth) 8.dp else 12.dp,
@@ -402,31 +480,49 @@ private fun ContextCard(
         contentAlignment = Alignment.Center
     ) {
         when (currentMode) {
-            AudioMode.AMBIENT -> AmbientControls(ambientLevel, compactWidth, compactHeight)
+            AudioMode.AMBIENT -> AmbientControls(
+                ambientLevel = ambientLevel,
+                compactWidth = compactWidth,
+                compactHeight = compactHeight,
+                isDisconnected = isDisconnected,
+                controlsEnabled = controlsEnabled,
+                contentColor = contentColor
+            )
             AudioMode.NC -> StatusContent(
                 R.drawable.ic_noise_cancelling,
                 "Noise Cancelling",
                 "Active",
-                compactWidth
+                compactWidth,
+                isDisconnected,
+                contentColor
             )
             AudioMode.OFF -> StatusContent(
                 R.drawable.ic_sound_off,
                 "Sound Control Off",
                 "Passive Isolation",
-                compactWidth
+                compactWidth,
+                isDisconnected,
+                contentColor
             )
         }
     }
 }
 
 @Composable
-private fun AmbientControls(ambientLevel: Int, compactWidth: Boolean, compactHeight: Boolean) {
+private fun AmbientControls(
+    ambientLevel: Int,
+    compactWidth: Boolean,
+    compactHeight: Boolean,
+    isDisconnected: Boolean,
+    controlsEnabled: Boolean,
+    contentColor: androidx.glance.unit.ColorProvider
+) {
     Column(modifier = GlanceModifier.fillMaxWidth()) {
         Row(modifier = GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "Ambient level",
                 style = labelText.copy(
-                    color = GlanceTheme.colors.onSecondaryContainer,
+                    color = contentColor,
                     fontSize = if (compactWidth) 11.sp else 13.sp
                 ),
                 modifier = GlanceModifier.defaultWeight()
@@ -434,7 +530,7 @@ private fun AmbientControls(ambientLevel: Int, compactWidth: Boolean, compactHei
             Text(
                 text = "$ambientLevel",
                 style = bodyText.copy(
-                    color = GlanceTheme.colors.onSecondaryContainer,
+                    color = contentColor,
                     fontSize = if (compactWidth) 12.sp else 13.sp
                 )
             )
@@ -444,59 +540,76 @@ private fun AmbientControls(ambientLevel: Int, compactWidth: Boolean, compactHei
                 .padding(top = if (compactHeight) 0.dp else 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            StepButton("−", -1)
-            AmbientProgress(ambientLevel, GlanceModifier.defaultWeight())
-            StepButton("+", 1)
+            StepButton("−", -1, controlsEnabled, isDisconnected)
+            AmbientProgress(ambientLevel, GlanceModifier.defaultWeight(), isDisconnected)
+            StepButton("+", 1, controlsEnabled, isDisconnected)
         }
     }
 }
 
 @Composable
-private fun StepButton(symbol: String, delta: Int) {
+private fun StepButton(symbol: String, delta: Int, controlsEnabled: Boolean, isDisconnected: Boolean) {
     Box(
         modifier = GlanceModifier.size(48.dp)
             .cornerRadius(16.dp)
-            .clickable(actionRunCallback<AdjustAmbientAction>(actionParametersOf(AdjustAmbientAction.deltaKey.to(delta)))),
+            .let {
+                if (controlsEnabled) {
+                    it.clickable(actionRunCallback<AdjustAmbientAction>(actionParametersOf(AdjustAmbientAction.deltaKey.to(delta))))
+                } else {
+                    it
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = symbol,
-            style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Medium, color = GlanceTheme.colors.onSurfaceVariant)
+            style = TextStyle(
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (isDisconnected) GlanceTheme.colors.outline else GlanceTheme.colors.onSurfaceVariant
+            )
         )
     }
 }
 
 @Composable
-private fun AmbientProgress(level: Int, modifier: GlanceModifier) {
+private fun AmbientProgress(level: Int, modifier: GlanceModifier, isDisconnected: Boolean) {
     LinearProgressIndicator(
         progress = level.coerceIn(1, 20) / 20f,
         modifier = modifier.height(3.dp),
-        color = GlanceTheme.colors.primaryContainer,
-        backgroundColor = GlanceTheme.colors.onSurfaceVariant
+        color = if (isDisconnected) GlanceTheme.colors.outline else GlanceTheme.colors.primaryContainer,
+        backgroundColor = if (isDisconnected) GlanceTheme.colors.outline else GlanceTheme.colors.onSurfaceVariant
     )
 }
 
 @Composable
-private fun StatusContent(icon: Int, title: String, subtitle: String, compactWidth: Boolean) {
+private fun StatusContent(
+    icon: Int,
+    title: String,
+    subtitle: String,
+    compactWidth: Boolean,
+    isDisconnected: Boolean,
+    contentColor: androidx.glance.unit.ColorProvider
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Image(
             provider = ImageProvider(icon),
             contentDescription = title,
-            colorFilter = ColorFilter.tint(GlanceTheme.colors.onSecondaryContainer),
+            colorFilter = ColorFilter.tint(contentColor),
             modifier = GlanceModifier.size(if (compactWidth) 20.dp else 24.dp)
         )
         Column(modifier = GlanceModifier.padding(start = 8.dp)) {
             Text(
                 text = title,
                 style = statusTitleText.copy(
-                    color = GlanceTheme.colors.onSecondaryContainer,
+                    color = contentColor,
                     fontSize = if (compactWidth) 13.sp else 14.sp
                 )
             )
             Text(
                 text = subtitle,
                 style = statusSubtitleText.copy(
-                    color = GlanceTheme.colors.onSecondaryContainer,
+                    color = contentColor,
                     fontSize = if (compactWidth) 11.sp else 12.sp
                 ),
                 modifier = GlanceModifier.padding(top = 2.dp)
@@ -507,25 +620,36 @@ private fun StatusContent(icon: Int, title: String, subtitle: String, compactWid
 
 class RefreshWidgetAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        RefreshCoordinator.enqueueRefresh(context.applicationContext)
-        SonyPodsBatteryWidget().update(context, glanceId)
+        if (!refreshActionMutex.tryLock()) return
+
+        val app = context.applicationContext
+        try {
+            try {
+                RefreshCoordinator.awaitRefresh(app, startPolling = true, automatic = false)
+            } finally {
+                SonyPodsBatteryWidgetUpdater.updateAll(app)
+            }
+        } finally {
+            refreshActionMutex.unlock()
+        }
     }
 }
 
 class SetListeningModeAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val mode = parameters[AudioModeKey]?.let(AudioMode::fromStored) ?: return
         val app = context.applicationContext
+        if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) return
+        val mode = parameters[AudioModeKey]?.let(AudioMode::fromStored) ?: return
         val current = BatteryStore.load(app)
         val preferences = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
-        val ambientLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY] ?: current.ambientLevel
+        val ambientLevel = preferences[PENDING_AMBIENT_LEVEL_KEY]
+            ?: preferences[DESIRED_AMBIENT_LEVEL_KEY]
+            ?: current.ambientLevel
         val actionTime = nextUserActionTime(preferences)
         updateAppWidgetState(context, glanceId) { preferences ->
-            preferences[CURRENT_AUDIO_MODE_KEY] = mode.name
-            preferences[DESIRED_AMBIENT_LEVEL_KEY] = ambientLevel
             preferences[LAST_USER_ACTION_TIME] = actionTime
         }
-        SonyPodsBatteryWidget().update(context, glanceId)
+        SonyPodsBatteryWidgetUpdater.update(context, glanceId)
 
         RefreshCoordinator.enqueueSetListeningMode(
             app,
@@ -541,16 +665,19 @@ class AdjustAmbientAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val delta = parameters[deltaKey] ?: return
         val app = context.applicationContext
+        if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) return
         val current = BatteryStore.load(app)
         val preferences = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
-        val currentLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY] ?: current.ambientLevel
+        val currentLevel = preferences[PENDING_AMBIENT_LEVEL_KEY]
+            ?: preferences[DESIRED_AMBIENT_LEVEL_KEY]
+            ?: current.ambientLevel
         val ambientLevel = (currentLevel + delta).coerceIn(1, 20)
         val actionTime = nextUserActionTime(preferences)
         updateAppWidgetState(context, glanceId) { state ->
-            state[DESIRED_AMBIENT_LEVEL_KEY] = ambientLevel
+            state[PENDING_AMBIENT_LEVEL_KEY] = ambientLevel
             state[LAST_USER_ACTION_TIME] = actionTime
         }
-        SonyPodsBatteryWidget().update(context, glanceId)
+        SonyPodsBatteryWidgetUpdater.update(context, glanceId)
         RefreshCoordinator.enqueueAmbientLevel(
             app,
             ambientLevel,
@@ -567,6 +694,7 @@ class AdjustAmbientAction : ActionCallback {
 class ToggleFocusOnVoiceAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val app = context.applicationContext
+        if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) return
         val current = BatteryStore.load(app)
         RefreshCoordinator.enqueueSetListeningMode(
             app,

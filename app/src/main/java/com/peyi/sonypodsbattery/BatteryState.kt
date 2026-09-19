@@ -13,6 +13,7 @@ data class BatteryState(
     val ambientLevel: Int = 20,
     val focusOnVoice: Boolean = false,
     val updatedAt: Long = 0L,
+    val lastCheckedAt: Long = 0L,
     val status: String = "Ready"
 )
 
@@ -31,6 +32,7 @@ object BatteryStore {
             ambientLevel = p.getInt("ambient_level", 20).coerceIn(1, 20),
             focusOnVoice = p.getBoolean("focus_on_voice", false),
             updatedAt = p.getLong("updated_at", 0L),
+            lastCheckedAt = p.getLong("last_checked_at", 0L),
             status = p.getString("status", "Ready") ?: "Ready"
         )
     }
@@ -48,6 +50,7 @@ object BatteryStore {
             putInt("ambient_level", state.ambientLevel)
             putBoolean("focus_on_voice", state.focusOnVoice)
             putLong("updated_at", state.updatedAt)
+            putLong("last_checked_at", state.lastCheckedAt)
             putString("status", state.status)
         }.apply()
     }
@@ -80,9 +83,16 @@ object DiagnosticsStore {
     }
 
     fun text(context: Context): String = buildString {
+        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        @Suppress("DEPRECATION")
+        val versionCode = if (android.os.Build.VERSION.SDK_INT >= 28) {
+            packageInfo.longVersionCode
+        } else {
+            packageInfo.versionCode.toLong()
+        }
         appendLine("Sony Pods Battery diagnostics")
         appendLine("Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
-        appendLine("App 0.3.2")
+        appendLine("App ${packageInfo.versionName} (versionCode $versionCode)")
         append(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "No events yet"))
     }
 }
