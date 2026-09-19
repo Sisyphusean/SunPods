@@ -30,6 +30,8 @@ class MainActivity : Activity() {
     private lateinit var permissionSettings: Button
     private lateinit var companionSetup: Button
     private lateinit var companionInstructions: TextView
+    private lateinit var setupStatus: TextView
+    private lateinit var setupContinue: Button
     private lateinit var ambientSlider: SeekBar
     private lateinit var ambientValue: TextView
     private lateinit var voiceFocus: CheckBox
@@ -38,28 +40,19 @@ class MainActivity : Activity() {
     private var pendingRefresh = false
     private var permissionRequestInFlight = false
     private var companionAssociationInFlight = false
-    private var onboardingSetupPending = false
+    private var showingCompanionSetup = false
+    private var pendingCompanionPicker = false
+    private var pendingDashboardAfterNotification = false
     private val modeButtons = mutableMapOf<ListeningMode, Button>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(buildContent())
-        render(BatteryStore.load(this))
-        refresh.setOnClickListener { requestRefresh() }
-        permissionSettings.setOnClickListener { openPermissionSettings() }
-        companionSetup.setOnClickListener { setupCompanionAssociation() }
-        findViewById<Button>(ID_DIAGNOSTICS).setOnClickListener { shareDiagnostics() }
         EarbudCompanionManager.startObservingPresence(this)
-        if (shouldStartFirstRunSetup()) {
-            getPreferences(MODE_PRIVATE).edit()
-                .putBoolean(COMPANION_ONBOARDING_STARTED, true)
-                .apply()
-            onboardingSetupPending = true
+        if (requiresCompanionSetup()) {
+            showCompanionSetupScreen()
         } else {
-            requestRefresh()
+            showDashboard()
         }
-        updateCompanionUi()
-        continuePermissionFlow()
     }
 
     override fun onResume() {
@@ -186,6 +179,80 @@ class MainActivity : Activity() {
         return ScrollView(this).apply { setBackgroundColor(getColor(R.color.black)); addView(body) }
     }
 
+    private fun showCompanionSetupScreen() {
+        showingCompanionSetup = true
+        setContentView(buildCompanionSetupContent())
+    }
+
+    private fun buildCompanionSetupContent(): View {
+        val density = resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt()
+        fun text(value: String, size: Float, color: Int = getColor(R.color.white)) = TextView(this).apply {
+            this.text = value
+            textSize = size
+            setTextColor(color)
+        }
+
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(28), dp(20), dp(28))
+            setBackgroundColor(getColor(R.color.black))
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        body.addView(text("SONY PODS", 12f, getColor(R.color.accent)).apply { letterSpacing = .16f })
+        body.addView(text("Set up your WF-1000XM5", 28f).apply {
+            setTypeface(typeface, Typeface.BOLD)
+        }, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(10), 0, dp(22)) })
+        body.addView(text("Before we look for your earbuds", 18f).apply {
+            setTypeface(typeface, Typeface.BOLD)
+        })
+        body.addView(text(
+            "Android can only find the earbuds while they are in pairing mode.\n\n" +
+                "1. Put both earbuds in the open charging case.\n" +
+                "2. Hold the pairing button on the back for about 5 seconds.\n" +
+                "3. Wait until the blue indicator starts flashing.\n\n" +
+                "When the blue light is flashing, tap the button below.",
+            16f,
+            getColor(R.color.muted)
+        ).apply { setLineSpacing(0f, 1.25f) }, LinearLayout.LayoutParams(-1, -2).apply {
+            setMargins(0, dp(10), 0, dp(18))
+        })
+        setupStatus = text("", 14f, getColor(R.color.muted)).apply {
+            setLineSpacing(0f, 1.2f)
+            visibility = View.GONE
+        }
+        body.addView(setupStatus, LinearLayout.LayoutParams(-1, -2))
+
+        page.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        setupContinue = Button(this).apply {
+            text = "DEVICE IN PAIRING MODE"
+            textSize = 14f
+            setTextColor(Color.BLACK)
+            background = getDrawable(R.drawable.button_background)
+            isAllCaps = false
+            setOnClickListener { setupCompanionAssociation() }
+        }
+        page.addView(setupContinue, LinearLayout.LayoutParams(-1, dp(56)).apply {
+            setMargins(0, dp(16), 0, 0)
+        })
+        return page
+    }
+
+    private fun showDashboard() {
+        showingCompanionSetup = false
+        setContentView(buildContent())
+        render(BatteryStore.load(this))
+        refresh.setOnClickListener { requestRefresh() }
+        permissionSettings.setOnClickListener { openPermissionSettings() }
+        companionSetup.setOnClickListener { setupCompanionAssociation() }
+        findViewById<Button>(ID_DIAGNOSTICS).setOnClickListener { shareDiagnostics() }
+        updatePermissionUi()
+        updateCompanionUi()
+        requestRefresh()
+    }
+
     private fun requestRefresh() {
         pendingRefresh = true
         continuePermissionFlow()
@@ -205,16 +272,6 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
             status.text = "Allow notifications so background refresh can show its status."
             return
-        }
-        if (onboardingSetupPending) {
-            onboardingSetupPending = false
-            if (EarbudCompanionManager.isSupported(this) &&
-                !EarbudCompanionManager.isAssociated(this)
-            ) {
-                status.text = "Put your earbuds in pairing mode, then continue below."
-                updateCompanionUi()
-                return
-            }
         }
         if (!pendingRefresh) return
         pendingRefresh = false
@@ -284,13 +341,26 @@ class MainActivity : Activity() {
             updatePermissionUi()
             updateCompanionUi()
             if (hasBluetoothPermission()) {
-                status.text = "Bluetooth access granted"
-                continuePermissionFlow()
+                if (pendingCompanionPicker) {
+                    pendingCompanionPicker = false
+                    setupCompanionAssociation()
+                } else if (::status.isInitialized) {
+                    status.text = "Bluetooth access granted"
+                    continuePermissionFlow()
+                }
+            } else if (showingCompanionSetup) {
+                setupStatus.text = "Nearby devices permission is required before Android can look for your earbuds."
+                setupStatus.visibility = View.VISIBLE
             } else {
                 status.text = "Nearby devices is blocked. Open Bluetooth permission settings below."
             }
         } else if (requestCode == REQUEST_NOTIFICATIONS) {
-            continuePermissionFlow()
+            if (pendingDashboardAfterNotification) {
+                pendingDashboardAfterNotification = false
+                showDashboard()
+            } else {
+                continuePermissionFlow()
+            }
         }
     }
 
@@ -323,29 +393,59 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun shouldStartFirstRunSetup() =
+    private fun requiresCompanionSetup() =
         EarbudCompanionManager.isSupported(this) &&
-            !EarbudCompanionManager.isAssociated(this) &&
-            !getPreferences(MODE_PRIVATE).getBoolean(COMPANION_ONBOARDING_STARTED, false)
+            !EarbudCompanionManager.isAssociated(this)
 
     private fun setupCompanionAssociation() {
         if (!hasBluetoothPermission()) {
-            status.text = "Allow Nearby devices first."
-            requestRefresh()
+            if (showingCompanionSetup) {
+                pendingCompanionPicker = true
+                permissionRequestInFlight = true
+                setupStatus.text = "Allow Nearby devices so Android can look for your earbuds."
+                setupStatus.visibility = View.VISIBLE
+                requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BLUETOOTH)
+            } else {
+                status.text = "Allow Nearby devices first."
+                requestRefresh()
+            }
             return
         }
         if (companionAssociationInFlight) return
         companionAssociationInFlight = true
-        status.text = "Follow the one-time Android setup to enable automatic refresh."
-        updateCompanionUi()
+        if (showingCompanionSetup) {
+            setupContinue.isEnabled = false
+            setupStatus.text = "Looking for a device in Android…"
+            setupStatus.visibility = View.VISIBLE
+        } else {
+            status.text = "Follow the one-time Android setup to enable automatic refresh."
+            updateCompanionUi()
+        }
         EarbudCompanionManager.associate(
             this,
-            onStatus = { message -> status.text = message },
+            onStatus = { message ->
+                runOnUiThread {
+                    if (showingCompanionSetup) {
+                        setupStatus.text = message
+                        setupStatus.visibility = View.VISIBLE
+                    } else {
+                        status.text = message
+                    }
+                }
+            },
             onFinished = { success ->
                 runOnUiThread {
                     companionAssociationInFlight = false
-                    if (!success) status.text = "Automatic refresh setup could not be completed."
-                    updateCompanionUi()
+                    if (showingCompanionSetup) {
+                        if (!success) {
+                            setupStatus.text = "Android could not open the device picker. Put the earbuds in pairing mode and try again."
+                            setupStatus.visibility = View.VISIBLE
+                        }
+                        setupContinue.isEnabled = true
+                    } else {
+                        if (!success) status.text = "Automatic refresh setup could not be completed."
+                        updateCompanionUi()
+                    }
                 }
             }
         )
@@ -357,13 +457,36 @@ class MainActivity : Activity() {
         if (requestCode != EarbudCompanionManager.REQUEST_ASSOCIATION) return
         companionAssociationInFlight = false
         if (EarbudCompanionManager.handleAssociationResult(this, resultCode, data)) {
-            status.text = "Automatic background refresh enabled"
-            updateCompanionUi()
-            requestRefresh()
+            if (showingCompanionSetup) {
+                setupStatus.text = "Automatic background refresh enabled."
+                setupStatus.visibility = View.VISIBLE
+                requestNotificationsThenShowDashboard()
+            } else {
+                status.text = "Automatic background refresh enabled"
+                updateCompanionUi()
+                requestRefresh()
+            }
         } else {
-            status.text = "Automatic background refresh setup was cancelled"
-            updateCompanionUi()
+            if (showingCompanionSetup) {
+                setupStatus.text = "Setup cancelled. Put the earbuds in pairing mode and try again."
+                setupStatus.visibility = View.VISIBLE
+                setupContinue.isEnabled = true
+            } else {
+                status.text = "Automatic background refresh setup was cancelled"
+                updateCompanionUi()
+            }
         }
+    }
+
+    private fun requestNotificationsThenShowDashboard() {
+        if (shouldRequestNotifications()) {
+            pendingDashboardAfterNotification = true
+            permissionRequestInFlight = true
+            getPreferences(MODE_PRIVATE).edit().putBoolean(NOTIFICATION_REQUESTED, true).apply()
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+            return
+        }
+        showDashboard()
     }
 
     private fun openPermissionSettings() {
@@ -388,6 +511,5 @@ class MainActivity : Activity() {
         private const val REQUEST_BLUETOOTH = 100
         private const val REQUEST_NOTIFICATIONS = 101
         private const val NOTIFICATION_REQUESTED = "notification_permission_requested"
-        private const val COMPANION_ONBOARDING_STARTED = "companion_onboarding_started"
     }
 }
