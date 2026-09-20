@@ -94,6 +94,7 @@ fun OnboardingWelcomeScreen(onContinue: () -> Unit) {
                     PrototypeImage(R.drawable.sonypods_earbuds, "WF-1000XM5 product reference render")
                 }
             },
+            showBrand = true,
             actionLabel = "Get started",
             onAction = onContinue,
         )
@@ -541,6 +542,7 @@ private fun OnboardingPage(
     subtitle: String,
     progress: Float,
     content: @Composable () -> Unit,
+    showBrand: Boolean = false,
     actionLabel: String,
     actionEnabled: Boolean = true,
     actionFilled: Boolean = true,
@@ -557,10 +559,7 @@ private fun OnboardingPage(
                 .fillMaxSize()
                 .padding(horizontal = 24.dp, vertical = 18.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            if (showBrand) {
                 Text(
                     text = "SONPODS",
                     style = MaterialTheme.typography.labelLarge,
