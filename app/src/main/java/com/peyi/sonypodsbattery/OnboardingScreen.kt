@@ -604,11 +604,11 @@ private fun OnboardingPage(
                             .height(56.dp),
                         shape = OnboardingPillShape,
                     ) {
-                        if (secondaryActionIcon != null) {
-                            Icon(secondaryActionIcon, contentDescription = null)
-                            Spacer(Modifier.size(8.dp))
-                        }
                         Text(secondaryActionLabel)
+                        if (secondaryActionIcon != null) {
+                            Spacer(Modifier.size(8.dp))
+                            Icon(secondaryActionIcon, contentDescription = null)
+                        }
                     }
                     Spacer(Modifier.height(12.dp))
                 }
