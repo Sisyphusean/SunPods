@@ -49,6 +49,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 
 private const val ONBOARDING_STEPS = 7f
 private val OnboardingPillShape = RoundedCornerShape(percent = 50)
@@ -57,6 +62,23 @@ private val OnboardingErrorCardColor = Color(0xFF2B1B1D)
 private val OnboardingErrorTextColor = Color(0xFFFFB4AB)
 private val OnboardingWarningCardColor = Color(0xFF2B2519)
 private val OnboardingWarningTextColor = Color(0xFFF2D38A)
+
+@Composable
+fun OnboardingAnimatedHost(content: @Composable () -> Unit) {
+    AnimatedContent(
+        targetState = content,
+        transitionSpec = {
+            fadeIn(
+                animationSpec = tween(durationMillis = 210, delayMillis = 90),
+            ) togetherWith fadeOut(
+                animationSpec = tween(durationMillis = 90),
+            )
+        },
+        label = "onboarding_page_transition",
+    ) { page ->
+        page()
+    }
+}
 
 @Composable
 private fun OnboardingTheme(content: @Composable () -> Unit) {

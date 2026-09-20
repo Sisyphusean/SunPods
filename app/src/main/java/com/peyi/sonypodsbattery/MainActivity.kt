@@ -24,6 +24,7 @@ import android.widget.TextView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.compose.runtime.Composable
 import java.text.DateFormat
 import java.util.Date
 
@@ -49,6 +50,8 @@ class MainActivity : ComponentActivity() {
     private var showingWelcome = false
     private var emulatorMockEnabled = false
     private var emulatorMockState = MockEarbudController.initialState()
+    private val onboardingContent = mutableStateOf<(@Composable () -> Unit)?>(null)
+    private var onboardingHostInitialized = false
     private val setupMessage = mutableStateOf<String?>(null)
     private val setupActionLabel = mutableStateOf("")
     private val setupActionEnabled = mutableStateOf(true)
@@ -227,11 +230,24 @@ class MainActivity : ComponentActivity() {
     private fun shouldShowWelcome() =
         !getPreferences(MODE_PRIVATE).getBoolean(WELCOME_SEEN, false)
 
+    private fun showOnboardingContent(content: @Composable () -> Unit) {
+        onboardingContent.value = content
+        if (onboardingHostInitialized) return
+
+        onboardingHostInitialized = true
+        setContent {
+            val currentContent = onboardingContent.value
+            if (currentContent != null) {
+                OnboardingAnimatedHost(currentContent)
+            }
+        }
+    }
+
     private fun showWelcomeScreen() {
         showingCompanionSetup = true
         showingWelcome = true
         initialSetupStage = null
-        setContent {
+        showOnboardingContent {
             OnboardingWelcomeScreen(
                 onContinue = {
                     getPreferences(MODE_PRIVATE).edit()
@@ -250,7 +266,7 @@ class MainActivity : ComponentActivity() {
         initialSetupStage = InitialSetupStage.PAIRING
         setupMessage.value = null
         setupActionEnabled.value = true
-        setContent {
+        showOnboardingContent {
             OnboardingPairingScreen(
                 message = setupMessage.value,
                 actionEnabled = setupActionEnabled.value,
@@ -274,7 +290,7 @@ class MainActivity : ComponentActivity() {
         showingWelcome = false
         initialSetupStage = InitialSetupStage.SEARCHING
         setupMessage.value = null
-        setContent {
+        showOnboardingContent {
             OnboardingSearchingScreen(
                 message = setupMessage.value,
                 onCancel = { showCompanionSetupScreen() },
@@ -287,7 +303,7 @@ class MainActivity : ComponentActivity() {
         showingWelcome = false
         initialSetupStage = InitialSetupStage.BLUETOOTH_OFF
         setupMessage.value = null
-        setContent {
+        showOnboardingContent {
             OnboardingBluetoothOffScreen(
                 onRetry = { setupCompanionAssociation() },
                 onOpenSettings = { openBluetoothSettings() },
@@ -300,7 +316,7 @@ class MainActivity : ComponentActivity() {
         showingWelcome = false
         initialSetupStage = InitialSetupStage.NOT_FOUND
         setupMessage.value = null
-        setContent {
+        showOnboardingContent {
             OnboardingNotFoundScreen(
                 onRetry = { setupCompanionAssociation() },
                 onHelp = { showPairingHelpScreen() },
@@ -312,7 +328,7 @@ class MainActivity : ComponentActivity() {
         showingCompanionSetup = true
         showingWelcome = false
         initialSetupStage = InitialSetupStage.PAIRING
-        setContent {
+        showOnboardingContent {
             OnboardingHelpScreen(
                 onBack = { showCompanionSetupScreen() },
                 onGotIt = { setupCompanionAssociation() },
@@ -325,7 +341,7 @@ class MainActivity : ComponentActivity() {
         showingWelcome = false
         initialSetupStage = InitialSetupStage.FOUND
         setupMessage.value = null
-        setContent {
+        showOnboardingContent {
             OnboardingFoundScreen(
                 onConnect = { showConnectedScreen() },
                 onSearchAgain = { showCompanionSetupScreen() },
@@ -338,7 +354,7 @@ class MainActivity : ComponentActivity() {
         showingWelcome = false
         initialSetupStage = InitialSetupStage.PAIR_FAILED
         setupActionEnabled.value = true
-        setContent {
+        showOnboardingContent {
             OnboardingPairFailedScreen(
                 onRetry = { showCompanionSetupScreen() },
                 onOpenSettings = { openBluetoothSettings() },
@@ -350,7 +366,7 @@ class MainActivity : ComponentActivity() {
         showingCompanionSetup = true
         showingWelcome = false
         initialSetupStage = InitialSetupStage.CONNECTED
-        setContent {
+        showOnboardingContent {
             OnboardingConnectedScreen(onContinue = { showDashboard() })
         }
     }
@@ -373,7 +389,7 @@ class MainActivity : ComponentActivity() {
         setupActionOpensSettings = false
         val nearby = stage == InitialSetupStage.NEARBY_DEVICES
         setupActionLabel.value = "Continue"
-        setContent {
+        showOnboardingContent {
             OnboardingPermissionScreen(
                 nearby = nearby,
                 denied = false,
@@ -404,7 +420,7 @@ class MainActivity : ComponentActivity() {
         setupActionEnabled.value = true
         setupActionOpensSettings = false
         val nearby = stage == InitialSetupStage.NEARBY_DENIED
-        setContent {
+        showOnboardingContent {
             OnboardingPermissionScreen(
                 nearby = nearby,
                 denied = true,
@@ -427,7 +443,7 @@ class MainActivity : ComponentActivity() {
         initialSetupStage = stage
         setupMessage.value = null
         val nearby = stage == InitialSetupStage.NEARBY_SETTINGS
-        setContent {
+        showOnboardingContent {
             OnboardingPermissionSettingsScreen(
                 nearby = nearby,
                 onBack = {
@@ -468,6 +484,7 @@ class MainActivity : ComponentActivity() {
     private fun showDashboard() {
         showingWelcome = false
         showingCompanionSetup = false
+        onboardingHostInitialized = false
         showSystemBars()
         setContentView(buildContent())
         render(BatteryStore.load(this))
