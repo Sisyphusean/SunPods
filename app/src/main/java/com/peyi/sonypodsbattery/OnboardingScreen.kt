@@ -1,6 +1,7 @@
 package com.peyi.sonypodsbattery
 
 import android.os.Build
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -41,7 +42,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -74,6 +77,8 @@ fun OnboardingWelcomeScreen(onContinue: () -> Unit) {
             subtitle = "Everything you use most, without digging through menus.",
             icon = Icons.Rounded.Headphones,
             progress = null,
+            imageRes = R.drawable.sonypods_earbuds,
+            imageDescription = "Sony WF-1000XM5 earbuds",
             content = {
                 InfoCard(
                     title = "Your WF-1000XM5, at a glance",
@@ -152,6 +157,8 @@ fun OnboardingPairingScreen(
             subtitle = "Keep both earbuds in the case and leave the lid open.",
             icon = Icons.Rounded.BluetoothSearching,
             progress = 0.75f,
+            imageRes = R.drawable.sonypods_pairing_case,
+            imageDescription = "Rear view of the Sony WF-1000XM5 charging case showing the pairing button",
             content = {
                 InfoCard(
                     title = "Press and hold the pairing button on the back",
@@ -196,6 +203,8 @@ private fun OnboardingPage(
     subtitle: String,
     icon: ImageVector,
     progress: Float?,
+    imageRes: Int? = null,
+    imageDescription: String? = null,
     content: @Composable () -> Unit,
     actionLabel: String,
     actionEnabled: Boolean = true,
@@ -235,6 +244,17 @@ private fun OnboardingPage(
                         .fillMaxSize()
                         .padding(18.dp),
                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+            if (imageRes != null) {
+                Spacer(Modifier.height(20.dp))
+                Image(
+                    painter = painterResource(imageRes),
+                    contentDescription = imageDescription,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp),
+                    contentScale = ContentScale.Fit,
                 )
             }
             Spacer(Modifier.height(24.dp))
