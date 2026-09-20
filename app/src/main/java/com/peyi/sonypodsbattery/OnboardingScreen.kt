@@ -236,6 +236,8 @@ fun OnboardingPairingScreen(
     actionEnabled: Boolean,
     onHelp: () -> Unit,
     onAction: () -> Unit,
+    mockEnabled: Boolean = false,
+    onMockDevice: (() -> Unit)? = null,
 ) {
     OnboardingTheme {
         OnboardingPage(
@@ -282,6 +284,8 @@ fun OnboardingPairingScreen(
             secondaryActionLabel = "Need help",
             secondaryActionIcon = Icons.Rounded.Help,
             onSecondaryAction = onHelp,
+            tertiaryActionLabel = if (mockEnabled) "Use emulator mock" else null,
+            onTertiaryAction = onMockDevice,
         )
     }
 }

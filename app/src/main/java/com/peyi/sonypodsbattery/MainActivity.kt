@@ -7,6 +7,7 @@ import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.graphics.Color
 import android.graphics.Typeface
@@ -46,6 +47,8 @@ class MainActivity : ComponentActivity() {
     private var companionAssociationInFlight = false
     private var showingCompanionSetup = false
     private var showingWelcome = false
+    private var emulatorMockEnabled = false
+    private var emulatorMockState = MockEarbudController.initialState()
     private val setupMessage = mutableStateOf<String?>(null)
     private val setupActionLabel = mutableStateOf("")
     private val setupActionEnabled = mutableStateOf(true)
@@ -71,6 +74,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        emulatorMockEnabled = isDebugBuild() &&
+            intent.getBooleanExtra(EXTRA_EMULATOR_MOCK, false)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = false
@@ -251,6 +256,12 @@ class MainActivity : ComponentActivity() {
                 actionEnabled = setupActionEnabled.value,
                 onHelp = { showPairingHelpScreen() },
                 onAction = { setupCompanionAssociation() },
+                mockEnabled = isDebugBuild(),
+                onMockDevice = {
+                    emulatorMockEnabled = true
+                    emulatorMockState = MockEarbudController.initialState()
+                    showFoundScreen()
+                },
             )
         }
     }
@@ -466,7 +477,11 @@ class MainActivity : ComponentActivity() {
         findViewById<Button>(ID_DIAGNOSTICS).setOnClickListener { shareDiagnostics() }
         updatePermissionUi()
         updateCompanionUi()
-        requestRefresh()
+        if (emulatorMockEnabled) {
+            render(emulatorMockState)
+        } else {
+            requestRefresh()
+        }
     }
 
     private fun exitOnboarding() {
@@ -477,6 +492,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestRefresh() {
+        if (emulatorMockEnabled) {
+            emulatorMockState = MockEarbudController.refreshedState(emulatorMockState)
+            render(emulatorMockState)
+            return
+        }
         pendingRefresh = true
         continuePermissionFlow()
     }
@@ -533,6 +553,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun changeListeningMode(mode: ListeningMode) {
+        if (emulatorMockEnabled) {
+            emulatorMockState = MockEarbudController.modeState(
+                emulatorMockState,
+                mode,
+                ambientSlider.progress + 1,
+                voiceFocus.isChecked,
+            )
+            render(emulatorMockState)
+            return
+        }
         if (!hasBluetoothPermission()) {
             permissionRequestInFlight = true
             requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BLUETOOTH)
@@ -551,6 +581,9 @@ class MainActivity : ComponentActivity() {
 
     private fun hasBluetoothPermission() = Build.VERSION.SDK_INT < 31 ||
         checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+
+    private fun isDebugBuild() =
+        (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     private fun hasNotificationPermission() = Build.VERSION.SDK_INT < 33 ||
         checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -602,6 +635,11 @@ class MainActivity : ComponentActivity() {
 
     private fun updateCompanionUi() {
         if (!::companionSetup.isInitialized || !::companionInstructions.isInitialized) return
+        if (emulatorMockEnabled) {
+            companionSetup.visibility = View.GONE
+            companionInstructions.visibility = View.GONE
+            return
+        }
         val supported = EarbudCompanionManager.isSupported(this)
         val visible = supported && hasBluetoothPermission()
         val associated = EarbudCompanionManager.isAssociated(this)
@@ -740,5 +778,6 @@ class MainActivity : ComponentActivity() {
         private const val REQUEST_NOTIFICATIONS = 101
         private const val NOTIFICATION_REQUESTED = "notification_permission_requested"
         private const val WELCOME_SEEN = "onboarding_welcome_seen"
+        private const val EXTRA_EMULATOR_MOCK = "mock_earbuds"
     }
 }
