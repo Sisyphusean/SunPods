@@ -230,6 +230,7 @@ class MainActivity : ComponentActivity() {
             OnboardingPairingScreen(
                 message = setupMessage.value,
                 actionEnabled = setupActionEnabled.value,
+                onHelp = { showPairingHelpScreen() },
                 onAction = { setupCompanionAssociation() },
             )
         }
@@ -251,8 +252,6 @@ class MainActivity : ComponentActivity() {
             OnboardingSearchingScreen(
                 message = setupMessage.value,
                 onCancel = { showCompanionSetupScreen() },
-                onBluetoothOff = { showBluetoothOffScreen() },
-                onNotFound = { showNotFoundScreen() },
             )
         }
     }
@@ -264,8 +263,8 @@ class MainActivity : ComponentActivity() {
         setupMessage.value = null
         setContent {
             OnboardingBluetoothOffScreen(
-                onRetry = { showCompanionSetupScreen() },
-                onOpenSettings = { openPermissionSettings() },
+                onRetry = { setupCompanionAssociation() },
+                onOpenSettings = { openBluetoothSettings() },
             )
         }
     }
@@ -277,8 +276,20 @@ class MainActivity : ComponentActivity() {
         setupMessage.value = null
         setContent {
             OnboardingNotFoundScreen(
-                onRetry = { showCompanionSetupScreen() },
-                onHelp = { showCompanionSetupScreen() },
+                onRetry = { setupCompanionAssociation() },
+                onHelp = { showPairingHelpScreen() },
+            )
+        }
+    }
+
+    private fun showPairingHelpScreen() {
+        showingCompanionSetup = true
+        showingWelcome = false
+        initialSetupStage = InitialSetupStage.PAIRING
+        setContent {
+            OnboardingHelpScreen(
+                onBack = { showCompanionSetupScreen() },
+                onGotIt = { setupCompanionAssociation() },
             )
         }
     }
@@ -304,7 +315,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             OnboardingPairFailedScreen(
                 onRetry = { showCompanionSetupScreen() },
-                onOpenSettings = { openPermissionSettings() },
+                onOpenSettings = { openBluetoothSettings() },
             )
         }
     }
@@ -335,7 +346,7 @@ class MainActivity : ComponentActivity() {
         setupActionEnabled.value = true
         setupActionOpensSettings = false
         val nearby = stage == InitialSetupStage.NEARBY_DEVICES
-        setupActionLabel.value = if (nearby) "Allow Nearby devices" else "Allow notifications"
+        setupActionLabel.value = "Continue"
         setContent {
             OnboardingPermissionScreen(
                 nearby = nearby,
@@ -381,7 +392,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showInitialPermissionDenied(permissionName: String) {
         setupMessage.value = "$permissionName permission is required to continue setup. Try again, or enable it from App info if Android no longer shows the prompt."
-        setupActionLabel.value = "Try again"
+        setupActionLabel.value = if (permissionName == "Nearby devices") "Allow access" else "Allow notifications"
         setupActionEnabled.value = true
         setupActionOpensSettings = false
     }
@@ -591,7 +602,7 @@ class MainActivity : ComponentActivity() {
                     companionAssociationInFlight = false
                     if (showingCompanionSetup) {
                         if (!success) {
-                            showPairFailedScreen()
+                            showNotFoundScreen()
                         }
                     } else {
                         if (!success) status.text = "Automatic refresh setup could not be completed."
@@ -633,6 +644,10 @@ class MainActivity : ComponentActivity() {
         startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
             data = Uri.parse("package:$packageName")
         })
+    }
+
+    private fun openBluetoothSettings() {
+        startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS))
     }
 
     private fun shareDiagnostics() {
