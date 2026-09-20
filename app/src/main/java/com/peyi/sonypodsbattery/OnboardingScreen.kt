@@ -2,6 +2,7 @@ package com.peyi.sonypodsbattery
 
 import android.os.Build
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,34 +17,29 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BluetoothDisabled
 import androidx.compose.material.icons.rounded.BluetoothSearching
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Help
 import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -53,6 +49,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.Composable
+
+private const val ONBOARDING_STEPS = 7f
 
 @Composable
 private fun OnboardingTheme(content: @Composable () -> Unit) {
@@ -81,16 +80,8 @@ fun OnboardingWelcomeScreen(onContinue: () -> Unit) {
         OnboardingPage(
             title = "Control your earbuds without the clutter",
             subtitle = "Everything you use most, without digging through menus.",
-            icon = Icons.Rounded.Headphones,
-            progress = null,
-            imageRes = R.drawable.sonypods_earbuds,
-            imageDescription = "Sony WF-1000XM5 earbuds",
-            content = {
-                InfoCard(
-                    title = "Your WF-1000XM5, at a glance",
-                    body = "See battery levels, switch listening modes, and keep the connection status close at hand.",
-                )
-            },
+            progress = 1f / ONBOARDING_STEPS,
+            content = { PrototypeImage(R.drawable.sonypods_earbuds, "WF-1000XM5 product reference render") },
             actionLabel = "Get started",
             onAction = onContinue,
         )
@@ -106,40 +97,71 @@ fun OnboardingPermissionScreen(
     onAction: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    val title = if (nearby) "Find your earbuds" else "Allow notifications"
-    val subtitle = if (nearby) {
-        "Allow access to nearby devices so SONPODS can connect to your earbuds."
-    } else {
-        "Notifications are required for the connection state and battery alert experience in this MVP."
+    val denied = message != null
+    val title = when {
+        nearby && denied -> "Nearby devices is required"
+        nearby -> "Find your earbuds"
+        denied -> "Notifications are required"
+        else -> "Allow notifications"
+    }
+    val subtitle = when {
+        nearby && denied -> "SONPODS cannot discover or control your earbuds without this permission."
+        nearby -> "Allow access to nearby devices so SONPODS can connect to your earbuds."
+        denied -> "You need to allow notifications to continue onboarding."
+        else -> "Notifications are required for this MVP."
     }
     val body = if (nearby) {
-        "Nearby devices are required for discovery, live battery, listening modes, and Bluetooth controls."
+        if (denied) {
+            "Try the permission request again. If Android stops offering the prompt, enable the permission from App info."
+        } else {
+            "Required for discovery, live battery, ANC, Ambient Sound, EQ, and other Bluetooth controls."
+        }
     } else {
-        "SONPODS uses notifications to keep you informed when your earbuds connect and when battery refreshes complete."
+        if (denied) {
+            "Without notification permission, this MVP does not meet its required battery and connection alert behavior."
+        } else {
+            "SONPODS needs notifications for the required connection state and battery alert experience in this MVP."
+        }
     }
+    val icon = if (denied) Icons.Rounded.Warning
+    else if (nearby) Icons.Rounded.BluetoothSearching
+    else Icons.Rounded.Notifications
+    val nextPermission = if (nearby) "Nearby devices" else "notification"
     OnboardingTheme {
         OnboardingPage(
             title = title,
             subtitle = subtitle,
-            icon = if (nearby) Icons.Rounded.BluetoothSearching else Icons.Rounded.Notifications,
-            progress = if (nearby) 0.25f else 0.5f,
+            progress = if (nearby) 2f / ONBOARDING_STEPS else 3f / ONBOARDING_STEPS,
             content = {
-                InfoCard(title = if (nearby) "Nearby devices" else "Notifications", body = body)
-                if (message != null) {
-                    Spacer(Modifier.height(12.dp))
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                    containerColor = if (denied) MaterialTheme.colorScheme.errorContainer
+                    else MaterialTheme.colorScheme.surfaceVariant,
+                )) {
+                    Column(Modifier.padding(18.dp)) {
+                        IconTile(icon, denied)
+                        Spacer(Modifier.height(12.dp))
                         Text(
-                            text = message,
-                            modifier = Modifier.padding(16.dp),
-                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            body,
                             style = MaterialTheme.typography.bodyMedium,
+                            color = if (denied) MaterialTheme.colorScheme.onErrorContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        if (!denied) {
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                "Android will ask for " + nextPermission + " permission next.",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
-                    Spacer(Modifier.height(8.dp))
+                }
+                if (denied) {
+                    Spacer(Modifier.height(12.dp))
                     OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Rounded.Settings, contentDescription = null)
                         Spacer(Modifier.size(8.dp))
-                        Text("Open app settings")
+                        Text("Open settings instead")
                     }
                 }
             },
@@ -154,47 +176,52 @@ fun OnboardingPermissionScreen(
 fun OnboardingPairingScreen(
     message: String?,
     actionEnabled: Boolean,
+    onHelp: () -> Unit,
     onAction: () -> Unit,
 ) {
-    var showHelp by remember { mutableStateOf(false) }
     OnboardingTheme {
         OnboardingPage(
             title = "Put your earbuds in pairing mode",
             subtitle = "Keep both earbuds in the case and leave the lid open.",
-            icon = Icons.Rounded.BluetoothSearching,
-            progress = 0.75f,
-            imageRes = R.drawable.sonypods_pairing_case,
-            imageDescription = "Rear view of the Sony WF-1000XM5 charging case showing the pairing button",
-            imageBeforeTitle = false,
+            progress = 4f / ONBOARDING_STEPS,
             content = {
-                InfoCard(
-                    title = "Press and hold the pairing button on the back",
-                    body = "Keep the lid open, then hold the rear button for about 5 seconds until the blue indicator repeatedly flashes twice.",
-                )
-                TextButton(onClick = { showHelp = !showHelp }) {
-                    Text(if (showHelp) "Hide pairing help" else "Need help?")
-                }
-                if (showHelp) {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text("Pairing checklist", fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                "1. Open the case lid\n2. Keep both earbuds inside\n3. Hold the rear button for 5+ seconds\n4. Wait for the blue light to flash twice repeatedly",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                )) {
+                    Column {
+                        PrototypeImage(
+                            R.drawable.sonypods_pairing_case,
+                            "Rear view of Sony WF-1000XM5 charging case showing the pairing button and USB-C port",
+                        )
+                        Text(
+                            "Press and hold the pairing button on the back.",
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Keep the lid open, then hold the rear button for about 5 seconds or more, until the blue indicator repeatedly flashes twice.",
+                            modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
                 if (message != null) {
                     Spacer(Modifier.height(12.dp))
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                         Text(
-                            text = message,
+                            message,
                             modifier = Modifier.padding(16.dp),
                             color = MaterialTheme.colorScheme.onErrorContainer,
                         )
                     }
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(onClick = onHelp, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.Help, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Need help")
                 }
             },
             actionLabel = "I'm ready",
@@ -205,40 +232,67 @@ fun OnboardingPairingScreen(
 }
 
 @Composable
+fun OnboardingHelpScreen(
+    onBack: () -> Unit,
+    onGotIt: () -> Unit,
+) {
+    OnboardingTheme {
+        OnboardingPage(
+            title = "Pairing help",
+            subtitle = "Use these steps if the earbuds are not entering pairing mode.",
+            progress = 4f / ONBOARDING_STEPS,
+            content = {
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                )) {
+                    Column(Modifier.padding(18.dp)) {
+                        PairingStep("1", "Open the case lid")
+                        PairingStep("2", "Keep both earbuds inside")
+                        PairingStep("3", "Hold the rear button for 5+ seconds")
+                        PairingStep("4", "Wait for the blue light to flash twice repeatedly")
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
+                    Text("Back")
+                }
+            },
+            actionLabel = "Got it",
+            onAction = onGotIt,
+        )
+    }
+}
+
+@Composable
 fun OnboardingSearchingScreen(
     message: String?,
     onCancel: () -> Unit,
-    onBluetoothOff: () -> Unit,
-    onNotFound: () -> Unit,
 ) {
     OnboardingTheme {
         OnboardingPage(
             title = "Looking for your earbuds",
-            subtitle = "Keep the case open and nearby while SONPODS searches.",
-            icon = Icons.Rounded.BluetoothSearching,
-            progress = 0.85f,
+            subtitle = "Keep the case open and nearby.",
+            progress = 5f / ONBOARDING_STEPS,
             content = {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                ) {
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                )) {
                     Column(
                         modifier = Modifier.padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         CircularProgressIndicator()
-                        Spacer(Modifier.height(16.dp))
-                        Text("Searching for WF-1000XM5", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(18.dp))
+                        Text("Searching for WF 1000XM5", style = MaterialTheme.typography.bodyLarge)
                     }
                 }
                 if (message != null) {
                     Spacer(Modifier.height(12.dp))
                     Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TextButton(onClick = onBluetoothOff) { Text("Bluetooth is off") }
-                TextButton(onClick = onNotFound) { Text("Can't find earbuds") }
             },
             actionLabel = "Cancel",
+            actionFilled = false,
             onAction = onCancel,
         )
     }
@@ -251,23 +305,31 @@ fun OnboardingBluetoothOffScreen(
 ) {
     OnboardingTheme {
         OnboardingPage(
-            title = "Turn on Bluetooth",
-            subtitle = "Bluetooth needs to be on before SONPODS can find your earbuds.",
-            icon = Icons.Rounded.BluetoothDisabled,
-            progress = 0.85f,
+            title = "Bluetooth is off",
+            subtitle = "Turn Bluetooth on so SONPODS can search for your earbuds.",
+            progress = 5f / ONBOARDING_STEPS,
             content = {
-                InfoCard(
-                    title = "Bluetooth is currently off",
-                    body = "Turn Bluetooth on, then return here and retry the search.",
-                )
-                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Rounded.Settings, contentDescription = null)
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                )) {
+                    Column(Modifier.padding(18.dp)) {
+                        IconTile(Icons.Rounded.BluetoothDisabled, false)
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "Open Android Bluetooth settings, enable Bluetooth, then return here.",
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = null)
                     Spacer(Modifier.size(8.dp))
-                    Text("Open Bluetooth settings")
+                    Text("Retry")
                 }
             },
-            actionLabel = "Retry",
-            onAction = onRetry,
+            actionLabel = "Turn on Bluetooth",
+            onAction = onOpenSettings,
         )
     }
 }
@@ -279,17 +341,27 @@ fun OnboardingNotFoundScreen(
 ) {
     OnboardingTheme {
         OnboardingPage(
-            title = "We couldn't find your earbuds",
-            subtitle = "Make sure the case is open and the blue light is flashing.",
-            icon = Icons.Rounded.SearchOff,
-            progress = 0.85f,
+            title = "No earbuds found",
+            subtitle = "We could not find your earbuds yet.",
+            progress = 5f / ONBOARDING_STEPS,
             content = {
-                InfoCard(
-                    title = "Try bringing them closer",
-                    body = "Keep both earbuds in the open case, hold the rear pairing button for at least 5 seconds, and search again.",
-                )
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                )) {
+                    Column(Modifier.padding(18.dp)) {
+                        IconTile(Icons.Rounded.SearchOff, true)
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "Check that the case is open and the rear button was held until the indicator started flashing twice.",
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
                 OutlinedButton(onClick = onHelp, modifier = Modifier.fillMaxWidth()) {
-                    Text("Need pairing help?")
+                    Icon(Icons.Rounded.Help, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Need help")
                 }
             },
             actionLabel = "Retry search",
@@ -305,15 +377,36 @@ fun OnboardingFoundScreen(
 ) {
     OnboardingTheme {
         OnboardingPage(
-            title = "Earbuds found",
-            subtitle = "SONPODS found a nearby WF-1000XM5.",
-            icon = Icons.Rounded.Headphones,
-            progress = 0.92f,
+            title = "Your earbuds are nearby",
+            subtitle = "Choose the device you want SONPODS to connect to.",
+            progress = 6f / ONBOARDING_STEPS,
             content = {
-                InfoCard(
-                    title = "WF-1000XM5",
-                    body = "Available now • Ready to connect",
-                )
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                )) {
+                    Column(Modifier.padding(18.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(R.drawable.sonypods_earbuds),
+                                contentDescription = "WF-1000XM5 product reference render",
+                                modifier = Modifier.size(56.dp),
+                                contentScale = ContentScale.Fit,
+                            )
+                            Spacer(Modifier.size(12.dp))
+                            Column {
+                                Text("WF 1000XM5", fontWeight = FontWeight.SemiBold)
+                                Text("Available now", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Spacer(Modifier.height(14.dp))
+                        Text(
+                            "SONPODS will request the Bluetooth connection needed for live controls.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
                 OutlinedButton(onClick = onSearchAgain, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Rounded.Refresh, contentDescription = null)
                     Spacer(Modifier.size(8.dp))
@@ -333,15 +426,23 @@ fun OnboardingPairFailedScreen(
 ) {
     OnboardingTheme {
         OnboardingPage(
-            title = "Pairing didn't finish",
-            subtitle = "The earbuds were found, but Android couldn't complete the connection.",
-            icon = Icons.Rounded.LinkOff,
-            progress = 0.92f,
+            title = "Could not connect",
+            subtitle = "The pairing request did not complete.",
+            progress = 6f / ONBOARDING_STEPS,
             content = {
-                InfoCard(
-                    title = "Try pairing again",
-                    body = "Keep the case open, confirm the blue light is flashing, and make sure another device is not already connected.",
-                )
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                )) {
+                    Column(Modifier.padding(18.dp)) {
+                        IconTile(Icons.Rounded.LinkOff, true)
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "Make sure the earbuds are still in pairing mode, then try again.",
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
                 OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Rounded.Settings, contentDescription = null)
                     Spacer(Modifier.size(8.dp))
@@ -359,25 +460,27 @@ fun OnboardingConnectedScreen(onContinue: () -> Unit) {
     OnboardingTheme {
         OnboardingPage(
             title = "You're connected",
-            subtitle = "Your WF-1000XM5 is ready for battery and listening controls.",
-            icon = Icons.Rounded.CheckCircle,
+            subtitle = "Live battery and listening controls are ready.",
             progress = 1f,
             content = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    BatteryTile("Left", "82%", Modifier.weight(1f))
-                    BatteryTile("Right", "76%", Modifier.weight(1f))
-                    BatteryTile("Case", "64%", Modifier.weight(1f))
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                )) {
+                    Column(Modifier.padding(18.dp)) {
+                        IconTile(Icons.Rounded.Check, false)
+                        Spacer(Modifier.height(18.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            BatteryTile("Left", "82%", Modifier.weight(1f))
+                            BatteryTile("Right", "76%", Modifier.weight(1f))
+                            BatteryTile("Case", "64%", Modifier.weight(1f))
+                        }
+                    }
                 }
-                Spacer(Modifier.height(12.dp))
-                InfoCard(
-                    title = "Automatic background refresh enabled",
-                    body = "SONPODS can now refresh battery information without keeping the control app open.",
-                )
             },
-            actionLabel = "Continue to home",
+            actionLabel = "Continue to Home",
             onAction = onContinue,
         )
     }
@@ -387,14 +490,11 @@ fun OnboardingConnectedScreen(onContinue: () -> Unit) {
 private fun OnboardingPage(
     title: String,
     subtitle: String,
-    icon: ImageVector,
-    progress: Float?,
-    imageRes: Int? = null,
-    imageDescription: String? = null,
-    imageBeforeTitle: Boolean = true,
+    progress: Float,
     content: @Composable () -> Unit,
     actionLabel: String,
     actionEnabled: Boolean = true,
+    actionFilled: Boolean = true,
     onAction: () -> Unit,
 ) {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -402,41 +502,29 @@ private fun OnboardingPage(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 28.dp),
+                .padding(horizontal = 24.dp, vertical = 18.dp),
         ) {
-            Text(
-                text = "SONPODS",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(20.dp))
-            if (progress != null) {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(28.dp))
-            } else {
-                Spacer(Modifier.height(8.dp))
-            }
-            Card(
-                modifier = Modifier.size(72.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(18.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                Text(
+                    text = "SONPODS",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
                 )
+                IconButton(onClick = {}) {
+                    Icon(Icons.Rounded.Help, contentDescription = "Help")
+                }
             }
-            if (imageRes != null && imageBeforeTitle) {
-                Spacer(Modifier.height(20.dp))
-                PrototypeImage(imageRes, imageDescription)
-            }
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+            )
             Spacer(Modifier.height(24.dp))
             Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(10.dp))
@@ -445,21 +533,29 @@ private fun OnboardingPage(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (imageRes != null && !imageBeforeTitle) {
-                Spacer(Modifier.height(20.dp))
-                PrototypeImage(imageRes, imageDescription)
-            }
             Spacer(Modifier.height(24.dp))
             content()
-            Spacer(Modifier.height(32.dp))
-            Button(
-                onClick = onAction,
-                enabled = actionEnabled,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-            ) {
-                Text(actionLabel)
+            Spacer(Modifier.height(28.dp))
+            if (actionFilled) {
+                Button(
+                    onClick = onAction,
+                    enabled = actionEnabled,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                ) {
+                    Text(actionLabel)
+                }
+            } else {
+                OutlinedButton(
+                    onClick = onAction,
+                    enabled = actionEnabled,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                ) {
+                    Text(actionLabel)
+                }
             }
         }
     }
@@ -471,7 +567,7 @@ private fun PrototypeImage(imageRes: Int, imageDescription: String?) {
         modifier = Modifier
             .fillMaxWidth()
             .height(220.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         Image(
             painter = painterResource(imageRes),
@@ -485,6 +581,46 @@ private fun PrototypeImage(imageRes: Int, imageDescription: String?) {
 }
 
 @Composable
+private fun IconTile(icon: ImageVector, error: Boolean) {
+    val tileColor = if (error) MaterialTheme.colorScheme.errorContainer
+    else MaterialTheme.colorScheme.primaryContainer
+    val iconColor = if (error) MaterialTheme.colorScheme.onErrorContainer
+    else MaterialTheme.colorScheme.onPrimaryContainer
+    Card(
+        modifier = Modifier.size(56.dp),
+        colors = CardDefaults.cardColors(containerColor = tileColor),
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            tint = iconColor,
+        )
+    }
+}
+
+@Composable
+private fun PairingStep(number: String, text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Card(
+            modifier = Modifier.size(32.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        ) {
+            Text(number, modifier = Modifier.padding(8.dp), fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.size(12.dp))
+        Text(text, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
 private fun BatteryTile(label: String, value: String, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier,
@@ -494,20 +630,6 @@ private fun BatteryTile(label: String, value: String, modifier: Modifier = Modif
             Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(4.dp))
             Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-@Composable
-private fun InfoCard(title: String, body: String) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Column(Modifier.padding(18.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
