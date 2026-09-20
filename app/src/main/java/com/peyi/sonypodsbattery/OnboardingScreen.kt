@@ -30,7 +30,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -549,7 +548,6 @@ private fun OnboardingPage(
     secondaryActionLabel: String? = null,
     secondaryActionIcon: ImageVector? = null,
     onSecondaryAction: (() -> Unit)? = null,
-    onHelp: (() -> Unit)? = null,
     tertiaryActionLabel: String? = null,
     onTertiaryAction: (() -> Unit)? = null,
 ) {
@@ -562,7 +560,6 @@ private fun OnboardingPage(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
                     text = "SONPODS",
@@ -570,11 +567,6 @@ private fun OnboardingPage(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                 )
-                IconButton(
-                    onClick = { onHelp?.invoke() },
-                ) {
-                    Icon(Icons.Rounded.Help, contentDescription = "Help")
-                }
             }
             LinearProgressIndicator(
                 progress = { progress },
