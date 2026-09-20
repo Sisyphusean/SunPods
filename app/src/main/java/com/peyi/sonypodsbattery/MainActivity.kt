@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -53,6 +54,12 @@ class MainActivity : ComponentActivity() {
         NEARBY_DEVICES,
         NOTIFICATIONS,
         PAIRING,
+        SEARCHING,
+        BLUETOOTH_OFF,
+        NOT_FOUND,
+        FOUND,
+        PAIR_FAILED,
+        CONNECTED,
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,7 +80,7 @@ class MainActivity : ComponentActivity() {
             render(BatteryStore.load(this))
             updatePermissionUi()
             updateCompanionUi()
-        } else if (showingCompanionSetup && !showingWelcome && initialSetupStage != InitialSetupStage.PAIRING) {
+        } else if (showingCompanionSetup && !showingWelcome && isSetupPermissionStage()) {
             showInitialSetupFlow()
         }
     }
@@ -228,6 +235,89 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun isSetupPermissionStage() =
+        initialSetupStage == InitialSetupStage.NEARBY_DEVICES ||
+            initialSetupStage == InitialSetupStage.NOTIFICATIONS
+
+    private fun isBluetoothEnabled() =
+        BluetoothAdapter.getDefaultAdapter()?.isEnabled != false
+
+    private fun showSearchingScreen() {
+        showingCompanionSetup = true
+        showingWelcome = false
+        initialSetupStage = InitialSetupStage.SEARCHING
+        setupMessage.value = null
+        setContent {
+            OnboardingSearchingScreen(
+                message = setupMessage.value,
+                onCancel = { showCompanionSetupScreen() },
+                onBluetoothOff = { showBluetoothOffScreen() },
+                onNotFound = { showNotFoundScreen() },
+            )
+        }
+    }
+
+    private fun showBluetoothOffScreen() {
+        showingCompanionSetup = true
+        showingWelcome = false
+        initialSetupStage = InitialSetupStage.BLUETOOTH_OFF
+        setupMessage.value = null
+        setContent {
+            OnboardingBluetoothOffScreen(
+                onRetry = { showCompanionSetupScreen() },
+                onOpenSettings = { openPermissionSettings() },
+            )
+        }
+    }
+
+    private fun showNotFoundScreen() {
+        showingCompanionSetup = true
+        showingWelcome = false
+        initialSetupStage = InitialSetupStage.NOT_FOUND
+        setupMessage.value = null
+        setContent {
+            OnboardingNotFoundScreen(
+                onRetry = { showCompanionSetupScreen() },
+                onHelp = { showCompanionSetupScreen() },
+            )
+        }
+    }
+
+    private fun showFoundScreen() {
+        showingCompanionSetup = true
+        showingWelcome = false
+        initialSetupStage = InitialSetupStage.FOUND
+        setupMessage.value = null
+        setContent {
+            OnboardingFoundScreen(
+                onConnect = { showConnectedScreen() },
+                onSearchAgain = { showCompanionSetupScreen() },
+            )
+        }
+    }
+
+    private fun showPairFailedScreen() {
+        showingCompanionSetup = true
+        showingWelcome = false
+        initialSetupStage = InitialSetupStage.PAIR_FAILED
+        setupActionEnabled.value = true
+        setContent {
+            OnboardingPairFailedScreen(
+                onRetry = { showCompanionSetupScreen() },
+                onOpenSettings = { openPermissionSettings() },
+            )
+        }
+    }
+
+    private fun showConnectedScreen() {
+        showingCompanionSetup = true
+        showingWelcome = false
+        initialSetupStage = InitialSetupStage.CONNECTED
+        setContent {
+            OnboardingConnectedScreen(onContinue = { showDashboard() })
+        }
+    }
+
     private fun showInitialSetupFlow() {
         showingWelcome = false
         when {
@@ -268,7 +358,7 @@ class MainActivity : ComponentActivity() {
         val alreadyGranted = when (stage) {
             InitialSetupStage.NEARBY_DEVICES -> hasBluetoothPermission()
             InitialSetupStage.NOTIFICATIONS -> hasNotificationPermission()
-            InitialSetupStage.PAIRING -> false
+            else -> false
         }
         if (alreadyGranted) {
             showInitialSetupFlow()
@@ -472,11 +562,15 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
+        if (showingCompanionSetup && !isBluetoothEnabled()) {
+            showBluetoothOffScreen()
+            return
+        }
         if (companionAssociationInFlight) return
         companionAssociationInFlight = true
         if (showingCompanionSetup) {
             setupActionEnabled.value = false
-            setupMessage.value = "Looking for a device in Android…"
+            showSearchingScreen()
         } else {
             status.text = "Follow the one-time Android setup to enable automatic refresh."
             updateCompanionUi()
@@ -497,9 +591,8 @@ class MainActivity : ComponentActivity() {
                     companionAssociationInFlight = false
                     if (showingCompanionSetup) {
                         if (!success) {
-                            setupMessage.value = "Android could not open the device picker. Put the earbuds in pairing mode and try again."
+                            showPairFailedScreen()
                         }
-                        setupActionEnabled.value = true
                     } else {
                         if (!success) status.text = "Automatic refresh setup could not be completed."
                         updateCompanionUi()
@@ -516,9 +609,7 @@ class MainActivity : ComponentActivity() {
         companionAssociationInFlight = false
         if (EarbudCompanionManager.handleAssociationResult(this, resultCode, data)) {
             if (showingCompanionSetup) {
-                setupMessage.value = "Automatic background refresh enabled."
-                setupActionEnabled.value = true
-                requestNotificationsThenShowDashboard()
+                showFoundScreen()
             } else {
                 status.text = "Automatic background refresh enabled"
                 updateCompanionUi()
@@ -526,8 +617,7 @@ class MainActivity : ComponentActivity() {
             }
         } else {
             if (showingCompanionSetup) {
-                setupMessage.value = "Setup cancelled. Put the earbuds in pairing mode and try again."
-                setupActionEnabled.value = true
+                showPairFailedScreen()
             } else {
                 status.text = "Automatic background refresh setup was cancelled"
                 updateCompanionUi()
