@@ -81,7 +81,14 @@ fun OnboardingWelcomeScreen(onContinue: () -> Unit) {
             title = "Control your earbuds without the clutter",
             subtitle = "Everything you use most, without digging through menus.",
             progress = 1f / ONBOARDING_STEPS,
-            content = { PrototypeImage(R.drawable.sonypods_earbuds, "WF-1000XM5 product reference render") },
+            content = {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                ) {
+                    PrototypeImage(R.drawable.sonypods_earbuds, "WF-1000XM5 product reference render")
+                }
+            },
             actionLabel = "Get started",
             onAction = onContinue,
         )
@@ -467,7 +474,12 @@ fun OnboardingConnectedScreen(onContinue: () -> Unit) {
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 )) {
                     Column(Modifier.padding(18.dp)) {
-                        IconTile(Icons.Rounded.Check, false)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            IconTile(Icons.Rounded.Check, false)
+                        }
                         Spacer(Modifier.height(18.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -563,21 +575,15 @@ private fun OnboardingPage(
 
 @Composable
 private fun PrototypeImage(imageRes: Int, imageDescription: String?) {
-    Card(
+    Image(
+        painter = painterResource(imageRes),
+        contentDescription = imageDescription,
         modifier = Modifier
             .fillMaxWidth()
-            .height(220.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Image(
-            painter = painterResource(imageRes),
-            contentDescription = imageDescription,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-            contentScale = ContentScale.Fit,
-        )
-    }
+            .height(220.dp)
+            .padding(12.dp),
+        contentScale = ContentScale.Fit,
+    )
 }
 
 @Composable
