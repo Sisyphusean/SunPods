@@ -20,6 +20,9 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import java.text.DateFormat
 import java.util.Date
 
@@ -52,7 +55,11 @@ class MainActivity : ComponentActivity() {
 
     private enum class InitialSetupStage {
         NEARBY_DEVICES,
+        NEARBY_DENIED,
+        NEARBY_SETTINGS,
         NOTIFICATIONS,
+        NOTIFICATIONS_DENIED,
+        NOTIFICATIONS_SETTINGS,
         PAIRING,
         SEARCHING,
         BLUETOOTH_OFF,
@@ -64,6 +71,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
         EarbudCompanionManager.startObservingPresence(this)
         if (requiresCompanionSetup() && shouldShowWelcome()) {
             showWelcomeScreen()
@@ -76,12 +88,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        showSystemBars()
         if (::status.isInitialized) {
             render(BatteryStore.load(this))
             updatePermissionUi()
             updateCompanionUi()
-        } else if (showingCompanionSetup && !showingWelcome && isSetupPermissionStage()) {
-            showInitialSetupFlow()
+        } else if (showingCompanionSetup && !showingWelcome && !permissionRequestInFlight) {
+            when (initialSetupStage) {
+                InitialSetupStage.NEARBY_SETTINGS,
+                InitialSetupStage.NEARBY_DENIED -> if (hasBluetoothPermission()) showInitialSetupFlow()
+                InitialSetupStage.NOTIFICATIONS_SETTINGS,
+                InitialSetupStage.NOTIFICATIONS_DENIED -> if (hasNotificationPermission()) showInitialSetupFlow()
+                else -> Unit
+            }
         }
     }
 
@@ -236,10 +255,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun isSetupPermissionStage() =
-        initialSetupStage == InitialSetupStage.NEARBY_DEVICES ||
-            initialSetupStage == InitialSetupStage.NOTIFICATIONS
-
     private fun isBluetoothEnabled() =
         BluetoothAdapter.getDefaultAdapter()?.isEnabled != false
 
@@ -350,7 +365,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             OnboardingPermissionScreen(
                 nearby = nearby,
-                message = setupMessage.value,
+                denied = false,
                 actionLabel = setupActionLabel.value,
                 actionEnabled = setupActionEnabled.value,
                 onAction = {
@@ -359,6 +374,55 @@ class MainActivity : ComponentActivity() {
                     } else {
                         requestInitialSetupPermission(stage)
                     }
+                },
+                onOpenSettings = { openPermissionSettings() },
+            )
+        }
+    }
+
+    private fun showPermissionDeniedScreen(stage: InitialSetupStage) {
+        showingCompanionSetup = true
+        showingWelcome = false
+        initialSetupStage = stage
+        setupMessage.value = null
+        setupActionLabel.value = if (stage == InitialSetupStage.NEARBY_DENIED) {
+            "Allow access"
+        } else {
+            "Allow notifications"
+        }
+        setupActionEnabled.value = true
+        setupActionOpensSettings = false
+        val nearby = stage == InitialSetupStage.NEARBY_DENIED
+        setContent {
+            OnboardingPermissionScreen(
+                nearby = nearby,
+                denied = true,
+                actionLabel = setupActionLabel.value,
+                actionEnabled = setupActionEnabled.value,
+                onAction = { requestInitialSetupPermission(if (nearby) InitialSetupStage.NEARBY_DEVICES else InitialSetupStage.NOTIFICATIONS) },
+                onOpenSettings = {
+                    showPermissionSettingsScreen(
+                        if (nearby) InitialSetupStage.NEARBY_SETTINGS else InitialSetupStage.NOTIFICATIONS_SETTINGS,
+                    )
+                },
+                onExit = if (nearby) ({ exitOnboarding() }) else null,
+            )
+        }
+    }
+
+    private fun showPermissionSettingsScreen(stage: InitialSetupStage) {
+        showingCompanionSetup = true
+        showingWelcome = false
+        initialSetupStage = stage
+        setupMessage.value = null
+        val nearby = stage == InitialSetupStage.NEARBY_SETTINGS
+        setContent {
+            OnboardingPermissionSettingsScreen(
+                nearby = nearby,
+                onBack = {
+                    showPermissionDeniedScreen(
+                        if (nearby) InitialSetupStage.NEARBY_DENIED else InitialSetupStage.NOTIFICATIONS_DENIED,
+                    )
                 },
                 onOpenSettings = { openPermissionSettings() },
             )
@@ -390,16 +454,10 @@ class MainActivity : ComponentActivity() {
         requestPermissions(arrayOf(permission), requestCode)
     }
 
-    private fun showInitialPermissionDenied(permissionName: String) {
-        setupMessage.value = "$permissionName permission is required to continue setup. Try again, or enable it from App info if Android no longer shows the prompt."
-        setupActionLabel.value = if (permissionName == "Nearby devices") "Allow access" else "Allow notifications"
-        setupActionEnabled.value = true
-        setupActionOpensSettings = false
-    }
-
     private fun showDashboard() {
         showingWelcome = false
         showingCompanionSetup = false
+        showSystemBars()
         setContentView(buildContent())
         render(BatteryStore.load(this))
         refresh.setOnClickListener { requestRefresh() }
@@ -409,6 +467,13 @@ class MainActivity : ComponentActivity() {
         updatePermissionUi()
         updateCompanionUi()
         requestRefresh()
+    }
+
+    private fun exitOnboarding() {
+        getPreferences(MODE_PRIVATE).edit()
+            .putBoolean(WELCOME_SEEN, false)
+            .apply()
+        showWelcomeScreen()
     }
 
     private fun requestRefresh() {
@@ -503,7 +568,7 @@ class MainActivity : ComponentActivity() {
                 if (hasBluetoothPermission()) {
                     showInitialSetupFlow()
                 } else {
-                    showInitialPermissionDenied("Nearby devices")
+                    showPermissionDeniedScreen(InitialSetupStage.NEARBY_DENIED)
                 }
                 return
             }
@@ -522,7 +587,7 @@ class MainActivity : ComponentActivity() {
                 if (hasNotificationPermission()) {
                     showInitialSetupFlow()
                 } else {
-                    showInitialPermissionDenied("Notifications")
+                    showPermissionDeniedScreen(InitialSetupStage.NOTIFICATIONS_DENIED)
                 }
             } else {
                 continuePermissionFlow()
@@ -648,6 +713,14 @@ class MainActivity : ComponentActivity() {
 
     private fun openBluetoothSettings() {
         startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS))
+    }
+
+    private fun showSystemBars() {
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            show(WindowInsetsCompat.Type.systemBars())
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
     }
 
     private fun shareDiagnostics() {

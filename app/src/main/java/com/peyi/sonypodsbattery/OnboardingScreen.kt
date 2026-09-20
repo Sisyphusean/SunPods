@@ -2,7 +2,6 @@ package com.peyi.sonypodsbattery
 
 import android.os.Build
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,11 +20,12 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Help
 import androidx.compose.material.icons.rounded.LinkOff
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,10 +36,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -50,25 +49,32 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 private const val ONBOARDING_STEPS = 7f
+private val OnboardingPillShape = RoundedCornerShape(percent = 50)
+private val OnboardingCardShape = RoundedCornerShape(20.dp)
+private val OnboardingErrorCardColor = Color(0xFF2B1B1D)
+private val OnboardingErrorTextColor = Color(0xFFFFB4AB)
+private val OnboardingWarningCardColor = Color(0xFF2B2519)
+private val OnboardingWarningTextColor = Color(0xFFF2D38A)
 
 @Composable
 private fun OnboardingTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
-    val isDark = isSystemInDarkTheme()
     val colors = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isDark -> dynamicDarkColorScheme(context)
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> dynamicLightColorScheme(context)
-        isDark -> darkColorScheme(
-            primary = Color(0xFF8DEEB7),
-            onPrimary = Color(0xFF00391E),
-            background = Color(0xFF0E1417),
-            surface = Color(0xFF151D20),
-        )
-        else -> lightColorScheme(
-            primary = Color(0xFF006D3C),
-            onPrimary = Color.White,
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> dynamicDarkColorScheme(context)
+        else -> darkColorScheme(
+            primary = Color(0xFFD0BCFF),
+            onPrimary = Color(0xFF381E72),
+            primaryContainer = Color(0xFF4F378B),
+            onPrimaryContainer = Color(0xFFEADDFF),
+            background = Color(0xFF100D13),
+            onBackground = Color(0xFFE7E0E8),
+            surface = Color(0xFF100D13),
+            onSurface = Color(0xFFE7E0E8),
+            surfaceVariant = Color(0xFF49454F),
+            onSurfaceVariant = Color(0xFFCAC4D0),
         )
     }
     MaterialTheme(colorScheme = colors, content = content)
@@ -98,13 +104,13 @@ fun OnboardingWelcomeScreen(onContinue: () -> Unit) {
 @Composable
 fun OnboardingPermissionScreen(
     nearby: Boolean,
-    message: String?,
+    denied: Boolean,
     actionLabel: String,
     actionEnabled: Boolean,
     onAction: () -> Unit,
     onOpenSettings: () -> Unit,
+    onExit: (() -> Unit)? = null,
 ) {
-    val denied = message != null
     val title = when {
         nearby && denied -> "Nearby devices is required"
         nearby -> "Find your earbuds"
@@ -130,7 +136,8 @@ fun OnboardingPermissionScreen(
             "SONPODS needs notifications for the required connection state and battery alert experience in this MVP."
         }
     }
-    val icon = if (denied) Icons.Rounded.Warning
+    val icon = if (denied && nearby) Icons.Rounded.BluetoothDisabled
+    else if (denied) Icons.Rounded.NotificationsOff
     else if (nearby) Icons.Rounded.BluetoothSearching
     else Icons.Rounded.Notifications
     val nextPermission = if (nearby) "Nearby devices" else "notification"
@@ -140,17 +147,21 @@ fun OnboardingPermissionScreen(
             subtitle = subtitle,
             progress = if (nearby) 2f / ONBOARDING_STEPS else 3f / ONBOARDING_STEPS,
             content = {
-                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
-                    containerColor = if (denied) MaterialTheme.colorScheme.errorContainer
-                    else MaterialTheme.colorScheme.surfaceVariant,
-                )) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (denied) OnboardingErrorCardColor
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                    shape = OnboardingCardShape,
+                ) {
                     Column(Modifier.padding(18.dp)) {
                         IconTile(icon, denied)
                         Spacer(Modifier.height(12.dp))
                         Text(
                             body,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (denied) MaterialTheme.colorScheme.onErrorContainer
+                            color = if (denied) OnboardingErrorTextColor
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         if (!denied) {
@@ -163,18 +174,58 @@ fun OnboardingPermissionScreen(
                         }
                     }
                 }
-                if (denied) {
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Rounded.Settings, contentDescription = null)
-                        Spacer(Modifier.size(8.dp))
-                        Text("Open settings instead")
-                    }
-                }
             },
             actionLabel = actionLabel,
             actionEnabled = actionEnabled,
             onAction = onAction,
+            secondaryActionLabel = if (denied) "Open settings instead" else null,
+            secondaryActionIcon = if (denied) Icons.Rounded.Settings else null,
+            onSecondaryAction = if (denied) onOpenSettings else null,
+            tertiaryActionLabel = if (denied && nearby) "Exit onboarding" else null,
+            onTertiaryAction = onExit,
+        )
+    }
+}
+
+@Composable
+fun OnboardingPermissionSettingsScreen(
+    nearby: Boolean,
+    onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    OnboardingTheme {
+        OnboardingPage(
+            title = if (nearby) "Enable nearby devices in Settings" else "Enable notifications in Settings",
+            subtitle = if (nearby) {
+                "Android is no longer showing the permission prompt."
+            } else {
+                "Android may no longer show the notifications prompt."
+            },
+            progress = if (nearby) 2f / ONBOARDING_STEPS else 3f / ONBOARDING_STEPS,
+            content = {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = OnboardingCardShape,
+                ) {
+                    Column(Modifier.padding(18.dp)) {
+                        IconTile(Icons.Rounded.Settings, false)
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            if (nearby) {
+                                "Open App info, choose Permissions, then enable Nearby devices for SONPODS."
+                            } else {
+                                "Open App info, choose Notifications, then allow notifications for SONPODS."
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+            secondaryActionLabel = "Back",
+            onSecondaryAction = onBack,
+            actionLabel = "Open Settings",
+            onAction = onOpenSettings,
         )
     }
 }
@@ -216,24 +267,21 @@ fun OnboardingPairingScreen(
                 }
                 if (message != null) {
                     Spacer(Modifier.height(12.dp))
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                    Card(colors = CardDefaults.cardColors(containerColor = OnboardingErrorCardColor), shape = OnboardingCardShape) {
                         Text(
                             message,
                             modifier = Modifier.padding(16.dp),
-                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            color = OnboardingErrorTextColor,
                         )
                     }
-                }
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = onHelp, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Rounded.Help, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Need help")
                 }
             },
             actionLabel = "I'm ready",
             actionEnabled = actionEnabled,
             onAction = onAction,
+            secondaryActionLabel = "Need help",
+            secondaryActionIcon = Icons.Rounded.Help,
+            onSecondaryAction = onHelp,
         )
     }
 }
@@ -259,13 +307,11 @@ fun OnboardingHelpScreen(
                         PairingStep("4", "Wait for the blue light to flash twice repeatedly")
                     }
                 }
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-                    Text("Back")
-                }
             },
             actionLabel = "Got it",
             onAction = onGotIt,
+            secondaryActionLabel = "Back",
+            onSecondaryAction = onBack,
         )
     }
 }
@@ -317,26 +363,23 @@ fun OnboardingBluetoothOffScreen(
             progress = 5f / ONBOARDING_STEPS,
             content = {
                 Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                )) {
+                    containerColor = OnboardingWarningCardColor,
+                ), shape = OnboardingCardShape) {
                     Column(Modifier.padding(18.dp)) {
                         IconTile(Icons.Rounded.BluetoothDisabled, false)
                         Spacer(Modifier.height(12.dp))
                         Text(
                             "Open Android Bluetooth settings, enable Bluetooth, then return here.",
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            color = OnboardingWarningTextColor,
                         )
                     }
-                }
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Retry")
                 }
             },
             actionLabel = "Turn on Bluetooth",
             onAction = onOpenSettings,
+            secondaryActionLabel = "Retry",
+            secondaryActionIcon = Icons.Rounded.Refresh,
+            onSecondaryAction = onRetry,
         )
     }
 }
@@ -353,26 +396,23 @@ fun OnboardingNotFoundScreen(
             progress = 5f / ONBOARDING_STEPS,
             content = {
                 Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                )) {
+                    containerColor = OnboardingErrorCardColor,
+                ), shape = OnboardingCardShape) {
                     Column(Modifier.padding(18.dp)) {
                         IconTile(Icons.Rounded.SearchOff, true)
                         Spacer(Modifier.height(12.dp))
                         Text(
                             "Check that the case is open and the rear button was held until the indicator started flashing twice.",
-                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            color = OnboardingErrorTextColor,
                         )
                     }
-                }
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = onHelp, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Rounded.Help, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Need help")
                 }
             },
             actionLabel = "Retry search",
             onAction = onRetry,
+            secondaryActionLabel = "Need help",
+            secondaryActionIcon = Icons.Rounded.Help,
+            onSecondaryAction = onHelp,
         )
     }
 }
@@ -413,15 +453,12 @@ fun OnboardingFoundScreen(
                         )
                     }
                 }
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = onSearchAgain, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Search again")
-                }
             },
             actionLabel = "Connect",
             onAction = onConnect,
+            secondaryActionLabel = "Search again",
+            secondaryActionIcon = Icons.Rounded.Refresh,
+            onSecondaryAction = onSearchAgain,
         )
     }
 }
@@ -438,26 +475,23 @@ fun OnboardingPairFailedScreen(
             progress = 6f / ONBOARDING_STEPS,
             content = {
                 Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                )) {
+                    containerColor = OnboardingErrorCardColor,
+                ), shape = OnboardingCardShape) {
                     Column(Modifier.padding(18.dp)) {
                         IconTile(Icons.Rounded.LinkOff, true)
                         Spacer(Modifier.height(12.dp))
                         Text(
                             "Make sure the earbuds are still in pairing mode, then try again.",
-                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            color = OnboardingErrorTextColor,
                         )
                     }
-                }
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Rounded.Settings, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("Open Bluetooth settings")
                 }
             },
             actionLabel = "Try again",
             onAction = onRetry,
+            secondaryActionLabel = "Open Bluetooth settings",
+            secondaryActionIcon = Icons.Rounded.Settings,
+            onSecondaryAction = onOpenSettings,
         )
     }
 }
@@ -508,12 +542,17 @@ private fun OnboardingPage(
     actionEnabled: Boolean = true,
     actionFilled: Boolean = true,
     onAction: () -> Unit,
+    secondaryActionLabel: String? = null,
+    secondaryActionIcon: ImageVector? = null,
+    onSecondaryAction: (() -> Unit)? = null,
+    onHelp: (() -> Unit)? = null,
+    tertiaryActionLabel: String? = null,
+    onTertiaryAction: (() -> Unit)? = null,
 ) {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 18.dp),
         ) {
             Row(
@@ -527,7 +566,9 @@ private fun OnboardingPage(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                 )
-                IconButton(onClick = {}) {
+                IconButton(
+                    onClick = { onHelp?.invoke() },
+                ) {
                     Icon(Icons.Rounded.Help, contentDescription = "Help")
                 }
             }
@@ -535,38 +576,80 @@ private fun OnboardingPage(
                 progress = { progress },
                 modifier = Modifier
                     .fillMaxWidth()
+                    .height(4.dp)
                     .padding(top = 12.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .18f),
+                drawStopIndicator = {},
             )
-            Spacer(Modifier.height(24.dp))
-            Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(10.dp))
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(24.dp))
-            content()
-            Spacer(Modifier.height(28.dp))
-            if (actionFilled) {
-                Button(
-                    onClick = onAction,
-                    enabled = actionEnabled,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                ) {
-                    Text(actionLabel)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Spacer(Modifier.height(24.dp))
+                Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(24.dp))
+                content()
+                Spacer(Modifier.height(24.dp))
+            }
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (secondaryActionLabel != null && onSecondaryAction != null) {
+                    OutlinedButton(
+                        onClick = onSecondaryAction,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = OnboardingPillShape,
+                    ) {
+                        if (secondaryActionIcon != null) {
+                            Icon(secondaryActionIcon, contentDescription = null)
+                            Spacer(Modifier.size(8.dp))
+                        }
+                        Text(secondaryActionLabel)
+                    }
+                    Spacer(Modifier.height(12.dp))
                 }
-            } else {
-                OutlinedButton(
-                    onClick = onAction,
-                    enabled = actionEnabled,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                ) {
-                    Text(actionLabel)
+                if (actionFilled) {
+                    Button(
+                        onClick = onAction,
+                        enabled = actionEnabled,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = OnboardingPillShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                    ) {
+                        Text(actionLabel)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onAction,
+                        enabled = actionEnabled,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = OnboardingPillShape,
+                    ) {
+                        Text(actionLabel)
+                    }
+                }
+                if (tertiaryActionLabel != null && onTertiaryAction != null) {
+                    TextButton(
+                        onClick = onTertiaryAction,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(tertiaryActionLabel)
+                    }
                 }
             }
         }
@@ -588,9 +671,9 @@ private fun PrototypeImage(imageRes: Int, imageDescription: String?) {
 
 @Composable
 private fun IconTile(icon: ImageVector, error: Boolean) {
-    val tileColor = if (error) MaterialTheme.colorScheme.errorContainer
+    val tileColor = if (error) OnboardingErrorCardColor
     else MaterialTheme.colorScheme.primaryContainer
-    val iconColor = if (error) MaterialTheme.colorScheme.onErrorContainer
+    val iconColor = if (error) OnboardingErrorTextColor
     else MaterialTheme.colorScheme.onPrimaryContainer
     Card(
         modifier = Modifier.size(56.dp),
