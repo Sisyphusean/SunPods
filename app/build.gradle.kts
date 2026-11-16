@@ -22,8 +22,8 @@ android {
         applicationId = "com.peyi.sonypodsbattery"
         minSdk = 29
         targetSdk = 35
-        versionCode = 23
-        versionName = "2.3.0"
+        versionCode = 34
+        versionName = "2.10.2"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
 
@@ -77,6 +77,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.glance:glance-appwidget:1.1.1")
     implementation("androidx.glance:glance-material3:1.1.1")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     testImplementation("junit:junit:4.13.2")
 }

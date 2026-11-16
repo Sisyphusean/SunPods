@@ -12,7 +12,7 @@ class SunpodsTileService : TileService() {
 
     override fun onStartListening() {
         super.onStartListening()
-        render(BatteryStore.load(this))
+        render(widgetSnapshot(this).state)
     }
 
     override fun onClick() {
@@ -20,7 +20,7 @@ class SunpodsTileService : TileService() {
         if (Build.VERSION.SDK_INT >= 31 &&
             checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
         ) return
-        val state = BatteryStore.load(this)
+        val state = widgetSnapshot(this).state
         val next = when (state.listeningMode) {
             ListeningMode.NOISE_CANCELLING -> ListeningMode.AMBIENT
             ListeningMode.AMBIENT -> ListeningMode.OFF

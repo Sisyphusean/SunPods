@@ -6,4 +6,5 @@
     <color name="white">#F7F7FA</color>
     <color name="muted">#A8A8B3</color>
     <color name="accent">#6750A4</color>
+    <color name="splash_background">#F3F0EB</color>
 </resources>

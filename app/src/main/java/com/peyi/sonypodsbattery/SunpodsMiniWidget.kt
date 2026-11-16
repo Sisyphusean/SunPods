@@ -38,8 +38,8 @@ import androidx.glance.text.TextStyle
 class SunpodsMiniWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
-            GlanceTheme(colors = DynamicThemeColorProviders) {
-                MiniContent(BatteryStore.load(context))
+            SunpodsGlanceTheme(context) { palette ->
+                MiniContent(widgetSnapshot(context), palette)
             }
         }
     }
@@ -50,12 +50,14 @@ class SunpodsMiniWidgetReceiver : GlanceAppWidgetReceiver() {
 }
 
 @Composable
-private fun MiniContent(state: BatteryState) {
+private fun MiniContent(snapshot: WidgetSnapshot, palette: WidgetPalette) {
     val colors = GlanceTheme.colors
+    val state = snapshot.state
+    val last = snapshot.last
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(colors.widgetBackground)
+            .background(palette.page)
             .cornerRadius(24.dp)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -71,7 +73,7 @@ private fun MiniContent(state: BatteryState) {
                 modifier = GlanceModifier.size(16.dp)
             )
             Text(
-                text = when (state.listeningMode) {
+                text = if (!snapshot.connected) "Not connected" else when (state.listeningMode) {
                     ListeningMode.NOISE_CANCELLING -> "Noise cancelling"
                     ListeningMode.AMBIENT -> "Ambient ${state.ambientLevel}"
                     ListeningMode.OFF -> "Noise control off"
@@ -87,25 +89,34 @@ private fun MiniContent(state: BatteryState) {
             modifier = GlanceModifier.fillMaxWidth().clickable(actionRunCallback<RefreshWidgetAction>()),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            MiniLevel("L", state.left, state.leftCharging, GlanceModifier.defaultWeight())
-            Spacer(GlanceModifier.width(10.dp))
-            MiniLevel("R", state.right, state.rightCharging, GlanceModifier.defaultWeight())
-            Spacer(GlanceModifier.width(10.dp))
-            MiniLevel("Case", state.case, state.caseCharging, GlanceModifier.defaultWeight())
+            if (snapshot.connected) {
+                MiniLevel("L", state.left, state.leftCharging, palette, GlanceModifier.defaultWeight())
+                Spacer(GlanceModifier.width(10.dp))
+                MiniLevel("R", state.right, state.rightCharging, palette, GlanceModifier.defaultWeight())
+                Spacer(GlanceModifier.width(10.dp))
+                MiniLevel("Case", state.case, state.caseCharging, palette, GlanceModifier.defaultWeight())
+            } else {
+                // Away: last known levels, greyed, so it never looks live.
+                MiniLevel("L", last?.left, false, palette, GlanceModifier.defaultWeight(), stale = true)
+                Spacer(GlanceModifier.width(10.dp))
+                MiniLevel("R", last?.right, false, palette, GlanceModifier.defaultWeight(), stale = true)
+                Spacer(GlanceModifier.width(10.dp))
+                MiniLevel("Case", last?.case, false, palette, GlanceModifier.defaultWeight(), stale = true)
+            }
         }
     }
 }
 
 @Composable
-private fun MiniLevel(label: String, rawLevel: Int?, charging: Boolean, modifier: GlanceModifier) {
+private fun MiniLevel(label: String, rawLevel: Int?, charging: Boolean, palette: WidgetPalette, modifier: GlanceModifier, stale: Boolean = false) {
     val colors = GlanceTheme.colors
     val level = rawLevel?.takeIf { it in 1..100 }
-    val low = level != null && level <= 20
+    val low = !stale && level != null && level <= 20
     Column(modifier = modifier) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 text = level?.toString() ?: "--",
-                style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Medium, color = if (low) colors.error else colors.onSurface),
+                style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Medium, color = if (low) colors.error else if (stale) colors.onSurfaceVariant else colors.onSurface),
                 maxLines = 1
             )
             Text(
@@ -118,8 +129,8 @@ private fun MiniLevel(label: String, rawLevel: Int?, charging: Boolean, modifier
         LinearProgressIndicator(
             progress = (level ?: 0) / 100f,
             modifier = GlanceModifier.fillMaxWidth().height(4.dp),
-            color = if (low) colors.error else colors.primary,
-            backgroundColor = colors.surfaceVariant
+            color = if (low) colors.error else if (stale) colors.outline else colors.primary,
+            backgroundColor = palette.track
         )
     }
 }

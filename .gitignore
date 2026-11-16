@@ -8,3 +8,23 @@
 /**/build/
 *.iml
 .idea/
+
+# Blender working files: keep the accepted model and tools, not every iteration
+*.blend1
+/branding/render/backup_iter*.blend
+/branding/render/loop2/backup_iter*.blend
+/branding/render/iter*/
+/branding/render/loop/
+/branding/render/loop2/iter*/
+/branding/render/loop2/boards/
+/branding/render/fit/
+/branding/render/*.obj
+/branding/render/*.log
+/branding/render/*.jpg
+/branding/render/check_*.png
+/branding/render/live_face.png
+/branding/render/xm5_bud.blend
+# Sony's reference photos are for matching only, never shipped or committed
+/branding/render/ref360/
+/branding/render/loop2/_fit/
+/branding/render/app/turntable/

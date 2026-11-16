@@ -124,7 +124,9 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
             val pendingResult = goAsync()
             CoroutineScope(Dispatchers.IO).launch {
                 try {
+                    val spot = launch { LastSeenStore.captureAtDisconnect(context.applicationContext) }
                     RefreshCoordinator.handleDeviceDisconnected(context.applicationContext, target)
+                    spot.join()
                 } finally {
                     pendingResult.finish()
                 }
@@ -155,7 +157,9 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
             val pendingResult = goAsync()
             CoroutineScope(Dispatchers.IO).launch {
                 try {
+                    val spot = launch { LastSeenStore.captureAtDisconnect(app) }
                     RefreshCoordinator.handleDeviceDisconnected(app, target)
+                    spot.join()
                 } finally {
                     pendingResult.finish()
                 }

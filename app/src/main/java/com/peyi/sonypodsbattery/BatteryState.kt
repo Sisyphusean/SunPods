@@ -20,6 +20,10 @@ data class BatteryState(
 object BatteryStore {
     private const val PREFS = "battery_state"
 
+    /** The saved battery values; listen to it to see refreshes made anywhere in the app. */
+    fun prefs(context: Context): android.content.SharedPreferences =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
     fun load(context: Context): BatteryState {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         fun level(key: String) = p.getInt(key, -1).takeIf { it in 0..100 }

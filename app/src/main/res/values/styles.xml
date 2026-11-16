@@ -5,4 +5,13 @@
         <item name="android:windowNoTitle">true</item>
         <item name="android:colorAccent">@color/accent</item>
     </style>
+
+    <!-- Launch screen: the page colour of the app, with the SunPods mark assembling on its ink badge. -->
+    <style name="Theme.SunPods.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon_animated</item>
+        <item name="windowSplashScreenAnimationDuration">1000</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/ic_launcher_background</item>
+        <item name="postSplashScreenTheme">@style/AppTheme</item>
+    </style>
 </resources>

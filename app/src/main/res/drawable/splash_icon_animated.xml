@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Splash: the SunPods mark assembles itself. The amber ring sweeps round into place, the sun
+  pops in behind the bud, then the five rays draw outward one after another. Under 1 second.
+-->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+    <aapt:attr name="android:drawable">
+        <vector android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+            <group android:pivotX="54" android:pivotY="54" android:scaleX="0.8" android:scaleY="0.8" android:translateX="-3" android:translateY="3">
+                <group android:name="ring" android:pivotX="57.5" android:pivotY="52.5" android:rotation="-120" android:scaleX="0.7" android:scaleY="0.7">
+                    <path android:pathData="M34.00,52.50a23.50,23.50 0,1 0,47.00,0a23.50,23.50 0,1 0,-47.00,0Z" android:fillColor="#FFFFB547"/>
+                    <path android:pathData="M34.00,56.00a20.00,20.00 0,1 0,40.00,0a20.00,20.00 0,1 0,-40.00,0Z" android:fillColor="#FF15161A"/>
+                    <path android:pathData="M42.00,50.00A13,13 0,0 1,50.00,43.00" android:strokeColor="#FFFFFFFF" android:strokeWidth="2.4" android:strokeLineCap="round" android:strokeAlpha="0.35"/>
+                </group>
+                <path android:name="ray1" android:pathData="M81.80,40.02L87.78,39.49" android:strokeColor="#FFFFB547" android:strokeWidth="3.2" android:strokeLineCap="round" android:trimPathEnd="0"/>
+                <path android:name="ray2" android:pathData="M80.63,35.66L89.69,31.43" android:strokeColor="#FFFFB547" android:strokeWidth="3.2" android:strokeLineCap="round" android:trimPathEnd="0"/>
+                <path android:name="ray3" android:pathData="M78.04,31.96L87.94,22.06" android:strokeColor="#FFFFB547" android:strokeWidth="3.2" android:strokeLineCap="round" android:trimPathEnd="0"/>
+                <path android:name="ray4" android:pathData="M74.34,29.37L78.57,20.31" android:strokeColor="#FFFFB547" android:strokeWidth="3.2" android:strokeLineCap="round" android:trimPathEnd="0"/>
+                <path android:name="ray5" android:pathData="M69.98,28.20L70.51,22.22" android:strokeColor="#FFFFB547" android:strokeWidth="3.2" android:strokeLineCap="round" android:trimPathEnd="0"/>
+                <group android:name="sun" android:pivotX="68.85" android:pivotY="41.15" android:scaleX="0" android:scaleY="0">
+                    <path android:pathData="M58.85,41.15a10.00,10.00 0,1 0,20.00,0a10.00,10.00 0,1 0,-20.00,0Z" android:fillColor="#FFFFFFFF" android:fillAlpha="0.25"/>
+                    <path android:pathData="M63.35,41.15a5.50,5.50 0,1 0,11.00,0a5.50,5.50 0,1 0,-11.00,0Z" android:fillColor="#FFFFFFFF"/>
+                </group>
+            </group>
+        </vector>
+    </aapt:attr>
+
+    <target android:name="ring">
+        <aapt:attr name="android:animation">
+            <set>
+                <objectAnimator android:propertyName="rotation" android:valueFrom="-120" android:valueTo="0" android:duration="520" android:interpolator="@android:interpolator/fast_out_slow_in"/>
+                <objectAnimator android:propertyName="scaleX" android:valueFrom="0.7" android:valueTo="1" android:duration="520" android:interpolator="@android:interpolator/overshoot"/>
+                <objectAnimator android:propertyName="scaleY" android:valueFrom="0.7" android:valueTo="1" android:duration="520" android:interpolator="@android:interpolator/overshoot"/>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="sun">
+        <aapt:attr name="android:animation">
+            <set>
+                <objectAnimator android:propertyName="scaleX" android:valueFrom="0" android:valueTo="1" android:startOffset="300" android:duration="320" android:interpolator="@android:interpolator/overshoot"/>
+                <objectAnimator android:propertyName="scaleY" android:valueFrom="0" android:valueTo="1" android:startOffset="300" android:duration="320" android:interpolator="@android:interpolator/overshoot"/>
+            </set>
+        </aapt:attr>
+    </target>
+    <target android:name="ray5">
+        <aapt:attr name="android:animation">
+            <objectAnimator android:propertyName="trimPathEnd" android:valueFrom="0" android:valueTo="1" android:startOffset="520" android:duration="180" android:interpolator="@android:interpolator/fast_out_slow_in"/>
+        </aapt:attr>
+    </target>
+    <target android:name="ray4">
+        <aapt:attr name="android:animation">
+            <objectAnimator android:propertyName="trimPathEnd" android:valueFrom="0" android:valueTo="1" android:startOffset="580" android:duration="180" android:interpolator="@android:interpolator/fast_out_slow_in"/>
+        </aapt:attr>
+    </target>
+    <target android:name="ray3">
+        <aapt:attr name="android:animation">
+            <objectAnimator android:propertyName="trimPathEnd" android:valueFrom="0" android:valueTo="1" android:startOffset="640" android:duration="180" android:interpolator="@android:interpolator/fast_out_slow_in"/>
+        </aapt:attr>
+    </target>
+    <target android:name="ray2">
+        <aapt:attr name="android:animation">
+            <objectAnimator android:propertyName="trimPathEnd" android:valueFrom="0" android:valueTo="1" android:startOffset="700" android:duration="180" android:interpolator="@android:interpolator/fast_out_slow_in"/>
+        </aapt:attr>
+    </target>
+    <target android:name="ray1">
+        <aapt:attr name="android:animation">
+            <objectAnimator android:propertyName="trimPathEnd" android:valueFrom="0" android:valueTo="1" android:startOffset="760" android:duration="180" android:interpolator="@android:interpolator/fast_out_slow_in"/>
+        </aapt:attr>
+    </target>
+</animated-vector>

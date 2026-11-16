@@ -49,6 +49,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -69,7 +72,24 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.util.Calendar
+import androidx.compose.animation.core.exponentialDecay
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.min
@@ -107,12 +127,12 @@ internal val SolarLight = lightColorScheme(
     secondaryContainer = Color(0xFFFBDDBD), onSecondaryContainer = Color(0xFF281805),
     tertiary = Color(0xFFA33E13), onTertiary = Color.White,
     tertiaryContainer = Color(0xFFFFDBCF), onTertiaryContainer = Color(0xFF380D00),
-    background = Color(0xFFFFF8F1), onBackground = Color(0xFF1F1B16),
-    surface = Color(0xFFFFF8F1), onSurface = Color(0xFF1F1B16),
-    surfaceVariant = Color(0xFFF0E0CF), onSurfaceVariant = Color(0xFF504539),
-    surfaceContainerLowest = Color.White, surfaceContainerLow = Color(0xFFFBF2E7),
-    surfaceContainer = Color(0xFFF6ECDF), surfaceContainerHigh = Color(0xFFF0E6D9),
-    surfaceContainerHighest = Color(0xFFEAE0D3),
+    background = Color(0xFFFCFAF7), onBackground = Color(0xFF1F1B16),
+    surface = Color(0xFFFCFAF7), onSurface = Color(0xFF1F1B16),
+    surfaceVariant = Color(0xFFEFE6DC), onSurfaceVariant = Color(0xFF504539),
+    surfaceContainerLowest = Color.White, surfaceContainerLow = Color(0xFFF8F5F1),
+    surfaceContainer = Color(0xFFF3F0EB), surfaceContainerHigh = Color(0xFFEDE9E3),
+    surfaceContainerHighest = Color(0xFFE7E2DB),
     outline = Color(0xFF827568), outlineVariant = Color(0xFFD5C4B5),
     inverseSurface = Color(0xFF35302A), inverseOnSurface = Color(0xFFF9EFE5), inversePrimary = SolarAmber
 )
@@ -135,13 +155,6 @@ internal val SolarTypography: Typography = Typography().let { t ->
     )
 }
 
-internal fun greeting(): String = when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
-    in 5..11 -> "Good morning"
-    in 12..16 -> "Good afternoon"
-    in 17..21 -> "Good evening"
-    else -> "Late night listening"
-}
-
 // ======================================================================
 // Product hero: rendered XM5-style buds floating over a warm glow
 // ======================================================================
@@ -152,6 +165,25 @@ private fun modeTitle(mode: ListeningMode?, connected: Boolean, ambient: Int): S
     mode == ListeningMode.AMBIENT -> "Ambient sound · $ambient"
     mode == ListeningMode.OFF -> "Noise control off"
     else -> "Connected"
+}
+
+internal const val TURNTABLE_FRAMES = 72
+
+/** Frame index (0 until TURNTABLE_FRAMES) for a spin angle in degrees; frame k = k * 5 degrees. */
+internal fun turntableFrameFor(angleDeg: Float): Int =
+    Math.floorMod((angleDeg / (360f / TURNTABLE_FRAMES)).roundToInt(), TURNTABLE_FRAMES)
+
+/** Decodes turntable frames from assets/turntable on demand, keeping a small LRU of recent ones. */
+internal class TurntableFrames(private val context: android.content.Context) {
+    private val cache = android.util.LruCache<Int, ImageBitmap>(14)
+    private fun decode(i: Int): ImageBitmap? = runCatching {
+        context.assets.open("turntable/f%03d.webp".format(i)).use {
+            android.graphics.BitmapFactory.decodeStream(it)?.asImageBitmap()
+        }
+    }.getOrNull()?.also { cache.put(i, it) }
+
+    fun loadNow(i: Int): ImageBitmap? = cache.get(i) ?: decode(i)
+    suspend fun load(i: Int): ImageBitmap? = cache.get(i) ?: withContext(Dispatchers.IO) { decode(i) }
 }
 
 @Composable
@@ -183,180 +215,140 @@ internal fun SolarHero(
     }
     val title = modeTitle(mode, connected, ambientLevel)
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(280.dp)
-            .clip(MaterialTheme.shapes.extraLarge)
-            .background(colors.surfaceContainerLow)
-            .background(
-                Brush.radialGradient(
-                    listOf(SolarAmber.copy(alpha = glow), Color.Transparent),
-                    radius = 700f
-                )
-            )
-            .clickable(enabled = connected, onClickLabel = "Switch noise mode", onClick = onCycle)
-            .semantics { contentDescription = "$model. $title" }
-    ) {
-        Image(
-            painter = painterResource(R.drawable.buds_pair),
-            contentDescription = null,
-            colorFilter = if (connected) null else ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }),
+    // Turntable: drag sideways to spin both buds (pre-rendered frames), fling for momentum,
+    // and they ease back to the hero pose after a short idle. Tap still cycles noise mode.
+    val context = LocalContext.current
+    val frames = remember { TurntableFrames(context.applicationContext) }
+    val angle = remember { Animatable(0f) }
+    var shown by remember { mutableStateOf(frames.loadNow(0)) }
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    val degPerPx = with(LocalDensity.current) { 360f / 320.dp.toPx() }
+    var settle by remember { mutableStateOf<Job?>(null) }
+    val target = turntableFrameFor(angle.value)
+    LaunchedEffect(target) {
+        frames.load(target)?.let { shown = it }
+        for (d in intArrayOf(1, -1, 2, -2, 3, -3)) frames.load(Math.floorMod(target + d, TURNTABLE_FRAMES))
+    }
+    fun settleHome(velocity: Float) {
+        settle?.cancel()
+        settle = scope.launch {
+            angle.animateDecay(velocity.coerceIn(-1440f, 1440f), exponentialDecay(frictionMultiplier = 2.2f))
+            delay(2500)
+            val home = (angle.value / 360f).roundToInt() * 360f
+            angle.animateTo(home, spring(dampingRatio = 0.82f, stiffness = 60f))
+            angle.snapTo(0f)
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+    }
+    LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences("sunpods_ui", android.content.Context.MODE_PRIVATE)
+        val animationsOn = android.provider.Settings.Global.getFloat(
+            context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f
+        ) > 0f
+        if (animationsOn && !prefs.getBoolean("turntable_hint_shown", false)) {
+            delay(900)
+            angle.animateTo(-40f, tween(700, easing = FastOutSlowInEasing))
+            angle.animateTo(0f, spring(dampingRatio = 0.6f, stiffness = 90f))
+            prefs.edit().putBoolean("turntable_hint_shown", true).apply()
+        }
+    }
+
+    // No card around the hero: the buds float on the page with a soft glow that follows the mode.
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
             modifier = Modifier
-                .align(Alignment.Center)
-                .fillMaxWidth(0.82f)
-                .graphicsLayer {
-                    translationY = bob * 6.dp.toPx() - 8.dp.toPx()
-                    rotationZ = tilt * 1.5f
-                    scaleX = bump.value
-                    scaleY = bump.value
-                    alpha = if (connected) 1f else 0.55f
+                .fillMaxWidth()
+                .height(244.dp)
+                .drawBehind {
+                    // A wide oval glow that fades out fully inside the hero, so it has no edges.
+                    val r = size.height / 2
+                    scale(scaleX = size.width / size.height * 0.92f, scaleY = 1f, pivot = center) {
+                        drawCircle(
+                            Brush.radialGradient(
+                                listOf(SolarAmber.copy(alpha = glow), Color.Transparent),
+                                center = center,
+                                radius = r
+                            ),
+                            radius = r,
+                            center = center
+                        )
+                    }
                 }
-        )
-        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                .pointerInput(Unit) {
+                    val tracker = VelocityTracker()
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            settle?.cancel()
+                            tracker.resetTracking()
+                            scope.launch { angle.stop() }
+                        },
+                        onHorizontalDrag = { change, dx ->
+                            change.consume()
+                            tracker.addPosition(change.uptimeMillis, change.position)
+                            scope.launch { angle.snapTo(angle.value + dx * degPerPx) }
+                        },
+                        onDragEnd = { settleHome(tracker.calculateVelocity().x * degPerPx) },
+                        onDragCancel = { settleHome(0f) }
+                    )
+                }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    enabled = connected,
+                    onClickLabel = "Switch noise mode",
+                    onClick = onCycle
+                )
+                .semantics {
+                    contentDescription = "$model. $title"
+                    customActions = listOf(CustomAccessibilityAction("Spin earbuds") {
+                        settle?.cancel()
+                        settle = scope.launch {
+                            angle.animateTo(angle.value + 360f, tween(1600, easing = FastOutSlowInEasing))
+                            angle.snapTo(0f)
+                        }
+                        true
+                    })
+                }
+        ) {
+            Image(
+                bitmap = shown ?: frames.loadNow(0) ?: ImageBitmap(1, 1),
+                contentDescription = null,
+                colorFilter = if (connected) null else ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth(0.94f)
+                    .graphicsLayer {
+                        translationY = bob * 5.dp.toPx()
+                        rotationZ = tilt * 1.5f
+                        scaleX = bump.value
+                        scaleY = bump.value
+                        alpha = if (connected) 1f else 0.5f
+                    }
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(model, style = MaterialTheme.typography.titleLarge, color = colors.onSurface)
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(8.dp).clip(CircleShape)
                     .background(if (connected) SolarAmber else colors.outline)
             )
             Spacer(Modifier.width(8.dp))
-            Text(model, style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
-        }
-        Text(
-            title,
-            style = MaterialTheme.typography.headlineSmall,
-            color = colors.onSurface,
-            modifier = Modifier.align(Alignment.BottomStart).padding(20.dp).semantics { heading() }
-        )
-    }
-}
-
-// ======================================================================
-// Battery insights screen
-// ======================================================================
-
-@Composable
-internal fun BatteryInsightsScreen(battery: BatteryState) {
-    val context = LocalContext.current
-    var week by rememberSaveable { mutableStateOf(false) }
-    val samples = remember(battery.updatedAt) {
-        BatteryHistory.load(context, System.currentTimeMillis() - 7L * 86_400_000)
-    }
-    val outlook = remember(samples, battery) { BatteryInsights.outlook(samples, battery) }
-    val colors = MaterialTheme.colorScheme
-
-    Surface(color = colors.primaryContainer, shape = MaterialTheme.shapes.extraLarge) {
-        Column(Modifier.fillMaxWidth().padding(24.dp)) {
-            Text("Listening left", style = MaterialTheme.typography.labelLarge, color = colors.onPrimaryContainer)
             Text(
-                outlook.minutesLeft?.let(BatteryInsights::formatMinutes) ?: "--",
-                style = MaterialTheme.typography.displayMedium,
-                color = colors.onPrimaryContainer
-            )
-            Text(
-                when {
-                    outlook.minutesLeft == null -> "Take your buds out to see an estimate."
-                    outlook.measured -> "Based on how you listened this week. ${outlook.lowestBud} bud runs out first."
-                    else -> "Estimated from the XM5's 8 hour rating until SunPods learns your habits."
-                },
+                title,
                 style = MaterialTheme.typography.bodyMedium,
-                color = colors.onPrimaryContainer
+                color = colors.onSurfaceVariant,
+                modifier = Modifier.semantics { heading() }
             )
         }
-    }
-
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        if (!connected) {
+            Spacer(Modifier.height(12.dp))
             Text(
-                "History",
-                style = MaterialTheme.typography.titleSmall,
-                color = colors.primary,
-                modifier = Modifier.padding(start = 16.dp).weight(1f).semantics { heading() }
-            )
-            SingleChoiceSegmentedButtonRow(Modifier.width(180.dp)) {
-                SegmentedButton(selected = !week, onClick = { week = false }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("24 h") }
-                SegmentedButton(selected = week, onClick = { week = true }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("7 days") }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Surface(color = colors.surfaceContainer, shape = MaterialTheme.shapes.extraLarge) {
-            Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                val span = if (week) 7L * 86_400_000 else 86_400_000L
-                val now = System.currentTimeMillis()
-                val shown = samples.filter { it.time >= now - span }
-                if (shown.size < 2) {
-                    Text(
-                        "Your battery story starts here. SunPods notes a reading every few minutes while your buds are out, and nothing leaves your phone.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 24.dp)
-                    )
-                } else {
-                    BatteryChart(shown, now - span, now, Modifier.fillMaxWidth().height(200.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Legend("Left", colors.primary, false)
-                        Legend("Right", colors.tertiary, false)
-                        Legend("Case", colors.outline, true)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun Legend(label: String, color: Color, dashed: Boolean) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Canvas(Modifier.size(width = 18.dp, height = 8.dp)) {
-            drawLine(
-                color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2),
-                strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round,
-                pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(6f, 6f)) else null
-            )
-        }
-        Spacer(Modifier.width(6.dp))
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun BatteryChart(samples: List<BatterySample>, from: Long, to: Long, modifier: Modifier) {
-    val colors = MaterialTheme.colorScheme
-    val grid = colors.outlineVariant
-    val low = colors.error.copy(alpha = 0.10f)
-    val series = listOf(
-        Triple({ s: BatterySample -> s.left }, colors.primary, false),
-        Triple({ s: BatterySample -> s.right }, colors.tertiary, false),
-        Triple({ s: BatterySample -> s.case }, colors.outline, true)
-    )
-    Canvas(modifier.semantics { contentDescription = "Battery history chart" }) {
-        val w = size.width
-        val h = size.height
-        fun x(t: Long) = ((t - from).toFloat() / (to - from)) * w
-        fun y(level: Int) = h - level / 100f * h
-        drawRect(low, topLeft = Offset(0f, y(20)), size = androidx.compose.ui.geometry.Size(w, h - y(20)))
-        for (level in listOf(25, 50, 75, 100)) {
-            drawLine(grid, Offset(0f, y(level)), Offset(w, y(level)), strokeWidth = 1.dp.toPx())
-        }
-        for ((pick, color, dashed) in series) {
-            val path = Path()
-            var drawing = false
-            var lastTime = 0L
-            for (s in samples) {
-                val level = pick(s)?.takeIf { it in 1..100 }
-                if (level == null || s.time - lastTime > 30L * 60 * 1000) drawing = false
-                if (level != null) {
-                    if (!drawing) path.moveTo(x(s.time), y(level)) else path.lineTo(x(s.time), y(level))
-                    drawing = true
-                }
-                lastTime = s.time
-            }
-            drawPath(
-                path, color,
-                style = Stroke(
-                    width = 3.dp.toPx(), cap = StrokeCap.Round,
-                    pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(10f, 10f)) else null
-                )
+                "Open the case near your phone to connect.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.onSurfaceVariant
             )
         }
     }

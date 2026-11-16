@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,6 +30,27 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
 
     private val settingsLock = Mutex()
 
+    // Background refreshes (earbuds connecting, polling, the widget) save to BatteryStore. Follow
+    // those saves so the open screen updates by itself instead of waiting for a pull.
+    private val batteryListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        _battery.value = BatteryStore.load(app)
+    }
+
+    init {
+        BatteryStore.prefs(application).registerOnSharedPreferenceChangeListener(batteryListener)
+    }
+
+    override fun onCleared() {
+        BatteryStore.prefs(app).unregisterOnSharedPreferenceChangeListener(batteryListener)
+    }
+
+    /** On opening the app: read the earbuds if they're connected and the numbers are over a minute old. */
+    fun refreshIfStale() {
+        val b = _battery.value
+        val age = System.currentTimeMillis() - maxOf(b.updatedAt, b.lastCheckedAt)
+        if (age > 60_000 && audioLinkUp(app)) refreshAll()
+    }
+
     fun consumeMessage() {
         _message.value = null
     }
@@ -40,10 +62,25 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
 
     fun refreshAll() {
         if (_busy.value) return
+        _busy.value = true
         viewModelScope.launch {
-            _busy.value = true
             try {
-                _battery.value = RefreshCoordinator.awaitRefresh(app, startPolling = true)
+                // Right after the earbuds connect, the control channel often isn't ready for a second
+                // or two. Retry quietly instead of stopping and showing the old numbers.
+                var state = RefreshCoordinator.awaitRefresh(app, startPolling = true)
+                var attempt = 0
+                while (!state.status.startsWith("Updated") && attempt < 3 && audioLinkUp(app)) {
+                    delay(1_500L * (attempt + 1))
+                    attempt++
+                    state = RefreshCoordinator.awaitRefresh(app, startPolling = true)
+                }
+                _battery.value = state
+                if (!state.status.startsWith("Updated") && audioLinkUp(app)) {
+                    _message.value = "Couldn't reach your earbuds. If Sony Sound Connect is open, close it and pull down."
+                }
+                if (_battery.value.left != null || _battery.value.right != null) {
+                    launch { LastSeenStore.captureWhileConnected(app) }
+                }
                 settingsLock.withLock {
                     RefreshCoordinator.awaitSession(app, "Read settings") { session ->
                         SonyFeatures.readAll(session, _settings.value)

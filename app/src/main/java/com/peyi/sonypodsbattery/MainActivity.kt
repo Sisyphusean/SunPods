@@ -11,9 +11,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val vm: SunpodsViewModel by viewModels()
@@ -28,6 +31,20 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Splash exit: the mark grows and fades as the page fades through to SunPods.
+        // Fast phones are ready before the logo finishes assembling, so wait out the rest of
+        // the icon animation before the exit plays.
+        installSplashScreen().setOnExitAnimationListener { splash ->
+            val left = runCatching {
+                splash.iconAnimationStartMillis + splash.iconAnimationDurationMillis - android.os.SystemClock.uptimeMillis()
+            }.getOrDefault(0L).coerceIn(0L, 1_000L)
+            runCatching {
+                splash.iconView.animate().scaleX(1.5f).scaleY(1.5f).alpha(0f).setStartDelay(left + 120)
+                    .setDuration(300).setInterpolator(android.view.animation.AccelerateInterpolator()).start()
+            }
+            splash.view.animate().alpha(0f).setStartDelay(left + 180).setDuration(320)
+                .withEndAction { splash.remove() }.start()
+        }
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         hasPermission = hasBluetoothPermission()
@@ -43,18 +60,21 @@ class MainActivity : ComponentActivity() {
                     dynamicColor = dynamicColor,
                     onDynamicColorChange = { on ->
                         dynamicColor = on
-                        getSharedPreferences("ui", MODE_PRIVATE).edit().putBoolean("dynamic_color", on).apply()
+                        getSharedPreferences("ui", MODE_PRIVATE).edit().putBoolean("dynamic_color", on).commit()
+                        // Widgets follow the same colour choice as the app.
+                        lifecycleScope.launch { SonyPodsBatteryWidgetUpdater.updateAll(applicationContext) }
                     }
                 )
             }
         }
-        if (hasPermission) vm.refreshAll() else askForPermissions()
+        if (!hasPermission) askForPermissions()
     }
 
     override fun onResume() {
         super.onResume()
         hasPermission = hasBluetoothPermission()
         vm.reloadCached()
+        if (hasPermission) vm.refreshIfStale()
     }
 
     private fun hasBluetoothPermission() = Build.VERSION.SDK_INT < 31 ||

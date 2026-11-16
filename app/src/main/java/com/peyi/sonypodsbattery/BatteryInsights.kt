@@ -112,12 +112,18 @@ object BatteryInsights {
     }
 
     /** Average discharge rate across stretches where a bud was out of the case and falling. */
-    fun measuredDrain(samples: List<BatterySample>): Double? {
+    fun measuredDrain(samples: List<BatterySample>): Double? = drain(samples, listOf(0, 1))
+
+    /** Discharge rate for one bud: 0 = left, 1 = right. */
+    fun measuredDrain(samples: List<BatterySample>, side: Int): Double? = drain(samples, listOf(side))
+
+    private fun drain(samples: List<BatterySample>, sides: List<Int>): Double? {
         var drop = 0.0
         var hours = 0.0
-        for (side in listOf<(BatterySample) -> Pair<Int?, Boolean>>(
+        val pick = listOf<(BatterySample) -> Pair<Int?, Boolean>>(
             { it.left to it.leftCharging }, { it.right to it.rightCharging }
-        )) {
+        )
+        for (side in sides.map { pick[it] }) {
             samples.zipWithNext().forEach { (a, b) ->
                 val (la, ca) = side(a)
                 val (lb, cb) = side(b)
@@ -129,9 +135,38 @@ object BatteryInsights {
                 hours += gap / 3_600_000.0
             }
         }
-        if (hours < 0.75 || drop < 4) return null
+        if (hours < 0.75 * sides.size || drop < 4) return null
         return (drop / hours).coerceIn(3.0, 40.0)
     }
+
+    /** Minutes of listening on each of the last [days] days, oldest first, paired with each day's start. */
+    fun dailyListening(samples: List<BatterySample>, now: Long, days: Int): List<Pair<Long, Int>> {
+        val today = Calendar.getInstance().apply {
+            timeInMillis = now
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        return (days - 1 downTo 0).map { back ->
+            val start = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -back) }.timeInMillis
+            val end = (today.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -back + 1) }.timeInMillis
+            start to listeningBetween(samples, start, end)
+        }
+    }
+
+    private fun listeningBetween(samples: List<BatterySample>, start: Long, end: Long): Int {
+        var ms = 0L
+        samples.filter { it.time in start until end }.zipWithNext().forEach { (a, b) ->
+            val out = (a.left != null && !a.leftCharging) || (a.right != null && !a.rightCharging)
+            val gap = b.time - a.time
+            if (out && gap in 1..MAX_GAP_MS) ms += gap
+        }
+        return (ms / 60_000).toInt()
+    }
+
+    /** When the buds last came out of the case after charging, if the history saw it. */
+    fun lastTakenOut(samples: List<BatterySample>): Long? =
+        samples.zipWithNext().lastOrNull { (a, b) ->
+            (a.leftCharging || a.rightCharging) && !b.leftCharging && !b.rightCharging && (b.left != null || b.right != null)
+        }?.second?.time
 
     /** Time the earbuds were out and connected today, from the 5 minute refresh cadence. */
     fun listeningToday(samples: List<BatterySample>): Int {
@@ -167,16 +202,17 @@ object BatteryNudges {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val outlook = BatteryInsights.outlook(BatteryHistory.load(context, System.currentTimeMillis() - 7L * 86_400_000), state)
 
+        val threshold = budThreshold(context)
         for ((side, level, charging) in listOf(
             Triple("Left", state.left, state.leftCharging),
             Triple("Right", state.right, state.rightCharging)
         )) {
             val key = "low_${side.lowercase()}"
-            if (level == null || charging || level > 30) {
+            if (level == null || charging || level > threshold + 15) {
                 prefs.edit().remove(key).apply()
                 continue
             }
-            if (level in 1..15 && !prefs.getBoolean(key, false)) {
+            if (budAlerts(context) && level in 1..threshold && !prefs.getBoolean(key, false)) {
                 val left = (level / outlook.drainPerHour * 60).roundToInt()
                 notify(
                     context, 3001 + side.length,
@@ -189,13 +225,21 @@ object BatteryNudges {
 
         val case = state.case
         val lastCaseNudge = prefs.getLong("case_nudge", 0L)
-        if (case != null && case in 1..20 && !state.caseCharging &&
+        if (caseAlerts(context) && case != null && case in 1..20 && !state.caseCharging &&
             System.currentTimeMillis() - lastCaseNudge > 20L * 3_600_000
         ) {
             notify(context, 3010, "Case is at $case%", "Give it a charge tonight so tomorrow starts full.")
             prefs.edit().putLong("case_nudge", System.currentTimeMillis()).apply()
         }
     }
+
+    private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    fun budAlerts(context: Context) = prefs(context).getBoolean("alert_buds", true)
+    fun setBudAlerts(context: Context, on: Boolean) = prefs(context).edit().putBoolean("alert_buds", on).apply()
+    fun caseAlerts(context: Context) = prefs(context).getBoolean("alert_case", true)
+    fun setCaseAlerts(context: Context, on: Boolean) = prefs(context).edit().putBoolean("alert_case", on).apply()
+    fun budThreshold(context: Context) = prefs(context).getInt("bud_threshold", 15).coerceIn(10, 30)
+    fun setBudThreshold(context: Context, percent: Int) = prefs(context).edit().putInt("bud_threshold", percent).apply()
 
     private fun notify(context: Context, id: Int, title: String, text: String) {
         if (Build.VERSION.SDK_INT >= 33 &&

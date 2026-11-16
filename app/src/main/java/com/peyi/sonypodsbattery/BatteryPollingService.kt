@@ -34,6 +34,7 @@ class BatteryPollingService : Service() {
                 )
                 if (!pollingActive || EarbudConnectionStateStore.current(applicationContext) == EarbudConnectionState.DISCONNECTED) return@launch
                 failures = if (state.status.startsWith("Updated")) 0 else failures + 1
+                if (failures == 0) LastSeenStore.captureWhileConnected(applicationContext)
                 if (failures >= MAX_FAILURES) {
                     stopSelf()
                 } else {

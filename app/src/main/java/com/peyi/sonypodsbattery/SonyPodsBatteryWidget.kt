@@ -19,6 +19,7 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.LinearProgressIndicator
+import androidx.glance.appwidget.CircularProgressIndicator
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
@@ -79,6 +80,10 @@ private val CURRENT_AUDIO_MODE_KEY = stringPreferencesKey("current_audio_mode")
 private val DESIRED_AMBIENT_LEVEL_KEY = intPreferencesKey("desired_ambient_level")
 private val PENDING_AMBIENT_LEVEL_KEY = intPreferencesKey("pending_ambient_level")
 private val LAST_USER_ACTION_TIME = longPreferencesKey("last_user_action_time")
+private val REFRESH_STARTED = longPreferencesKey("refresh_started")
+private val PENDING_MODE_KEY = stringPreferencesKey("pending_mode")
+private val PENDING_MODE_AT = longPreferencesKey("pending_mode_at")
+private const val WORKING_TIMEOUT_MS = 15_000L
 private val AudioModeKey = ActionParameters.Key<String>("audio_mode_action")
 private const val MODE_SYNC_GRACE_PERIOD_MS = 4_000L
 
@@ -88,17 +93,29 @@ class SonyPodsBatteryWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
-            GlanceTheme(colors = DynamicThemeColorProviders) {
-                val storedState = BatteryStore.load(context)
+            SunpodsGlanceTheme(context) { palette ->
+                val snapshot = widgetSnapshot(context)
+                val storedState = snapshot.state
                 val preferences = currentState<Preferences>()
                 val currentMode = preferences[CURRENT_AUDIO_MODE_KEY] ?: AudioMode.NC.name
                 val desiredAmbientLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY]
                     ?: storedState.ambientLevel
+                val now = System.currentTimeMillis()
+                val started = preferences[REFRESH_STARTED] ?: 0L
+                val refreshing = now - started < WORKING_TIMEOUT_MS &&
+                    maxOf(storedState.updatedAt, storedState.lastCheckedAt) < started
+                val pending = preferences[PENDING_MODE_KEY]
+                    ?.takeIf { now - (preferences[PENDING_MODE_AT] ?: 0L) < WORKING_TIMEOUT_MS }
+                    ?.let(AudioMode::fromStored)
                 WidgetContent(
                     context = context,
                     state = storedState,
-                    currentMode = AudioMode.fromStored(currentMode),
-                    ambientLevel = desiredAmbientLevel
+                    currentMode = pending ?: AudioMode.fromStored(currentMode),
+                    pendingMode = pending,
+                    ambientLevel = desiredAmbientLevel,
+                    refreshing = refreshing,
+                    palette = palette,
+                    snapshot = snapshot
                 )
             }
         }
@@ -170,9 +187,10 @@ object SonyPodsBatteryWidgetUpdater {
                     state[CURRENT_AUDIO_MODE_KEY] = confirmedMode
                     state[DESIRED_AMBIENT_LEVEL_KEY] = confirmedState.ambientLevel
                     state.remove(PENDING_AMBIENT_LEVEL_KEY)
+                    state.remove(PENDING_MODE_KEY)
                     state[LAST_USER_ACTION_TIME] = 0L
                 }
-                if (shouldRedraw) widget.update(context, glanceId)
+                widget.update(context, glanceId)
             }
         }
     }
@@ -191,7 +209,11 @@ private fun WidgetContent(
     context: Context,
     state: BatteryState,
     currentMode: AudioMode,
-    ambientLevel: Int
+    pendingMode: AudioMode?,
+    ambientLevel: Int,
+    refreshing: Boolean,
+    palette: WidgetPalette,
+    snapshot: WidgetSnapshot
 ) {
     val size = LocalSize.current
     val wide = size.width >= 290.dp
@@ -200,35 +222,88 @@ private fun WidgetContent(
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(colors.widgetBackground)
+            .background(palette.page)
             .cornerRadius(24.dp)
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        Header(state, context)
+        Header(state, context, refreshing, snapshot.connected)
+        if (!snapshot.connected) {
+            NotConnectedBody(snapshot.last, palette, GlanceModifier.fillMaxWidth().defaultWeight())
+            return@Column
+        }
         Row(modifier = GlanceModifier.fillMaxWidth().defaultWeight()) {
-            BatteryTile("Left", usable(state.left), state.leftCharging, GlanceModifier.defaultWeight())
+            BatteryTile("Left", usable(state.left), state.leftCharging, palette, GlanceModifier.defaultWeight())
             Spacer(GlanceModifier.width(6.dp))
-            BatteryTile("Right", usable(state.right), state.rightCharging, GlanceModifier.defaultWeight())
+            BatteryTile("Right", usable(state.right), state.rightCharging, palette, GlanceModifier.defaultWeight())
             Spacer(GlanceModifier.width(6.dp))
-            BatteryTile("Case", usable(state.case), state.caseCharging, GlanceModifier.defaultWeight())
+            BatteryTile("Case", usable(state.case), state.caseCharging, palette, GlanceModifier.defaultWeight())
         }
         Spacer(GlanceModifier.height(6.dp))
         Row(modifier = GlanceModifier.fillMaxWidth().height(48.dp)) {
-            ModeButton(R.drawable.ic_mode_nc, "Noise cancelling", "ANC", AudioMode.NC, currentMode, wide, GlanceModifier.defaultWeight())
+            ModeButton(R.drawable.ic_mode_nc, "Noise cancelling", "ANC", AudioMode.NC, currentMode, pendingMode, wide, palette, GlanceModifier.defaultWeight())
             Spacer(GlanceModifier.width(6.dp))
-            ModeButton(R.drawable.ic_mode_ambient, "Ambient sound", "Ambient", AudioMode.AMBIENT, currentMode, wide, GlanceModifier.defaultWeight())
+            ModeButton(R.drawable.ic_mode_ambient, "Ambient sound", "Ambient", AudioMode.AMBIENT, currentMode, pendingMode, wide, palette, GlanceModifier.defaultWeight())
             Spacer(GlanceModifier.width(6.dp))
-            ModeButton(R.drawable.ic_mode_off, "Noise control off", "Off", AudioMode.OFF, currentMode, wide, GlanceModifier.defaultWeight())
+            ModeButton(R.drawable.ic_mode_off, "Noise control off", "Off", AudioMode.OFF, currentMode, pendingMode, wide, palette, GlanceModifier.defaultWeight())
         }
         if (currentMode == AudioMode.AMBIENT && tall) {
             Spacer(GlanceModifier.height(6.dp))
-            AmbientStepper(ambientLevel)
+            AmbientStepper(ambientLevel, palette)
+        }
+    }
+}
+
+/** Shown when the earbuds are away: the last reading, quietly, and how to reconnect. */
+@Composable
+private fun NotConnectedBody(last: BatterySample?, palette: WidgetPalette, modifier: GlanceModifier) {
+    val colors = GlanceTheme.colors
+    Column(
+        modifier = modifier
+            .background(palette.card)
+            .cornerRadius(16.dp)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .clickable(actionStartActivity<MainActivity>()),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("Earbuds not connected", style = titleText.copy(color = colors.onSurface), maxLines = 1)
+        Spacer(GlanceModifier.height(2.dp))
+        Text("Open the case near your phone", style = smallText.copy(color = colors.onSurfaceVariant), maxLines = 1)
+        if (last != null) {
+            Spacer(GlanceModifier.height(10.dp))
+            Row(modifier = GlanceModifier.fillMaxWidth()) {
+                LastLevel("L", usable(last.left), palette, GlanceModifier.defaultWeight())
+                Spacer(GlanceModifier.width(10.dp))
+                LastLevel("R", usable(last.right), palette, GlanceModifier.defaultWeight())
+                Spacer(GlanceModifier.width(10.dp))
+                LastLevel("Case", usable(last.case), palette, GlanceModifier.defaultWeight())
+            }
+            Spacer(GlanceModifier.height(6.dp))
+            Text("Last reading ${agoShort(last.time)}", style = smallText.copy(color = colors.onSurfaceVariant), maxLines = 1)
         }
     }
 }
 
 @Composable
-private fun Header(state: BatteryState, context: Context) {
+private fun LastLevel(label: String, level: Int?, palette: WidgetPalette, modifier: GlanceModifier) {
+    val colors = GlanceTheme.colors
+    Column(modifier = modifier) {
+        Text(
+            "$label ${level?.let { "$it%" } ?: "--"}",
+            style = smallText.copy(color = colors.onSurfaceVariant),
+            maxLines = 1
+        )
+        Spacer(GlanceModifier.height(4.dp))
+        LinearProgressIndicator(
+            progress = (level ?: 0) / 100f,
+            modifier = GlanceModifier.fillMaxWidth().height(4.dp),
+            color = colors.outline,
+            backgroundColor = palette.track
+        )
+    }
+}
+
+@Composable
+private fun Header(state: BatteryState, context: Context, refreshing: Boolean, connected: Boolean) {
     val colors = GlanceTheme.colors
     val timestamp = state.lastCheckedAt.takeIf { it != 0L } ?: state.updatedAt
     Row(
@@ -256,31 +331,38 @@ private fun Header(state: BatteryState, context: Context) {
             modifier = GlanceModifier.fillMaxHeight().clickable(actionRunCallback<RefreshWidgetAction>()),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (timestamp != 0L) {
-                Text(
-                    text = DateFormat.getTimeFormat(context).format(Date(timestamp)),
-                    style = smallText.copy(color = colors.onSurfaceVariant)
-                )
-            }
+            Text(
+                text = when {
+                    refreshing -> "Updating"
+                    !connected -> "Not connected"
+                    timestamp != 0L -> DateFormat.getTimeFormat(context).format(Date(timestamp))
+                    else -> ""
+                },
+                style = smallText.copy(color = if (refreshing) colors.primary else colors.onSurfaceVariant)
+            )
             Box(modifier = GlanceModifier.size(44.dp), contentAlignment = Alignment.Center) {
-                Image(
-                    provider = ImageProvider(R.drawable.ic_refresh),
-                    contentDescription = "Refresh",
-                    colorFilter = ColorFilter.tint(colors.onSurfaceVariant),
-                    modifier = GlanceModifier.size(20.dp)
-                )
+                if (refreshing) {
+                    CircularProgressIndicator(modifier = GlanceModifier.size(20.dp), color = colors.primary)
+                } else {
+                    Image(
+                        provider = ImageProvider(R.drawable.ic_refresh),
+                        contentDescription = "Refresh",
+                        colorFilter = ColorFilter.tint(colors.onSurfaceVariant),
+                        modifier = GlanceModifier.size(20.dp)
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun BatteryTile(label: String, level: Int?, charging: Boolean, modifier: GlanceModifier) {
+private fun BatteryTile(label: String, level: Int?, charging: Boolean, palette: WidgetPalette, modifier: GlanceModifier) {
     val colors = GlanceTheme.colors
-    val low = level != null && level <= 20
+    val low = level != null && level <= 20 && !charging
     Column(
         modifier = modifier.fillMaxHeight()
-            .background(colors.secondaryContainer)
+            .background(palette.card)
             .cornerRadius(16.dp)
             .padding(horizontal = 10.dp, vertical = 8.dp)
             .clickable(actionRunCallback<RefreshWidgetAction>()),
@@ -289,24 +371,24 @@ private fun BatteryTile(label: String, level: Int?, charging: Boolean, modifier:
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = level?.let { "$it" } ?: "--",
-                style = numberText.copy(color = if (low) colors.error else colors.onSecondaryContainer),
+                style = numberText.copy(color = if (low) colors.error else colors.onSurface),
                 maxLines = 1
             )
             if (level != null) {
-                Text("%", style = smallText.copy(color = colors.onSecondaryContainer))
+                Text("%", style = smallText.copy(color = colors.onSurfaceVariant))
             }
         }
         Text(
             text = if (charging) "$label · charging" else label,
-            style = smallText.copy(color = colors.onSecondaryContainer),
+            style = smallText.copy(color = if (charging) colors.primary else colors.onSurfaceVariant),
             maxLines = 1
         )
         Spacer(GlanceModifier.height(6.dp))
         LinearProgressIndicator(
             progress = (level ?: 0) / 100f,
-            modifier = GlanceModifier.fillMaxWidth().height(4.dp),
+            modifier = GlanceModifier.fillMaxWidth().height(6.dp).cornerRadius(3.dp),
             color = if (low) colors.error else colors.primary,
-            backgroundColor = colors.surfaceVariant
+            backgroundColor = palette.track
         )
     }
 }
@@ -318,26 +400,43 @@ private fun ModeButton(
     label: String,
     mode: AudioMode,
     activeMode: AudioMode,
+    pendingMode: AudioMode?,
     showLabel: Boolean,
+    palette: WidgetPalette,
     modifier: GlanceModifier
 ) {
     val active = mode == activeMode
+    val waiting = mode == pendingMode
     val colors = GlanceTheme.colors
-    val content = if (active) colors.onPrimary else colors.onSurfaceVariant
+    val content = when {
+        waiting -> colors.onPrimaryContainer
+        active -> colors.onPrimary
+        else -> colors.onSurfaceVariant
+    }
     Row(
         modifier = modifier.fillMaxHeight()
-            .background(if (active) colors.primary else colors.surfaceVariant)
+            .background(
+                when {
+                    waiting -> colors.primaryContainer
+                    active -> colors.primary
+                    else -> palette.card
+                }
+            )
             .cornerRadius(24.dp)
             .clickable(actionRunCallback<SetListeningModeAction>(actionParametersOf(AudioModeKey.to(mode.name)))),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Image(
-            provider = ImageProvider(icon),
-            contentDescription = description,
-            colorFilter = ColorFilter.tint(content),
-            modifier = GlanceModifier.size(20.dp)
-        )
+        if (waiting) {
+            CircularProgressIndicator(modifier = GlanceModifier.size(18.dp), color = colors.primary)
+        } else {
+            Image(
+                provider = ImageProvider(icon),
+                contentDescription = description,
+                colorFilter = ColorFilter.tint(content),
+                modifier = GlanceModifier.size(20.dp)
+            )
+        }
         if (showLabel) {
             Text(
                 text = label,
@@ -350,23 +449,23 @@ private fun ModeButton(
 }
 
 @Composable
-private fun AmbientStepper(ambientLevel: Int) {
+private fun AmbientStepper(ambientLevel: Int, palette: WidgetPalette) {
     val colors = GlanceTheme.colors
     Row(
         modifier = GlanceModifier.fillMaxWidth().height(44.dp)
-            .background(colors.secondaryContainer)
+            .background(palette.card)
             .cornerRadius(22.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         StepButton("−", -1)
         Column(modifier = GlanceModifier.defaultWeight(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Ambient $ambientLevel", style = smallText.copy(color = colors.onSecondaryContainer))
+            Text("Ambient $ambientLevel", style = smallText.copy(color = colors.onSurface))
             Spacer(GlanceModifier.height(4.dp))
             LinearProgressIndicator(
                 progress = ambientLevel.coerceIn(1, 20) / 20f,
                 modifier = GlanceModifier.fillMaxWidth().height(4.dp),
                 color = colors.primary,
-                backgroundColor = colors.surfaceVariant
+                backgroundColor = palette.track
             )
         }
         StepButton("+", 1)
@@ -382,15 +481,21 @@ private fun StepButton(symbol: String, delta: Int) {
     ) {
         Text(
             text = symbol,
-            style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Medium, color = GlanceTheme.colors.onSecondaryContainer)
+            style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Medium, color = GlanceTheme.colors.onSurface)
         )
     }
 }
 
 class RefreshWidgetAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        // Show "Updating" with a spinner straight away; the refresh redraws the widget when it lands.
+        val now = System.currentTimeMillis()
+        for (id in GlanceAppWidgetManager(context).getGlanceIds(SonyPodsBatteryWidget::class.java)) {
+            updateAppWidgetState(context, id) { it[REFRESH_STARTED] = now }
+            SonyPodsBatteryWidget().update(context, id)
+        }
         RefreshCoordinator.enqueueRefresh(context.applicationContext)
-        SonyPodsBatteryWidget().update(context, glanceId)
+        WidgetRedrawWorker.schedule(context, WORKING_TIMEOUT_MS / 1000 + 1)
     }
 }
 
@@ -404,10 +509,14 @@ class SetListeningModeAction : ActionCallback {
             ?: preferences[DESIRED_AMBIENT_LEVEL_KEY]
             ?: current.ambientLevel
         val actionTime = nextUserActionTime(preferences)
+        // The tapped mode lights up at once with a spinner until the earbuds confirm it.
         updateAppWidgetState(context, glanceId) { preferences ->
             preferences[LAST_USER_ACTION_TIME] = actionTime
+            preferences[PENDING_MODE_KEY] = mode.name
+            preferences[PENDING_MODE_AT] = actionTime
         }
         SonyPodsBatteryWidget().update(context, glanceId)
+        WidgetRedrawWorker.schedule(context, WORKING_TIMEOUT_MS / 1000 + 1)
 
         RefreshCoordinator.enqueueSetListeningMode(
             app,
