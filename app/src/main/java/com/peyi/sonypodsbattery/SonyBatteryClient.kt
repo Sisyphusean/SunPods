@@ -223,7 +223,9 @@ class SonyBatteryClient(private val context: Context) {
 
     data class Result(
         val left: Int?, val right: Int?, val case: Int?,
-        val leftCharging: Boolean, val rightCharging: Boolean, val caseCharging: Boolean
+        val leftCharging: Boolean, val rightCharging: Boolean, val caseCharging: Boolean,
+        /** The earbuds' own bytes, for diagnostics. */
+        val raw: String = ""
     )
 
     @SuppressLint("MissingPermission")
@@ -299,10 +301,15 @@ class SonyBatteryClient(private val context: Context) {
             return Result(
                 left = percent(buds.payload[2]), right = percent(buds.payload[4]),
                 case = caseFrame?.payload?.get(2)?.let(::percent),
-                leftCharging = buds.payload[3].toInt() != 0, rightCharging = buds.payload[5].toInt() != 0,
-                caseCharging = caseFrame?.payload?.get(3)?.let { it.toInt() != 0 } == true
+                // Status byte: 0 not charging, 1 charging, 2 unknown, 3 charged (full, still on power).
+                leftCharging = charging(buds.payload[3]), rightCharging = charging(buds.payload[5]),
+                caseCharging = caseFrame?.payload?.get(3)?.let(::charging) == true,
+                raw = "buds=${hex(buds.payload)} case=${caseFrame?.payload?.let(::hex) ?: "none"}"
             )
         }
+
+        private fun charging(status: Byte) = status.toInt() == 1 || status.toInt() == 3
+        private fun hex(b: ByteArray) = b.joinToString(" ") { "%02x".format(it.toInt() and 0xff) }
 
         fun setAmbientSoundMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean) {
             val enabled = if (mode == ListeningMode.OFF) 0 else 1

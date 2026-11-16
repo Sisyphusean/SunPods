@@ -737,7 +737,7 @@ private object SonyCommandCoordinator {
                 if (manualReconnectAttempt) DiagnosticsStore.add(app, "Manual refresh restored connection")
                 EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, target)
             }
-            DiagnosticsStore.add(app, "Refresh succeeded; case reported=${result.case != null}")
+            DiagnosticsStore.add(app, "Refresh succeeded; case reported=${result.case != null}; ${result.raw}")
             BatteryState(
                 result.left,
                 result.right,
