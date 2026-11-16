@@ -86,6 +86,13 @@ object RefreshCoordinator {
         SonyCommandCoordinator.closeSessionForServiceStop(context)
     }
 
+    /** Runs [action] on the shared Sony session, serialized with refreshes and mode changes. */
+    internal suspend fun <T> awaitSession(
+        context: Context,
+        label: String,
+        action: (SonyBatteryClient.SonySession) -> T
+    ): Result<T> = SonyCommandCoordinator.awaitCustom(context, label, action)
+
     suspend fun awaitRefresh(
         context: Context,
         device: BluetoothDevice? = null,
@@ -142,6 +149,13 @@ private sealed interface SonyCommand {
         val device: BluetoothDevice,
         val attempt: Int,
         val generation: Long
+    ) : SonyCommand
+
+    class Custom(
+        val context: Context,
+        val label: String,
+        val action: (SonyBatteryClient.SonySession) -> Any?,
+        val completion: CompletableDeferred<Result<Any?>>
     ) : SonyCommand
 
 }
@@ -544,7 +558,38 @@ private object SonyCommandCoordinator {
             is SonyCommand.Reconnect -> {
                 executeReconnect(command)
             }
+            is SonyCommand.Custom -> {
+                command.completion.complete(executeCustom(command))
+            }
         }
+    }
+
+    private suspend fun executeCustom(command: SonyCommand.Custom): Result<Any?> {
+        val app = command.context.applicationContext
+        val client = SonyBatteryClient(app)
+        val target = client.findEarbuds()
+            ?: return Result.failure(EarbudsUnavailableException("Pair your WF-1000XM5 in Android settings first"))
+        if (A2dpConnectionHelper.isConnected(app, target) == false) {
+            return Result.failure(EarbudsUnavailableException("Earbuds aren't connected"))
+        }
+        return try {
+            Result.success(SonyControlSessionManager.withSession(app, target, command.action))
+        } catch (error: Exception) {
+            DiagnosticsStore.add(app, "${command.label} failed: ${error.javaClass.simpleName}: ${error.message}")
+            Result.failure(error)
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    suspend fun <T> awaitCustom(
+        context: Context,
+        label: String,
+        action: (SonyBatteryClient.SonySession) -> T
+    ): Result<T> {
+        val completion = CompletableDeferred<Result<Any?>>()
+        commands.send(SonyCommand.Custom(context.applicationContext, label, { action(it) }, completion))
+        startWorker()
+        return completion.await().map { it as T }
     }
 
     private suspend fun executeConfirmedControlCommand(

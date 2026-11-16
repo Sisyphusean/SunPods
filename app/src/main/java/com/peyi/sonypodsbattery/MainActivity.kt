@@ -1,274 +1,76 @@
 package com.peyi.sonypodsbattery
 
 import android.Manifest
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
-import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
-import android.view.Gravity
-import android.view.View
-import android.widget.Button
-import android.widget.CheckBox
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.SeekBar
-import android.widget.TextView
-import java.text.DateFormat
-import java.util.Date
+import android.provider.Settings
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
-class MainActivity : Activity() {
-    private lateinit var status: TextView
-    private lateinit var left: TextView
-    private lateinit var right: TextView
-    private lateinit var caseLevel: TextView
-    private lateinit var updated: TextView
-    private lateinit var refresh: Button
-    private lateinit var permissionSettings: Button
-    private lateinit var ambientSlider: SeekBar
-    private lateinit var ambientValue: TextView
-    private lateinit var voiceFocus: CheckBox
-    private var currentMode: ListeningMode? = null
-    private var rendering = false
-    private val modeButtons = mutableMapOf<ListeningMode, Button>()
+class MainActivity : ComponentActivity() {
+    private val vm: SunpodsViewModel by viewModels()
+    private var hasPermission by mutableStateOf(false)
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        hasPermission = hasBluetoothPermission()
+        if (hasPermission) vm.refreshAll()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        setContentView(buildContent())
-        render(BatteryStore.load(this))
-        refresh.setOnClickListener { ensurePermissionsAndRefresh() }
-        permissionSettings.setOnClickListener { openPermissionSettings() }
-        findViewById<Button>(ID_DIAGNOSTICS).setOnClickListener { shareDiagnostics() }
-        if (hasBluetoothPermission()) ensurePermissionsAndRefresh() else requestBluetoothPermission()
+        hasPermission = hasBluetoothPermission()
+        setContent {
+            SunpodsTheme {
+                SunpodsApp(
+                    vm = vm,
+                    hasPermission = hasPermission,
+                    onRequestPermission = ::askForPermissions,
+                    onShareDiagnostics = ::shareDiagnostics,
+                    onOpenBluetoothSettings = { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
+                )
+            }
+        }
+        if (hasPermission) vm.refreshAll() else askForPermissions()
     }
 
     override fun onResume() {
         super.onResume()
-        if (::status.isInitialized) {
-            render(BatteryStore.load(this))
-            updatePermissionUi()
-        }
-    }
-
-    private fun buildContent(): View {
-        val density = resources.displayMetrics.density
-        fun dp(value: Int) = (value * density).toInt()
-        fun text(value: String, size: Float, color: Int = getColor(R.color.white)) = TextView(this).apply {
-            this.text = value; textSize = size; setTextColor(color)
-        }
-        fun batteryCard(label: String, id: Int): LinearLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = getDrawable(R.drawable.card_background)
-            setPadding(dp(16), dp(14), dp(16), dp(14))
-            addView(text(label.uppercase(), 11f, getColor(R.color.muted)))
-            addView(text("Not available", 26f).apply { this.id = id; setTypeface(typeface, Typeface.BOLD) })
-        }
-
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(28), dp(20), dp(28))
-        }
-        body.addView(text("SONY PODS", 12f, getColor(R.color.accent)).apply { letterSpacing = .16f })
-        body.addView(text("WF-1000XM5", 32f).apply { setTypeface(typeface, Typeface.BOLD) })
-        status = text("Ready", 15f, getColor(R.color.muted)).also {
-            body.addView(it, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(6), 0, dp(22)) })
-        }
-
-        val cards = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f }
-        val leftCard = batteryCard("Left", ID_LEFT)
-        left = leftCard.findViewById(ID_LEFT)
-        val rightCard = batteryCard("Right", ID_RIGHT)
-        right = rightCard.findViewById(ID_RIGHT)
-        cards.addView(leftCard, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
-        cards.addView(rightCard, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6) })
-        body.addView(cards)
-        val caseCard = batteryCard("Case", ID_CASE)
-        caseLevel = caseCard.findViewById(ID_CASE)
-        body.addView(caseCard, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(12), 0, dp(20)) })
-
-        body.addView(text("LISTENING MODE", 12f, getColor(R.color.muted)))
-        val modes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 3f }
-        fun modeButton(mode: ListeningMode, title: String): Button = Button(this).apply {
-            text = title; textSize = 11f; isAllCaps = false
-            setTextColor(getColor(R.color.white)); setBackgroundColor(getColor(R.color.surface_2))
-            setOnClickListener { changeListeningMode(mode) }
-            modeButtons[mode] = this
-        }
-        modes.addView(modeButton(ListeningMode.NOISE_CANCELLING, "Noise cancel"), LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(3) })
-        modes.addView(modeButton(ListeningMode.AMBIENT, "Ambient"), LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(3), 0, dp(3), 0) })
-        modes.addView(modeButton(ListeningMode.OFF, "Off"), LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(3) })
-        body.addView(modes, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(8), 0, dp(12)) })
-
-        val ambientControls = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = getDrawable(R.drawable.card_background)
-            setPadding(dp(16), dp(10), dp(16), dp(12))
-        }
-        ambientValue = text("Transparency level 20", 14f).also { ambientControls.addView(it) }
-        ambientSlider = SeekBar(this).apply {
-            max = 19; progress = 19
-            contentDescription = "Transparency level"
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                    ambientValue.text = "Transparency level ${progress + 1}"
-                }
-                override fun onStartTrackingTouch(seekBar: SeekBar) {}
-                override fun onStopTrackingTouch(seekBar: SeekBar) {
-                    if (currentMode == ListeningMode.AMBIENT) changeListeningMode(ListeningMode.AMBIENT)
-                }
-            })
-        }
-        ambientControls.addView(ambientSlider, LinearLayout.LayoutParams(-1, dp(42)))
-        voiceFocus = CheckBox(this).apply {
-            text = "Focus on voice"; textSize = 14f; setTextColor(getColor(R.color.white))
-            setOnCheckedChangeListener { _, _ ->
-                if (!rendering && currentMode == ListeningMode.AMBIENT) changeListeningMode(ListeningMode.AMBIENT)
-            }
-        }
-        ambientControls.addView(voiceFocus)
-        body.addView(ambientControls, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, dp(20)) })
-
-        refresh = Button(this).apply {
-            text = "REFRESH BATTERY"; textSize = 14f; setTextColor(Color.BLACK)
-            background = getDrawable(R.drawable.button_background); isAllCaps = false
-        }
-        body.addView(refresh, LinearLayout.LayoutParams(-1, dp(56)))
-        permissionSettings = Button(this).apply {
-            text = "OPEN BLUETOOTH PERMISSION SETTINGS"; textSize = 13f
-            setTextColor(getColor(R.color.white)); setBackgroundColor(getColor(R.color.surface_2)); isAllCaps = false
-        }
-        body.addView(permissionSettings, LinearLayout.LayoutParams(-1, dp(50)).apply { setMargins(0, dp(10), 0, 0) })
-        updated = text("Never updated", 12f, getColor(R.color.muted)).also {
-            it.gravity = Gravity.CENTER
-            body.addView(it, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(12), 0, dp(26)) })
-        }
-        body.addView(text("Designed to coexist", 18f).apply { setTypeface(typeface, Typeface.BOLD) })
-        body.addView(text("The Sony control connection is opened only during a refresh and closed immediately afterward. If Sound Connect is already open, close it and retry.", 14f, getColor(R.color.muted)).apply {
-            setLineSpacing(0f, 1.2f)
-        }, LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, dp(6), 0, dp(16)) })
-        body.addView(Button(this).apply {
-            id = ID_DIAGNOSTICS; text = "Share diagnostics"; isAllCaps = false
-            setTextColor(getColor(R.color.white)); setBackgroundColor(getColor(R.color.surface_2))
-        }, LinearLayout.LayoutParams(-1, dp(48)))
-        return ScrollView(this).apply { setBackgroundColor(getColor(R.color.black)); addView(body) }
-    }
-
-    private fun ensurePermissionsAndRefresh() {
-        if (!hasBluetoothPermission()) {
-            requestBluetoothPermission()
-            status.text = "Allow Nearby devices. If no prompt appears, use the settings button."
-            return
-        }
-        refresh.isEnabled = false
-        refresh.text = "Reading..."
-        status.text = "Connecting briefly to your earbuds"
-        Thread {
-            val state = RefreshCoordinator.refresh(applicationContext)
-            runOnUiThread { render(state); refresh.isEnabled = true; refresh.text = "REFRESH BATTERY" }
-        }.start()
-    }
-
-    private fun render(state: BatteryState) {
-        fun format(level: Int?, charging: Boolean) = level?.let { "$it%${if (charging) "  charging" else ""}" } ?: "Not available"
-        left.text = format(state.left, state.leftCharging)
-        right.text = format(state.right, state.rightCharging)
-        caseLevel.text = format(state.case, state.caseCharging)
-        status.text = state.status
-        modeButtons.forEach { (mode, button) ->
-            val active = state.listeningMode == mode
-            button.setBackgroundColor(getColor(if (active) R.color.accent else R.color.surface_2))
-            button.setTextColor(if (active) Color.BLACK else getColor(R.color.white))
-        }
-        rendering = true
-        currentMode = state.listeningMode
-        val isAmbient = state.listeningMode == ListeningMode.AMBIENT
-        ambientSlider.progress = state.ambientLevel - 1
-        voiceFocus.isChecked = state.focusOnVoice
-        ambientSlider.isEnabled = isAmbient
-        voiceFocus.isEnabled = isAmbient
-        ambientValue.alpha = if (isAmbient) 1f else .45f
-        voiceFocus.alpha = if (isAmbient) 1f else .45f
-        rendering = false
-        updated.text = if (state.updatedAt == 0L) "Never updated" else
-            "Last updated ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(state.updatedAt))}"
-    }
-
-    private fun changeListeningMode(mode: ListeningMode) {
-        if (!hasBluetoothPermission()) {
-            requestBluetoothPermission()
-            return
-        }
-        modeButtons.values.forEach { it.isEnabled = false }
-        status.text = "Switching to ${mode.label.lowercase()}"
-        Thread {
-            val state = RefreshCoordinator.setListeningMode(applicationContext, mode, ambientSlider.progress + 1, voiceFocus.isChecked)
-            runOnUiThread {
-                render(state)
-                modeButtons.values.forEach { it.isEnabled = true }
-            }
-        }.start()
+        hasPermission = hasBluetoothPermission()
+        vm.reloadCached()
     }
 
     private fun hasBluetoothPermission() = Build.VERSION.SDK_INT < 31 ||
         checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
-    private fun requestBluetoothPermission() {
-        if (Build.VERSION.SDK_INT >= 31 && !hasBluetoothPermission()) {
-            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BLUETOOTH)
+    private fun askForPermissions() {
+        val wanted = buildList {
+            if (Build.VERSION.SDK_INT >= 31) add(Manifest.permission.BLUETOOTH_CONNECT)
+            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (wanted.isEmpty()) {
+            hasPermission = true
+            vm.refreshAll()
         } else {
-            updatePermissionUi()
-            requestNotificationPermission()
+            permissionLauncher.launch(wanted.toTypedArray())
         }
-    }
-
-    private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
-        }
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_BLUETOOTH) {
-            updatePermissionUi()
-            if (hasBluetoothPermission()) {
-                status.text = "Bluetooth access granted"
-                requestNotificationPermission()
-                ensurePermissionsAndRefresh()
-            } else {
-                status.text = "Nearby devices is blocked. Open Bluetooth permission settings below."
-            }
-        }
-    }
-
-    private fun updatePermissionUi() {
-        if (!::permissionSettings.isInitialized) return
-        permissionSettings.visibility = if (hasBluetoothPermission()) View.GONE else View.VISIBLE
-    }
-
-    private fun openPermissionSettings() {
-        startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.parse("package:$packageName")
-        })
     }
 
     private fun shareDiagnostics() {
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "Sony Pods Battery diagnostics")
+            putExtra(Intent.EXTRA_SUBJECT, "Sunpods diagnostics")
             putExtra(Intent.EXTRA_TEXT, DiagnosticsStore.text(this@MainActivity))
         }, "Share diagnostics"))
-    }
-
-    companion object {
-        private const val ID_LEFT = 1001
-        private const val ID_RIGHT = 1002
-        private const val ID_CASE = 1003
-        private const val ID_DIAGNOSTICS = 1004
-        private const val REQUEST_BLUETOOTH = 100
-        private const val REQUEST_NOTIFICATIONS = 101
     }
 }

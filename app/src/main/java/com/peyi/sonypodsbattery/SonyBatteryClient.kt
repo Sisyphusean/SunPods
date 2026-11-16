@@ -246,13 +246,13 @@ class SonyBatteryClient(private val context: Context) {
         private val decoder = SonyProtocol.Decoder()
         private var sequence = 0
 
-        private fun send(payload: ByteArray) {
+        internal fun send(payload: ByteArray) {
             output.write(SonyProtocol.encode(SonyProtocol.DATA_MDR, sequence, payload))
             output.flush()
             sequence = 1 - sequence
         }
 
-        private fun waitFor(timeoutMs: Long, match: (SonyFrame) -> Boolean): SonyFrame? {
+        internal fun waitFor(timeoutMs: Long, match: (SonyFrame) -> Boolean): SonyFrame? {
             val deadline = System.currentTimeMillis() + timeoutMs
             val buffer = ByteArray(1024)
             while (System.currentTimeMillis() < deadline) {
@@ -312,5 +312,22 @@ class SonyBatteryClient(private val context: Context) {
         }
 
         private fun percent(value: Byte): Int? = (value.toInt() and 0xff).takeIf { it in 0..100 }
+
+        /** Sends a GET (payload[0] = command) and returns the matching RET payload (command + 1, same inquired type). */
+        fun request(payload: ByteArray, timeoutMs: Long = 1_500): ByteArray? {
+            val retCode = ((payload[0].toInt() and 0xff) + 1).toByte()
+            val inquired = payload.getOrNull(1)
+            send(payload)
+            return waitFor(timeoutMs) { frame ->
+                frame.type == SonyProtocol.DATA_MDR && frame.payload.size >= 2 &&
+                    frame.payload[0] == retCode && (inquired == null || frame.payload[1] == inquired)
+            }?.payload
+        }
+
+        /** Sends a SET and waits for the earbuds to acknowledge it. */
+        fun command(payload: ByteArray, timeoutMs: Long = 2_000): Boolean {
+            send(payload)
+            return waitFor(timeoutMs) { it.type == SonyProtocol.ACK } != null
+        }
     }
 }

@@ -111,6 +111,8 @@ class SonyPodsBatteryWidgetReceiver : GlanceAppWidgetReceiver() {
 object SonyPodsBatteryWidgetUpdater {
     suspend fun updateAll(context: Context) {
         SonyPodsBatteryWidget().updateAll(context)
+        SunpodsMiniWidget().updateAll(context)
+        SunpodsTileService.requestUpdate(context)
     }
 
     suspend fun syncReportedMode(context: Context, reportedMode: AudioMode): Boolean {
@@ -142,6 +144,8 @@ object SonyPodsBatteryWidgetUpdater {
         confirmedState: BatteryState,
         requestedAtMillis: Long
     ) {
+        SunpodsMiniWidget().updateAll(context)
+        SunpodsTileService.requestUpdate(context)
         val manager = GlanceAppWidgetManager(context)
         val widget = SonyPodsBatteryWidget()
         val glanceIds = manager.getGlanceIds(SonyPodsBatteryWidget::class.java)

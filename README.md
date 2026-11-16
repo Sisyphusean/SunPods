@@ -1,37 +1,53 @@
-# Sony Pods Battery
+# Sunpods
 
-A small, private Android battery companion for the Sony WF-1000XM5.
+A Material You companion for the Sony WF-1000XM5. No account, no sign-in, no internet permission.
 
-## What the MVP does
+## Features
 
-* Reads left, right, and case battery levels directly from the earbuds
-* Shows the last result in the app, a low-priority notification, and a home-screen widget
-* Refreshes manually, from the widget, or when Android reports that the earbuds connected
-* Opens Sony's RFCOMM control channel only for a refresh and always closes it afterward
-* Stores only battery state and a short sanitized diagnostic log on the phone
+* **Battery**: left, right and case, with charging state, in the app, a notification and two widgets
+* **Noise control**: noise cancelling, ambient (level 1 to 20, focus on voice) or off
+* **Equaliser**: Sony presets (Bright, Excited, Mellow, Relaxed, Vocal, Treble, Bass, Speech), plus Manual and Custom 1/2 with five bands and Clear Bass
+* **DSEE Extreme** on or off
+* **Connection quality**: prioritise sound quality (LDAC) or a stable connection
+* **Speak-to-Chat**: on or off, sensitivity, and when chat mode ends
+* **Touch controls**: assign ambient sound control, playback, volume or nothing to each earbud
+* **Wearing detection**: pause when removed, power off when removed
+* **Device info**: model, firmware, current codec
+* **Widgets**: the full Sunpods widget (battery and noise control) and a compact 2×1 battery widget
+* **Quick Settings tile**: tap to cycle noise cancelling, ambient and off, with battery in the subtitle
 
-There is no internet permission, account, advertising, analytics SDK, or persistent background service.
+Every change is read back from the earbuds, so the app shows what they actually applied.
 
-## Install and test
+## Install
 
 1. Pair the WF-1000XM5 in Android Bluetooth settings.
 2. Install the APK and allow Nearby devices. Notification permission is optional.
-3. Make sure Sony Sound Connect is not currently reading the earbuds, then tap **Refresh battery**.
-4. Open the charging case if the case level says **Not available**. Sony normally reports case battery only while the case is awake.
-5. If a refresh fails, use **Share diagnostics** in the app and send the text with the phone model and Android version.
-
-Do not run this app and Sony Sound Connect at the exact same moment. Sony exposes one private control connection, so whichever app owns it first can temporarily block the other. This app releases that connection immediately after every attempt.
+3. Close Sony Sound Connect. Sony exposes one control connection, so only one app can hold it.
+4. Open the case lid to read the case battery.
+5. If something fails, use **Device → Share diagnostics**.
 
 ## Build
 
-Use JDK 17 and Android SDK 35:
+JDK 17 and Android SDK 35:
 
 ```sh
 ./gradlew test assembleDebug
 ```
 
-## Protocol note
+## Protocol
 
-This clean implementation uses the Sony MDR packet framing and battery queries documented by open source interoperability projects. The relevant commands are `22 09` for both earbuds and `22 0A` for the case. Protocol behavior was cross-checked against SonyBridge and Gadgetbridge. SonyBridge is MIT licensed and Gadgetbridge is AGPL-3.0-or-later. No source code from either project is included here.
+This uses Sony's MDR v2 framing over RFCOMM. Command and value codes were checked against the command tables in Sound Connect 13.2.1 and against Gadgetbridge (AGPL-3.0-or-later) and SonyBridge (MIT). No code from either project is included.
 
-Sony and WF-1000XM5 are trademarks of Sony Group Corporation. This project is independent and is not endorsed by Sony.
+| Feature | GET / SET | Inquired type |
+|---|---|---|
+| Battery L/R, case | 0x22 | 0x09, 0x0a |
+| Noise / ambient | 0x66 / 0x68 | 0x15 |
+| Equaliser | 0x56 / 0x58 | 0x00 |
+| DSEE, connection mode | 0xe6 / 0xe8 | 0x01, 0x00 |
+| Pause when removed, touch, Speak-to-Chat | 0xf6 / 0xf8 | 0x01, 0x03, 0x0c |
+| Speak-to-Chat settings | 0xfa / 0xfc | 0x0c |
+| Auto power off | 0x26 / 0x28 | 0x05 |
+| Model, firmware | 0x04 | 0x01, 0x02 |
+| Codec | 0x12 | 0x02 |
+
+Sony and WF-1000XM5 are trademarks of Sony Group Corporation. This project is independent and not endorsed by Sony.
