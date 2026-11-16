@@ -1276,6 +1276,9 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
             }
         )
     }
+
+    val live = vm.battery.collectAsState().value
+    DevicesCard(connected = live.left != null || live.right != null)
 }
 
 private fun generalIcon(key: String) = when {
@@ -1455,5 +1458,5 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.11.1"
+    const val VERSION = "2.12.0"
 }

@@ -6,6 +6,8 @@ data class SonyFrame(val type: Int, val sequence: Int, val payload: ByteArray)
 
 object SonyProtocol {
     const val DATA_MDR = 0x0c
+    /** Sony's second command table (devices, voice guidance). */
+    const val DATA_MDR_NO2 = 0x0e
     const val ACK = 0x01
     private const val START = 0x3e
     private const val END = 0x3c

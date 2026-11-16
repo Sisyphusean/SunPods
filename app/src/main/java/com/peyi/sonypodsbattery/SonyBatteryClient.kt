@@ -249,8 +249,8 @@ class SonyBatteryClient(private val context: Context) {
         private val decoder = SonyProtocol.Decoder()
         private var sequence = 0
 
-        internal fun send(payload: ByteArray) {
-            output.write(SonyProtocol.encode(SonyProtocol.DATA_MDR, sequence, payload))
+        internal fun send(payload: ByteArray, type: Int = SonyProtocol.DATA_MDR) {
+            output.write(SonyProtocol.encode(type, sequence, payload))
             output.flush()
             sequence = 1 - sequence
         }
@@ -265,7 +265,7 @@ class SonyBatteryClient(private val context: Context) {
                     if (count < 0) throw EOFException("Sony control channel reached EOF")
                     if (count > 0) for (frame in decoder.feed(buffer.copyOf(count))) {
                         if (frame.type == SonyProtocol.ACK) sequence = frame.sequence
-                        if (frame.type == SonyProtocol.DATA_MDR) {
+                        if (frame.type == SonyProtocol.DATA_MDR || frame.type == SonyProtocol.DATA_MDR_NO2) {
                             output.write(SonyProtocol.encode(SonyProtocol.ACK, 1 - frame.sequence, byteArrayOf()))
                             output.flush()
                         }
@@ -317,19 +317,19 @@ class SonyBatteryClient(private val context: Context) {
         private fun percent(value: Byte): Int? = (value.toInt() and 0xff).takeIf { it in 0..100 }
 
         /** Sends a GET (payload[0] = command) and returns the matching RET payload (command + 1, same inquired type). */
-        fun request(payload: ByteArray, timeoutMs: Long = 1_500): ByteArray? {
+        fun request(payload: ByteArray, timeoutMs: Long = 1_500, type: Int = SonyProtocol.DATA_MDR): ByteArray? {
             val retCode = ((payload[0].toInt() and 0xff) + 1).toByte()
             val inquired = payload.getOrNull(1)
-            send(payload)
+            send(payload, type)
             return waitFor(timeoutMs) { frame ->
-                frame.type == SonyProtocol.DATA_MDR && frame.payload.size >= 2 &&
+                frame.type == type && frame.payload.size >= 2 &&
                     frame.payload[0] == retCode && (inquired == null || frame.payload[1] == inquired)
             }?.payload
         }
 
         /** Sends a SET and waits for the earbuds to acknowledge it. */
-        fun command(payload: ByteArray, timeoutMs: Long = 2_000): Boolean {
-            send(payload)
+        fun command(payload: ByteArray, timeoutMs: Long = 2_000, type: Int = SonyProtocol.DATA_MDR): Boolean {
+            send(payload, type)
             return waitFor(timeoutMs) { it.type == SonyProtocol.ACK } != null
         }
     }
