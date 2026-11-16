@@ -460,9 +460,9 @@ private fun BatteryStrip(battery: BatteryState) {
         BatteryInsights.outlook(BatteryHistory.load(context, System.currentTimeMillis() - 7L * 86_400_000), battery)
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        BatteryPill("Left", battery.left?.takeIf { it in 1..100 }, battery.leftCharging, Modifier.weight(1f))
-        BatteryPill("Right", battery.right?.takeIf { it in 1..100 }, battery.rightCharging, Modifier.weight(1f))
-        BatteryPill("Case", battery.case?.takeIf { it in 1..100 }, battery.caseCharging, Modifier.weight(1f))
+        BatteryPill("Left", battery.left?.takeIf { it in 1..100 }, battery.leftCharging, Modifier.weight(1f), R.drawable.bud_left)
+        BatteryPill("Right", battery.right?.takeIf { it in 1..100 }, battery.rightCharging, Modifier.weight(1f), R.drawable.bud_right)
+        BatteryPill("Case", battery.case?.takeIf { it in 1..100 }, battery.caseCharging, Modifier.weight(1f), R.drawable.bud_case)
     }
     Text(
         when {
@@ -482,7 +482,7 @@ private fun relative(time: Long): String =
 
 /** A tall tile that fills from the bottom like a battery. */
 @Composable
-private fun BatteryPill(label: String, level: Int?, charging: Boolean, modifier: Modifier = Modifier) {
+private fun BatteryPill(label: String, level: Int?, charging: Boolean, modifier: Modifier = Modifier, art: Int? = null) {
     val colors = MaterialTheme.colorScheme
     val low = level != null && level <= 20
     val fraction by animateFloatAsState((level ?: 0) / 100f, spring(stiffness = 200f), label = "fill")
@@ -505,6 +505,13 @@ private fun BatteryPill(label: String, level: Int?, charging: Boolean, modifier:
                 .align(Alignment.BottomCenter)
                 .background(if (low) colors.error.copy(alpha = 0.35f) else colors.primary.copy(alpha = 0.28f))
         )
+        if (art != null) {
+            androidx.compose.foundation.Image(
+                painter = androidx.compose.ui.res.painterResource(art),
+                contentDescription = null,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxWidth(0.62f).padding(end = 4.dp)
+            )
+        }
         Column(
             Modifier.fillMaxSize().padding(12.dp),
             verticalArrangement = Arrangement.SpaceBetween
@@ -942,5 +949,5 @@ private fun DeviceScreen(
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.2.0"
+    const val VERSION = "2.3.0"
 }

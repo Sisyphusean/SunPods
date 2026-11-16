@@ -3,6 +3,7 @@
 package com.peyi.sonypodsbattery
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -13,6 +14,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +40,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,11 +52,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -136,25 +143,15 @@ internal fun greeting(): String = when (Calendar.getInstance().get(Calendar.HOUR
 }
 
 // ======================================================================
-// The living eclipse: the XM5 bud moves across the sun as the mode changes
+// Product hero: rendered XM5-style buds floating over a warm glow
 // ======================================================================
 
-private data class Sky(val top: Color, val bottom: Color, val ink: Color)
-
-private fun skyFor(mode: ListeningMode?, connected: Boolean): Sky = when {
-    !connected -> Sky(Color(0xFF2A2B31), Color(0xFF45464E), Color.White)
-    mode == ListeningMode.NOISE_CANCELLING -> Sky(Color(0xFF07080C), Color(0xFF231B3A), Color.White)
-    mode == ListeningMode.AMBIENT -> Sky(Color(0xFF2B1B2E), Color(0xFFC2582A), Color.White)
-    mode == ListeningMode.OFF -> Sky(Color(0xFFFFC46B), Color(0xFFFFEBC8), SolarInk)
-    else -> Sky(Color(0xFF2A2B31), Color(0xFF45464E), Color.White)
-}
-
-private fun storyFor(mode: ListeningMode?, connected: Boolean, ambient: Int): Pair<String, String> = when {
-    !connected -> "Waiting for sunrise" to "Take your buds out and pull down to connect."
-    mode == ListeningMode.NOISE_CANCELLING -> "Total eclipse" to "Noise cancelling. The world goes quiet."
-    mode == ListeningMode.AMBIENT -> "Partial eclipse" to "Ambient sound at $ambient. Letting the world in."
-    mode == ListeningMode.OFF -> "Clear sky" to "No processing. Just you and the music."
-    else -> "Hello" to "Pull down to read your earbuds."
+private fun modeTitle(mode: ListeningMode?, connected: Boolean, ambient: Int): String = when {
+    !connected -> "Not connected"
+    mode == ListeningMode.NOISE_CANCELLING -> "Noise cancelling"
+    mode == ListeningMode.AMBIENT -> "Ambient sound · $ambient"
+    mode == ListeningMode.OFF -> "Noise control off"
+    else -> "Connected"
 }
 
 @Composable
@@ -165,111 +162,71 @@ internal fun SolarHero(
     model: String,
     onCycle: () -> Unit
 ) {
-    val sky = skyFor(mode, connected)
-    val top by animateColorAsState(sky.top, tween(700), label = "skyTop")
-    val bottom by animateColorAsState(sky.bottom, tween(700), label = "skyBottom")
-    val ink by animateColorAsState(sky.ink, tween(500), label = "ink")
-
-    // How far the bud sits from the sun's centre, in sun radii.
-    val targetOffset = when {
-        !connected -> 1.15f
-        mode == ListeningMode.NOISE_CANCELLING -> 0f
-        mode == ListeningMode.AMBIENT -> 0.35f + ambientLevel.coerceIn(1, 20) / 20f * 0.6f
-        mode == ListeningMode.OFF -> 2.4f
-        else -> 1.15f
-    }
-    val offset by animateFloatAsState(targetOffset, spring(dampingRatio = 0.62f, stiffness = 90f), label = "bud")
-    val rayAmp by animateFloatAsState(
+    val colors = MaterialTheme.colorScheme
+    val glow by animateFloatAsState(
         when {
-            !connected -> 0.15f
-            mode == ListeningMode.NOISE_CANCELLING -> 0.3f
-            mode == ListeningMode.AMBIENT -> 0.35f + ambientLevel / 50f
-            mode == ListeningMode.OFF -> 0.8f
-            else -> 0.3f
+            !connected -> 0.08f
+            mode == ListeningMode.NOISE_CANCELLING -> 0.22f
+            mode == ListeningMode.AMBIENT -> 0.32f + ambientLevel / 80f
+            mode == ListeningMode.OFF -> 0.5f
+            else -> 0.2f
         },
-        spring(stiffness = 60f), label = "rays"
+        tween(600), label = "glow"
     )
-    val motion = rememberInfiniteTransition(label = "sun")
-    val phase by motion.animateFloat(0f, (2 * PI).toFloat(), infiniteRepeatable(tween(4200, easing = LinearEasing)), label = "phase")
-    val pulse by motion.animateFloat(0.55f, 1f, infiniteRepeatable(tween(1500, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse")
-    val (title, line) = storyFor(mode, connected, ambientLevel)
+    val motion = rememberInfiniteTransition(label = "float")
+    val bob by motion.animateFloat(-1f, 1f, infiniteRepeatable(tween(2800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "bob")
+    val tilt by motion.animateFloat(-1f, 1f, infiniteRepeatable(tween(4300, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "tilt")
+    val bump = remember { Animatable(1f) }
+    LaunchedEffect(mode) {
+        bump.snapTo(0.96f)
+        bump.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 300f))
+    }
+    val title = modeTitle(mode, connected, ambientLevel)
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(300.dp)
+            .height(280.dp)
             .clip(MaterialTheme.shapes.extraLarge)
-            .background(Brush.verticalGradient(listOf(top, bottom)))
+            .background(colors.surfaceContainerLow)
+            .background(
+                Brush.radialGradient(
+                    listOf(SolarAmber.copy(alpha = glow), Color.Transparent),
+                    radius = 700f
+                )
+            )
             .clickable(enabled = connected, onClickLabel = "Switch noise mode", onClick = onCycle)
-            .semantics { contentDescription = "$title. $line" }
+            .semantics { contentDescription = "$model. $title" }
     ) {
-        Canvas(Modifier.fillMaxSize()) {
-            val r = min(size.width, size.height) * 0.14f
-            val c = Offset(size.width * 0.68f, size.height * 0.42f)
-
-            drawCircle(
-                Brush.radialGradient(listOf(SolarAmber.copy(alpha = 0.45f), Color.Transparent), c, r * 3.2f),
-                r * 3.2f, c
+        Image(
+            painter = painterResource(R.drawable.buds_pair),
+            contentDescription = null,
+            colorFilter = if (connected) null else ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }),
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth(0.82f)
+                .graphicsLayer {
+                    translationY = bob * 6.dp.toPx() - 8.dp.toPx()
+                    rotationZ = tilt * 1.5f
+                    scaleX = bump.value
+                    scaleY = bump.value
+                    alpha = if (connected) 1f else 0.55f
+                }
+        )
+        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(8.dp).clip(CircleShape)
+                    .background(if (connected) SolarAmber else colors.outline)
             )
-            val rays = 20
-            for (i in 0 until rays) {
-                val a = i * (2 * PI / rays).toFloat()
-                val wobble = 0.55f + 0.45f * sin(phase * 2 + i * 1.7f)
-                val len = r * rayAmp * wobble
-                val start = r * 1.28f
-                drawLine(
-                    SolarAmber.copy(alpha = 0.85f),
-                    Offset(c.x + cos(a) * start, c.y + sin(a) * start),
-                    Offset(c.x + cos(a) * (start + len), c.y + sin(a) * (start + len)),
-                    strokeWidth = r * 0.09f,
-                    cap = StrokeCap.Round
-                )
-            }
-            drawCircle(SolarAmber, r, c)
-
-            val bud = Offset(c.x - offset * r, c.y + offset * r * 0.32f)
-            drawCircle(SolarInk, r * 1.0f, bud)
-            drawArc(
-                Color.White.copy(alpha = 0.32f), 200f, 55f, false,
-                topLeft = Offset(bud.x - r * 0.68f, bud.y - r * 0.68f),
-                size = androidx.compose.ui.geometry.Size(r * 1.36f, r * 1.36f),
-                style = Stroke(width = r * 0.1f, cap = StrokeCap.Round)
-            )
-
-            // Diamond ring: the last bead of sunlight, only when the bud fully covers the sun.
-            val ring = (1f - (offset / 0.3f)).coerceIn(0f, 1f)
-            if (ring > 0f) {
-                val fa = (-PI / 4).toFloat()
-                val f = Offset(c.x + cos(fa) * r * 1.02f, c.y + sin(fa) * r * 1.02f)
-                drawCircle(Color.White.copy(alpha = 0.28f * ring * pulse), r * 0.42f, f)
-                drawCircle(Color.White.copy(alpha = ring), r * 0.14f, f)
-                drawCircle(
-                    SolarAmber.copy(alpha = 0.6f * ring), r * 1.05f, c,
-                    style = Stroke(width = r * 0.06f)
-                )
-            }
+            Spacer(Modifier.width(8.dp))
+            Text(model, style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
         }
-        Column(Modifier.padding(20.dp).fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(8.dp).clip(CircleShape)
-                        .background(if (connected) SolarAmber else ink.copy(alpha = 0.5f))
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    if (connected) "$model · connected" else model,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = ink.copy(alpha = 0.85f)
-                )
-            }
-        }
-        Column(
-            Modifier.align(Alignment.BottomStart).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(title, style = MaterialTheme.typography.headlineMedium, color = ink, modifier = Modifier.semantics { heading() })
-            Text(line, style = MaterialTheme.typography.bodyMedium, color = ink.copy(alpha = 0.85f))
-        }
+        Text(
+            title,
+            style = MaterialTheme.typography.headlineSmall,
+            color = colors.onSurface,
+            modifier = Modifier.align(Alignment.BottomStart).padding(20.dp).semantics { heading() }
+        )
     }
 }
 
