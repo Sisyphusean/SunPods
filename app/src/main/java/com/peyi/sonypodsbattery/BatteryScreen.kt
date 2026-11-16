@@ -194,7 +194,8 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
     val shown = remember(samples, week) { samples.filter { it.time >= from } }
     // Right gets a cool blue so the two buds never read as one line.
     val right = if (colors.isLight) Color(0xFF3B6EA8) else Color(0xFF9CC2F2)
-    val seriesColor = mapOf(Series.LEFT to colors.primary, Series.RIGHT to right, Series.CASE to colors.outline)
+    val left = if (colors.isLight) Color(0xFFB8740F) else Color(0xFFF2B65A)
+    val seriesColor = mapOf(Series.LEFT to left, Series.RIGHT to right, Series.CASE to colors.outline)
 
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -232,7 +233,10 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(8.dp).clip(CircleShape).background(seriesColor.getValue(s)))
                             Spacer(Modifier.width(6.dp))
-                            Text(point.level(s)?.let { "$it%" } ?: "--", style = MaterialTheme.typography.titleMedium)
+                            val value = if (selected != null) point.level(s) else shown.lastOrNull { it.level(s) != null }?.level(s)
+                            Text(s.label.first().toString(), style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
+                            Spacer(Modifier.width(4.dp))
+                            Text(value?.let { "$it%" } ?: "--", style = MaterialTheme.typography.titleMedium)
                         }
                     }
                     if (point.anyBudCharging()) {
@@ -297,7 +301,8 @@ private fun ScrubChart(
     val colors = MaterialTheme.colorScheme
     val grid = colors.outlineVariant
     val charging = colors.primary.copy(alpha = 0.08f)
-    val low = colors.error.copy(alpha = 0.08f)
+    val low = colors.error.copy(alpha = 0.035f)
+    val lowLine = colors.error.copy(alpha = 0.35f)
     val cursor = colors.onSurface
     val dotRing = cardColor
     val reveal = remember { androidx.compose.animation.core.Animatable(0f) }
@@ -329,9 +334,13 @@ private fun ScrubChart(
     ) {
         val w = size.width
         val h = size.height
+        val pad = 4.dp.toPx()
         fun x(t: Long) = ((t - from).toFloat() / (to - from)) * w
-        fun y(level: Int) = h - level / 100f * h
+        fun y(level: Int) = pad + (1f - level / 100f) * (h - 2 * pad)
+        // Low zone: a faint wash and a hairline at 20%, not a block.
         drawRect(low, topLeft = Offset(0f, y(20)), size = Size(w, h - y(20)))
+        drawLine(lowLine, Offset(0f, y(20)), Offset(w, y(20)), strokeWidth = 1.dp.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 8f)))
         samples.zipWithNext().forEach { (a, b) ->
             if (a.anyBudCharging() && b.time - a.time < 3 * 3_600_000L) {
                 drawRect(charging, topLeft = Offset(x(a.time), 0f), size = Size(x(b.time) - x(a.time), h))
@@ -344,25 +353,41 @@ private fun ScrubChart(
         clipRect(right = w * reveal.value) {
         for (s in Series.entries) {
             if (s.name in hidden) continue
-            val path = Path()
-            var drawing = false
-            var lastTime = 0L
+            val color = seriesColor.getValue(s)
+            val runs = mutableListOf<MutableList<Offset>>()
+            var lastTime = Long.MIN_VALUE / 2
             for (p in samples) {
-                val level = p.level(s)
-                if (level == null || p.time - lastTime > 30L * 60 * 1000) drawing = false
-                if (level != null) {
-                    if (!drawing) path.moveTo(x(p.time), y(level)) else path.lineTo(x(p.time), y(level))
-                    drawing = true
-                }
+                val level = p.level(s) ?: continue
+                val point = Offset(x(p.time), y(level))
+                if (runs.isEmpty() || p.time - lastTime > 45L * 60 * 1000) runs += mutableListOf(point) else runs.last() += point
                 lastTime = p.time
             }
-            drawPath(
-                path, seriesColor.getValue(s),
-                style = Stroke(
-                    width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round,
-                    pathEffect = if (s == Series.CASE) PathEffect.dashPathEffect(floatArrayOf(10f, 10f)) else null
+            val stroke = 3.dp.toPx()
+            runs.zipWithNext().forEach { (a, b) ->
+                // Bridge breaks of up to 6 hours: the level carried on while SunPods wasn't looking.
+                val gap = (b.first().x - a.last().x) / w * (to - from)
+                if (gap < 6 * 3_600_000f) drawLine(
+                    color.copy(alpha = 0.35f), a.last(), b.first(), strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(2f, 8f))
                 )
-            )
+            }
+            for (run in runs) {
+                if (run.size == 1) {
+                    drawCircle(color, stroke * 0.9f, run.first())
+                    continue
+                }
+                val path = Path().apply {
+                    moveTo(run.first().x, run.first().y)
+                    run.drop(1).forEach { lineTo(it.x, it.y) }
+                }
+                drawPath(
+                    path, color,
+                    style = Stroke(
+                        width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round,
+                        pathEffect = if (s == Series.CASE) PathEffect.dashPathEffect(floatArrayOf(10f, 10f)) else null
+                    )
+                )
+            }
         }
         }
         if (selected != null) {

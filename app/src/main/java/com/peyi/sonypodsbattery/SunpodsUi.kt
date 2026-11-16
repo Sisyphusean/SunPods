@@ -90,6 +90,7 @@ import androidx.compose.material.icons.rounded.NoiseAware
 import androidx.compose.material.icons.rounded.NoiseControlOff
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.SettingsInputAntenna
@@ -1262,6 +1263,26 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
             { ToggleRow(Icons.Rounded.PowerSettingsNew, "Power off when removed", "Saves battery when both earbuds are out", settings.autoOffWhenRemoved, vm::setAutoOff) }
         )
     )
+
+    // Only what these earbuds say they support, named the way they name it.
+    val general = settings.general.orEmpty()
+    if (general.isNotEmpty()) {
+        Group(
+            "Connection and calls",
+            rows = general.map { g ->
+                {
+                    ToggleRow(generalIcon(g.key), g.title, g.subtitle, g.on) { on -> vm.setGeneral(g.slot, on) }
+                }
+            }
+        )
+    }
+}
+
+private fun generalIcon(key: String) = when {
+    key.startsWith("MULTIPOINT") -> Icons.Rounded.Devices
+    key.startsWith("SIDETONE") -> Icons.Rounded.RecordVoiceOver
+    key.startsWith("TWS_ONE_SIDE") -> Icons.Rounded.Hearing
+    else -> Icons.Rounded.Tune
 }
 
 /** One earbud: its render, its side and what a touch does. Tap to change. */
@@ -1434,5 +1455,5 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.10.3"
+    const val VERSION = "2.11.0"
 }

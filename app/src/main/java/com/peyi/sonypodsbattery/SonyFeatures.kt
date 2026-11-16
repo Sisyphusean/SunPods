@@ -87,6 +87,27 @@ enum class NoiseCycle(val code: Int, val label: String) {
     }
 }
 
+/**
+ * A "general setting": an on/off switch the earbuds describe themselves (Sony's GS slots 1 to 4).
+ * On the XM5 these carry things like multipoint and hearing your own voice on calls.
+ */
+data class GeneralSetting(val slot: Int, val key: String, val on: Boolean?) {
+    val title: String get() = GS_TITLES[key]?.first ?: pretty(key)
+    val subtitle: String get() = GS_TITLES[key]?.second ?: ""
+
+    companion object {
+        private val GS_TITLES = mapOf(
+            "MULTIPOINT_SETTING" to ("Connect to 2 devices" to "Stay connected to your phone and another device at once"),
+            "SIDETONE_SETTING" to ("Hear your voice on calls" to "Plays your own voice back so you don't shout"),
+            "TWS_ONE_SIDE_USE_NCASM_SETTING" to ("Noise control with one earbud" to "Keep cancelling or ambient when only one earbud is in"),
+            "FACETAP_SETTING" to ("Tap your face to control" to "Tap near the earbud instead of on it")
+        )
+
+        private fun pretty(key: String) = key.removeSuffix("_SETTING").lowercase().replace('_', ' ')
+            .replaceFirstChar { it.uppercase() }
+    }
+}
+
 data class DeviceSettings(
     val modelName: String? = null,
     val firmware: String? = null,
@@ -105,6 +126,8 @@ data class DeviceSettings(
     val touchLeft: TouchFunction? = null,
     val touchRight: TouchFunction? = null,
     val noiseCycle: NoiseCycle? = null,
+    /** null until the slots have been probed once; empty means the earbuds offer none. */
+    val general: List<GeneralSetting>? = null,
     val readAt: Long = 0L
 ) {
     val eqPreset: EqPreset? get() = EqPreset.from(eqPresetCode)
@@ -119,6 +142,13 @@ internal object SonyFeatures {
     private const val AUDIO_GET_PARAM = 0xe6
     private const val SYSTEM_GET_PARAM = 0xf6
     private const val SYSTEM_GET_EXT_PARAM = 0xfa
+    private const val GS_GET_CAPABILITY = 0xd0
+    private const val GS_GET_PARAM = 0xd6
+    private val GS_SLOTS = 0xd1..0xd4
+    private const val GS_BOOLEAN = 0x00
+    private const val GS_ON = 0x00
+    private const val GS_OFF = 0x01
+    private const val LANGUAGE_ENGLISH = 0x01
 
     // Inquired types
     private const val INFO_MODEL = 0x01
@@ -154,7 +184,37 @@ internal object SonyFeatures {
         r = readAutoOff(s, r)
         r = readTouch(s, r)
         r = readNoiseCycle(s, r)
+        r = readGeneral(s, r)
         return r.copy(readAt = System.currentTimeMillis())
+    }
+
+    /**
+     * Asks each slot what it is once (unused slots stay silent, so that probe is kept short and
+     * remembered), then reads the current value of the ones that are on/off switches.
+     */
+    private fun readGeneral(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
+        val known = r.general ?: GS_SLOTS.mapNotNull { slot ->
+            val p = s.request(bytes(GS_GET_CAPABILITY, slot, LANGUAGE_ENGLISH), timeoutMs = 600) ?: return@mapNotNull null
+            // [ret, slot, type, format, titleLen, title...]
+            if (p.size < 5 || u(p[2]) != GS_BOOLEAN) return@mapNotNull null
+            val len = u(p[4]).coerceAtMost(p.size - 5)
+            val key = String(p, 5, len, Charsets.US_ASCII).trim()
+            if (key.isBlank()) null else GeneralSetting(slot, key, null)
+        }
+        return r.copy(general = known.map { g -> g.copy(on = readGeneralValue(s, g.slot) ?: g.on) })
+    }
+
+    private fun readGeneralValue(s: SonyBatteryClient.SonySession, slot: Int): Boolean? {
+        val p = s.request(bytes(GS_GET_PARAM, slot)) ?: return null
+        // [ret, slot, type, value] with 0 = on, 1 = off
+        if (p.size < 4 || u(p[2]) != GS_BOOLEAN) return null
+        return when (u(p[3])) { GS_ON -> true; GS_OFF -> false; else -> null }
+    }
+
+    fun setGeneral(s: SonyBatteryClient.SonySession, r: DeviceSettings, slot: Int, on: Boolean): DeviceSettings {
+        s.command(bytes(GS_GET_PARAM + 2, slot, GS_BOOLEAN, if (on) GS_ON else GS_OFF))
+        val value = readGeneralValue(s, slot)
+        return r.copy(general = r.general?.map { if (it.slot == slot) it.copy(on = value ?: on) else it })
     }
 
     // ---- readers ----
@@ -361,6 +421,12 @@ object SettingsStore {
                 pauseWhenRemoved = bool("pause"), autoOffWhenRemoved = bool("autoOff"),
                 touchLeft = TouchFunction.from(int("tl")), touchRight = TouchFunction.from(int("tr")),
                 noiseCycle = NoiseCycle.from(int("cycle")),
+                general = if (o.has("gs")) o.getJSONArray("gs").let { a ->
+                    (0 until a.length()).map { i ->
+                        val g = a.getJSONObject(i)
+                        GeneralSetting(g.getInt("slot"), g.getString("key"), if (g.has("on")) g.getBoolean("on") else null)
+                    }
+                } else null,
                 readAt = if (o.has("at")) o.getLong("at") else 0L
             )
         } catch (_: Exception) {
@@ -387,6 +453,11 @@ object SettingsStore {
         s.touchLeft?.let { o.put("tl", it.code) }
         s.touchRight?.let { o.put("tr", it.code) }
         s.noiseCycle?.let { o.put("cycle", it.code) }
+        s.general?.let { list ->
+            o.put("gs", org.json.JSONArray().also { a ->
+                list.forEach { g -> a.put(JSONObject().put("slot", g.slot).put("key", g.key).also { j -> g.on?.let { j.put("on", it) } }) }
+            })
+        }
         o.put("at", s.readAt)
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, o.toString()).apply()
     }

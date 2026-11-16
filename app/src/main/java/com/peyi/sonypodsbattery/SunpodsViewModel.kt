@@ -136,6 +136,11 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         SonyFeatures.setAutoOff(s, r, whenRemoved)
     }
 
+    fun setGeneral(slot: Int, on: Boolean) = change(
+        "Device setting",
+        { s -> s.copy(general = s.general?.map { if (it.slot == slot) it.copy(on = on) else it }) }
+    ) { s, r -> SonyFeatures.setGeneral(s, r, slot, on) }
+
     fun setTouch(left: TouchFunction, right: TouchFunction) = change(
         "Touch controls",
         { it.copy(touchLeft = left, touchRight = right) }
