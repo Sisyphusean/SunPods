@@ -572,8 +572,19 @@ private object SonyCommandCoordinator {
         if (A2dpConnectionHelper.isConnected(app, target) == false) {
             return Result.failure(EarbudsUnavailableException("Earbuds aren't connected"))
         }
+        val wasConnected = SonyControlSessionManager.currentState() == SonySessionState.CONNECTED
         return try {
-            Result.success(SonyControlSessionManager.withSession(app, target, command.action))
+            Result.success(
+                try {
+                    SonyControlSessionManager.withSession(app, target, command.action)
+                } catch (stale: SonyControlChannelUnavailableException) {
+                    if (!wasConnected) throw stale
+                    // The cached socket may have died silently; reopen once before giving up.
+                    DiagnosticsStore.add(app, "${command.label}: session failed, retrying once")
+                    SonyControlSessionManager.prepareManualReconnect(app)
+                    SonyControlSessionManager.withSession(app, target, command.action)
+                }
+            )
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "${command.label} failed: ${error.javaClass.simpleName}: ${error.message}")
             Result.failure(error)

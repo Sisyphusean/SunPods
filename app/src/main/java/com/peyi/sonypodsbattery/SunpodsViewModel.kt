@@ -104,6 +104,10 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         { it.copy(touchLeft = left, touchRight = right) }
     ) { s, r -> SonyFeatures.setTouch(s, r, left, right) }
 
+    fun setNoiseCycle(cycle: NoiseCycle) = change("Noise control cycle", { it.copy(noiseCycle = cycle) }) { s, r ->
+        SonyFeatures.setNoiseCycle(s, r, cycle)
+    }
+
     private fun change(
         label: String,
         optimistic: (DeviceSettings) -> DeviceSettings,

@@ -531,6 +531,22 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
             Text("Right earbud", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
             Segmented(TouchFunction.entries.toList(), right, { it.short }) { vm.setTouch(left, it) }
             Text(touchHint(right), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            if (left == TouchFunction.AMBIENT_SOUND_CONTROL || right == TouchFunction.AMBIENT_SOUND_CONTROL) {
+                Text(
+                    "Noise control tap cycles through",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 4.dp)
+                )
+                NoiseCycle.entries.forEach { option ->
+                    ListItem(
+                        headlineContent = { Text(option.label) },
+                        leadingContent = {
+                            RadioButton(selected = settings.noiseCycle == option, onClick = { vm.setNoiseCycle(option) })
+                        },
+                        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                    )
+                }
+            }
         }
     }
 

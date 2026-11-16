@@ -76,6 +76,17 @@ enum class ConnectionPriority(val code: Int, val label: String, val detail: Stri
     }
 }
 
+enum class NoiseCycle(val code: Int, val label: String) {
+    NC_AMBIENT_OFF(0x01, "Noise cancelling, Ambient, Off"),
+    NC_AMBIENT(0x02, "Noise cancelling, Ambient"),
+    NC_OFF(0x03, "Noise cancelling, Off"),
+    AMBIENT_OFF(0x04, "Ambient, Off");
+
+    companion object {
+        fun from(code: Int?): NoiseCycle? = entries.firstOrNull { it.code == code }
+    }
+}
+
 data class DeviceSettings(
     val modelName: String? = null,
     val firmware: String? = null,
@@ -93,6 +104,7 @@ data class DeviceSettings(
     val autoOffWhenRemoved: Boolean? = null,
     val touchLeft: TouchFunction? = null,
     val touchRight: TouchFunction? = null,
+    val noiseCycle: NoiseCycle? = null,
     val readAt: Long = 0L
 ) {
     val eqPreset: EqPreset? get() = EqPreset.from(eqPresetCode)
@@ -116,6 +128,10 @@ internal object SonyFeatures {
     private const val EQ_PRESET = 0x00
     private const val AUDIO_CONNECTION_MODE = 0x00
     private const val AUDIO_UPSCALING = 0x01
+    private const val AUDIO_CONNECTION_MODE_ALT = 0x02
+    private const val DSEE_SHORT_LAYOUT = -1
+
+    @Volatile private var prioritySub: Int? = null
     private const val SYSTEM_PLAYBACK_BY_WEARING = 0x01
     private const val SYSTEM_ASSIGNABLE = 0x03
     private const val SYSTEM_SPEAK_TO_CHAT = 0x0c
@@ -137,6 +153,7 @@ internal object SonyFeatures {
         r = readPause(s, r)
         r = readAutoOff(s, r)
         r = readTouch(s, r)
+        r = readNoiseCycle(s, r)
         return r.copy(readAt = System.currentTimeMillis())
     }
 
@@ -179,14 +196,26 @@ internal object SonyFeatures {
 
     private fun readDsee(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
         val p = s.request(bytes(AUDIO_GET_PARAM, AUDIO_UPSCALING)) ?: return r
-        if (p.size < 4) return r
-        return r.copy(dseeType = u(p[2]), dseeOn = u(p[3]) == 1)
+        // Two layouts exist in the wild: [cmd, 01, on] and [cmd, 01, type, on].
+        return when {
+            p.size == 3 -> r.copy(dseeType = DSEE_SHORT_LAYOUT, dseeOn = u(p[2]) == 1)
+            p.size >= 4 -> r.copy(dseeType = u(p[2]), dseeOn = u(p[3]) == 1)
+            else -> r
+        }
     }
 
     private fun readPriority(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
-        val p = s.request(bytes(AUDIO_GET_PARAM, AUDIO_CONNECTION_MODE)) ?: return r
-        if (p.size < 3) return r
-        return r.copy(priority = ConnectionPriority.from(u(p[2])))
+        // Sony's table names this CONNECTION_MODE (0x00); Gadgetbridge drives it as 0x02.
+        // Use whichever the earbuds answer and remember it for writes.
+        val candidates = prioritySub?.let { listOf(it) } ?: listOf(AUDIO_CONNECTION_MODE, AUDIO_CONNECTION_MODE_ALT)
+        for (sub in candidates) {
+            val p = s.request(bytes(AUDIO_GET_PARAM, sub), 1_000) ?: continue
+            val value = ConnectionPriority.from(u(p[p.size - 1])) ?: continue
+            if (p.size < 3) continue
+            prioritySub = sub
+            return r.copy(priority = value)
+        }
+        return r
     }
 
     private fun readSpeakToChat(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
@@ -221,6 +250,18 @@ internal object SonyFeatures {
         return r.copy(touchLeft = TouchFunction.from(u(p[3])), touchRight = TouchFunction.from(u(p[4])))
     }
 
+    // Which modes a tap on a "noise control" earbud cycles through: [fb, 03, 01, 00, 01, 00, mode]
+    private fun readNoiseCycle(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
+        val p = s.request(bytes(SYSTEM_GET_EXT_PARAM, SYSTEM_ASSIGNABLE)) ?: return r
+        if (p.size != 7) return r
+        return r.copy(noiseCycle = NoiseCycle.from(u(p[6])) ?: r.noiseCycle)
+    }
+
+    fun setNoiseCycle(s: SonyBatteryClient.SonySession, r: DeviceSettings, cycle: NoiseCycle): DeviceSettings {
+        s.command(bytes(SYSTEM_GET_EXT_PARAM + 2, SYSTEM_ASSIGNABLE, 0x01, 0x00, 0x01, 0x00, cycle.code))
+        return readNoiseCycle(s, r)
+    }
+
     // ---- writers (each returns settings re-read from the earbuds) ----
 
     fun setEqPreset(s: SonyBatteryClient.SonySession, r: DeviceSettings, preset: EqPreset): DeviceSettings {
@@ -239,12 +280,16 @@ internal object SonyFeatures {
     }
 
     fun setDsee(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
-        s.command(bytes(AUDIO_GET_PARAM + 2, AUDIO_UPSCALING, r.dseeType, if (on) 1 else 0))
+        val value = if (on) 1 else 0
+        s.command(
+            if (r.dseeType == DSEE_SHORT_LAYOUT) bytes(AUDIO_GET_PARAM + 2, AUDIO_UPSCALING, value)
+            else bytes(AUDIO_GET_PARAM + 2, AUDIO_UPSCALING, r.dseeType, value)
+        )
         return readDsee(s, r)
     }
 
     fun setPriority(s: SonyBatteryClient.SonySession, r: DeviceSettings, priority: ConnectionPriority): DeviceSettings {
-        s.command(bytes(AUDIO_GET_PARAM + 2, AUDIO_CONNECTION_MODE, priority.code))
+        s.command(bytes(AUDIO_GET_PARAM + 2, prioritySub ?: AUDIO_CONNECTION_MODE_ALT, priority.code))
         return readPriority(s, r)
     }
 
@@ -315,6 +360,7 @@ object SettingsStore {
                 speakToChatTimeout = SpeakToChatTimeout.from(int("s2cTime")),
                 pauseWhenRemoved = bool("pause"), autoOffWhenRemoved = bool("autoOff"),
                 touchLeft = TouchFunction.from(int("tl")), touchRight = TouchFunction.from(int("tr")),
+                noiseCycle = NoiseCycle.from(int("cycle")),
                 readAt = if (o.has("at")) o.getLong("at") else 0L
             )
         } catch (_: Exception) {
@@ -340,6 +386,7 @@ object SettingsStore {
         s.autoOffWhenRemoved?.let { o.put("autoOff", it) }
         s.touchLeft?.let { o.put("tl", it.code) }
         s.touchRight?.let { o.put("tr", it.code) }
+        s.noiseCycle?.let { o.put("cycle", it.code) }
         o.put("at", s.readAt)
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, o.toString()).apply()
     }
