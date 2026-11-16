@@ -40,6 +40,7 @@ object SonyControlSessionManager {
     private var activeSocket: BluetoothSocket? = null
     private var connectingSocket: BluetoothSocket? = null
     private var activeSession: SonyBatteryClient.SonySession? = null
+    private const val IDLE_DROP_MS = 90_000L
     private var connectionGeneration = 0L
     @Volatile private var lastGood: Pair<java.util.UUID, Boolean>? = null
 
@@ -103,11 +104,16 @@ object SonyControlSessionManager {
     @SuppressLint("MissingPermission")
     private fun getOrOpen(context: Context, device: BluetoothDevice): SonyBatteryClient.SonySession {
         val address = device.address
-        synchronized(this) {
-            if (state == SonySessionState.CONNECTED && activeAddress == address) {
-                return activeSession ?: error("Connected Sony session is missing")
-            }
+        val idle = synchronized(this) {
+            val session = activeSession
+            if (state == SonySessionState.CONNECTED && activeAddress == address && session != null) {
+                if (System.currentTimeMillis() - session.lastHeard < IDLE_DROP_MS) return session
+                true
+            } else false
         }
+        // An idle link is usually already gone on the earbuds' side; reopening (~0.3 s) beats
+        // waiting 3 s for a reply that never comes.
+        if (idle) close(context, "idle over ${IDLE_DROP_MS / 1000} s, reopening")
 
         val generation = synchronized(this) {
             closeSocketOnly()
@@ -247,6 +253,8 @@ class SonyBatteryClient(private val context: Context) {
 
     internal class SonySession(private val socket: BluetoothSocket) {
         private val input = socket.inputStream
+        /** When the earbuds last sent anything; they quietly drop an idle link after a few minutes. */
+        @Volatile var lastHeard = System.currentTimeMillis()
         private val output = socket.outputStream
         private val decoder = SonyProtocol.Decoder()
         private var sequence = 0
@@ -265,6 +273,7 @@ class SonyBatteryClient(private val context: Context) {
                 if (available > 0) {
                     val count = input.read(buffer, 0, minOf(buffer.size, available))
                     if (count < 0) throw EOFException("Sony control channel reached EOF")
+                    if (count > 0) lastHeard = System.currentTimeMillis()
                     if (count > 0) for (frame in decoder.feed(buffer.copyOf(count))) {
                         if (frame.type == SonyProtocol.ACK) sequence = frame.sequence
                         if (frame.type == SonyProtocol.DATA_MDR || frame.type == SonyProtocol.DATA_MDR_NO2) {

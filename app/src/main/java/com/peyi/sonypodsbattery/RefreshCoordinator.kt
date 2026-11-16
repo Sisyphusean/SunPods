@@ -738,13 +738,15 @@ private object SonyCommandCoordinator {
                 EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, target)
             }
             DiagnosticsStore.add(app, "Refresh succeeded; case reported=${result.case != null}; ${result.raw}")
+            fun inferred(part: String, before: Int?, now: Int?, reported: Boolean) =
+                ChargeInference.charging(app, part, before, previous.updatedAt, now, reported)
             BatteryState(
                 result.left,
                 result.right,
                 result.case,
-                result.leftCharging,
-                result.rightCharging,
-                result.caseCharging,
+                inferred("left", previous.left, result.left, result.leftCharging),
+                inferred("right", previous.right, result.right, result.rightCharging),
+                inferred("case", previous.case, result.case, result.caseCharging),
                 previous.listeningMode,
                 previous.ambientLevel,
                 previous.focusOnVoice,
