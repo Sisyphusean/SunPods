@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
     ) {
         hasPermission = hasBluetoothPermission()
         if (hasPermission) vm.refreshAll()
+        BackgroundAccess.askOnce(this)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,7 +68,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
-        if (!hasPermission) askForPermissions()
+        if (!hasPermission) askForPermissions() else BackgroundAccess.askOnce(this)
     }
 
     override fun onResume() {

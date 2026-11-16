@@ -541,6 +541,7 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
                 if (on) BatteryCard(battery, busy) else LastReading(battery)
             }
         }
+        KeepRunningCard(resumes)
         AnimatedVisibility(
             visible = connected,
             enter = expandVertically() + fadeIn(),
@@ -1458,5 +1459,5 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.12.0"
+    const val VERSION = "2.12.1"
 }
