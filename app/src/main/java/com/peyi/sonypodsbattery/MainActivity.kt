@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 class MainActivity : ComponentActivity() {
     private val vm: SunpodsViewModel by viewModels()
     private var hasPermission by mutableStateOf(false)
+    private var dynamicColor by mutableStateOf(false)
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -30,14 +31,20 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         hasPermission = hasBluetoothPermission()
+        dynamicColor = getSharedPreferences("ui", MODE_PRIVATE).getBoolean("dynamic_color", false)
         setContent {
-            SunpodsTheme {
+            SunpodsTheme(dynamicColor = dynamicColor) {
                 SunpodsApp(
                     vm = vm,
                     hasPermission = hasPermission,
                     onRequestPermission = ::askForPermissions,
                     onShareDiagnostics = ::shareDiagnostics,
-                    onOpenBluetoothSettings = { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
+                    onOpenBluetoothSettings = { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) },
+                    dynamicColor = dynamicColor,
+                    onDynamicColorChange = { on ->
+                        dynamicColor = on
+                        getSharedPreferences("ui", MODE_PRIVATE).edit().putBoolean("dynamic_color", on).apply()
+                    }
                 )
             }
         }

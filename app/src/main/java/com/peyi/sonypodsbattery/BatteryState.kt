@@ -53,6 +53,7 @@ object BatteryStore {
             putLong("last_checked_at", state.lastCheckedAt)
             putString("status", state.status)
         }.apply()
+        BatteryHistory.record(context, state)
     }
 
     fun clearBatteryValues(context: Context, status: String = "Earbuds disconnected") {

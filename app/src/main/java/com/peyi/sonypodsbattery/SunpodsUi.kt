@@ -43,7 +43,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bluetooth
+import androidx.compose.material.icons.rounded.BatteryStd
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -137,16 +139,16 @@ private val SunpodsShapes = Shapes(
 )
 
 @Composable
-fun SunpodsTheme(content: @Composable () -> Unit) {
+fun SunpodsTheme(dynamicColor: Boolean = false, content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
     val context = LocalContext.current
     val scheme = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && dark -> dynamicDarkColorScheme(context)
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> dynamicLightColorScheme(context)
-        dark -> darkColorScheme()
-        else -> lightColorScheme()
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && dark -> dynamicDarkColorScheme(context)
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> dynamicLightColorScheme(context)
+        dark -> SolarDark
+        else -> SolarLight
     }
-    MaterialTheme(colorScheme = scheme, shapes = SunpodsShapes, content = content)
+    MaterialTheme(colorScheme = scheme, shapes = SunpodsShapes, typography = SolarTypography, content = content)
 }
 
 // Spacing on the 8dp grid
@@ -160,6 +162,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     HOME("Home", Icons.Rounded.Headphones),
     SOUND("Sound", Icons.Rounded.GraphicEq),
     CONTROLS("Controls", Icons.Rounded.TouchApp),
+    BATTERY("Battery", Icons.Rounded.BatteryStd),
     DEVICE("Device", Icons.Rounded.Info)
 }
 
@@ -169,7 +172,9 @@ fun SunpodsApp(
     hasPermission: Boolean,
     onRequestPermission: () -> Unit,
     onShareDiagnostics: () -> Unit,
-    onOpenBluetoothSettings: () -> Unit
+    onOpenBluetoothSettings: () -> Unit,
+    dynamicColor: Boolean = false,
+    onDynamicColorChange: (Boolean) -> Unit = {}
 ) {
     val battery by vm.battery.collectAsState()
     val settings by vm.settings.collectAsState()
@@ -192,7 +197,7 @@ fun SunpodsApp(
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             LargeTopAppBar(
-                title = { Text(if (tab == Tab.HOME) "SunPods" else tab.label) },
+                title = { Text(if (tab == Tab.HOME) greeting() else tab.label) },
                 actions = {
                     IconButton(onClick = refresh, enabled = !busy) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "Refresh from earbuds")
@@ -237,7 +242,8 @@ fun SunpodsApp(
                     Tab.HOME -> HomeScreen(battery, settings, vm)
                     Tab.SOUND -> SoundScreen(settings, vm)
                     Tab.CONTROLS -> ControlsScreen(settings, vm)
-                    Tab.DEVICE -> DeviceScreen(battery, settings, onShareDiagnostics, onOpenBluetoothSettings)
+                    Tab.BATTERY -> BatteryInsightsScreen(battery)
+                    Tab.DEVICE -> DeviceScreen(battery, settings, onShareDiagnostics, onOpenBluetoothSettings, dynamicColor, onDynamicColorChange)
                 }
             }
         }
@@ -419,7 +425,23 @@ private fun signed(v: Int) = if (v > 0) "+$v" else "$v"
 
 @Composable
 private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: SunpodsViewModel) {
-    BatteryHero(battery, settings)
+    val connected = battery.left != null || battery.right != null
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SolarHero(
+            mode = battery.listeningMode,
+            ambientLevel = battery.ambientLevel,
+            connected = connected,
+            model = settings.modelName ?: "WF-1000XM5"
+        ) {
+            val next = when (battery.listeningMode) {
+                ListeningMode.NOISE_CANCELLING -> ListeningMode.AMBIENT
+                ListeningMode.AMBIENT -> ListeningMode.OFF
+                else -> ListeningMode.NOISE_CANCELLING
+            }
+            vm.setListeningMode(next, battery.ambientLevel, battery.focusOnVoice)
+        }
+        BatteryStrip(battery)
+    }
     NoiseControl(battery, vm)
     Group(
         "Quick settings",
@@ -432,51 +454,27 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
 }
 
 @Composable
-private fun BatteryHero(battery: BatteryState, settings: DeviceSettings) {
-    val colors = MaterialTheme.colorScheme
-    val connected = battery.left != null || battery.right != null
-    Surface(color = colors.surfaceContainer, shape = MaterialTheme.shapes.extraLarge) {
-        Column(Modifier.fillMaxWidth().padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(if (connected) colors.primary else colors.outline)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    if (connected) "Connected" else "Not connected",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = colors.onSurface
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    settings.modelName ?: "WF-1000XM5",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = colors.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                BatteryPill("Left", battery.left, battery.leftCharging, Modifier.weight(1f))
-                BatteryPill("Right", battery.right, battery.rightCharging, Modifier.weight(1f))
-                BatteryPill("Case", battery.case, battery.caseCharging, Modifier.weight(1f))
-            }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                when {
-                    battery.updatedAt == 0L -> "Pull down to read battery"
-                    battery.case == null && connected -> "Updated ${relative(battery.updatedAt)}. Open the case to see its battery."
-                    else -> "Updated ${relative(battery.updatedAt)}"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant
-            )
-        }
+private fun BatteryStrip(battery: BatteryState) {
+    val context = LocalContext.current
+    val outlook = remember(battery.updatedAt) {
+        BatteryInsights.outlook(BatteryHistory.load(context, System.currentTimeMillis() - 7L * 86_400_000), battery)
     }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        BatteryPill("Left", battery.left?.takeIf { it in 1..100 }, battery.leftCharging, Modifier.weight(1f))
+        BatteryPill("Right", battery.right?.takeIf { it in 1..100 }, battery.rightCharging, Modifier.weight(1f))
+        BatteryPill("Case", battery.case?.takeIf { it in 1..100 }, battery.caseCharging, Modifier.weight(1f))
+    }
+    Text(
+        when {
+            battery.updatedAt == 0L -> "Pull down to read your earbuds."
+            outlook.caseNeedsCharge -> "Case is low. Charge it tonight."
+            outlook.minutesLeft != null -> "About ${BatteryInsights.formatMinutes(outlook.minutesLeft)} of listening left · updated ${relative(battery.updatedAt)}"
+            else -> "Updated ${relative(battery.updatedAt)}"
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 8.dp)
+    )
 }
 
 private fun relative(time: Long): String =
@@ -505,7 +503,7 @@ private fun BatteryPill(label: String, level: Int?, charging: Boolean, modifier:
                 .fillMaxWidth()
                 .fillMaxHeight(fraction)
                 .align(Alignment.BottomCenter)
-                .background(if (low) colors.errorContainer else colors.primaryContainer)
+                .background(if (low) colors.error.copy(alpha = 0.35f) else colors.primary.copy(alpha = 0.28f))
         )
         Column(
             Modifier.fillMaxSize().padding(12.dp),
@@ -885,7 +883,9 @@ private fun DeviceScreen(
     battery: BatteryState,
     settings: DeviceSettings,
     onShareDiagnostics: () -> Unit,
-    onOpenBluetoothSettings: () -> Unit
+    onOpenBluetoothSettings: () -> Unit,
+    dynamicColor: Boolean,
+    onDynamicColorChange: (Boolean) -> Unit
 ) {
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.extraLarge) {
         Row(Modifier.fillMaxWidth().padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -920,6 +920,18 @@ private fun DeviceScreen(
     )
 
     Group(
+        "Appearance",
+        rows = listOf(
+            {
+                ToggleRow(
+                    Icons.Rounded.Palette, "Match wallpaper colours",
+                    "Use Material You colours instead of SunPods amber", dynamicColor, onDynamicColorChange
+                )
+            }
+        )
+    )
+
+    Group(
         "Help",
         rows = listOf(
             { NavRow(Icons.Rounded.Bluetooth, "Bluetooth settings", "Pair, forget or reconnect", onOpenBluetoothSettings) },
@@ -930,5 +942,5 @@ private fun DeviceScreen(
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.1.0"
+    const val VERSION = "2.2.0"
 }

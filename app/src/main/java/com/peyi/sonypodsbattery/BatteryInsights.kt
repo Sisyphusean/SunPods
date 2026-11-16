@@ -1,0 +1,225 @@
+package com.peyi.sonypodsbattery
+
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import java.io.File
+import java.util.Calendar
+import kotlin.math.roundToInt
+
+data class BatterySample(
+    val time: Long,
+    val left: Int?,
+    val right: Int?,
+    val case: Int?,
+    val leftCharging: Boolean,
+    val rightCharging: Boolean,
+    val caseCharging: Boolean
+)
+
+/** Append-only log of confirmed battery reads, kept on the phone only (14 days). */
+object BatteryHistory {
+    private const val FILE = "battery_history.csv"
+    private const val KEEP_MS = 14L * 24 * 60 * 60 * 1000
+    private const val SAME_STATE_GAP_MS = 10L * 60 * 1000
+
+    private fun file(context: Context) = File(context.filesDir, FILE)
+
+    @Synchronized
+    fun record(context: Context, state: BatteryState) {
+        if (state.updatedAt == 0L || (state.left == null && state.right == null)) return
+        val f = file(context)
+        val last = if (f.exists()) f.useLines { lines -> lines.lastOrNull() }?.let(::parse) else null
+        val sample = BatterySample(
+            state.updatedAt, state.left, state.right, state.case,
+            state.leftCharging, state.rightCharging, state.caseCharging
+        )
+        if (last != null) {
+            if (sample.time <= last.time) return
+            val unchanged = last.copy(time = sample.time) == sample
+            if (unchanged && sample.time - last.time < SAME_STATE_GAP_MS) return
+        }
+        f.appendText(format(sample) + "\n")
+        if (f.length() > 200_000) prune(f)
+    }
+
+    fun load(context: Context, sinceMillis: Long = 0L): List<BatterySample> {
+        val f = file(context)
+        if (!f.exists()) return emptyList()
+        return f.useLines { lines -> lines.mapNotNull(::parse).filter { it.time >= sinceMillis }.toList() }
+    }
+
+    private fun prune(f: File) {
+        val cutoff = System.currentTimeMillis() - KEEP_MS
+        val kept = f.readLines().filter { line -> parse(line)?.let { it.time >= cutoff } == true }
+        f.writeText(kept.joinToString("\n", postfix = "\n"))
+    }
+
+    private fun format(s: BatterySample) = listOf(
+        s.time, s.left ?: "", s.right ?: "", s.case ?: "",
+        if (s.leftCharging) 1 else 0, if (s.rightCharging) 1 else 0, if (s.caseCharging) 1 else 0
+    ).joinToString(",")
+
+    private fun parse(line: String): BatterySample? {
+        val p = line.split(",")
+        if (p.size != 7) return null
+        return BatterySample(
+            p[0].toLongOrNull() ?: return null,
+            p[1].toIntOrNull(), p[2].toIntOrNull(), p[3].toIntOrNull(),
+            p[4] == "1", p[5] == "1", p[6] == "1"
+        )
+    }
+}
+
+data class BatteryOutlook(
+    /** Percent per hour while listening, from your own history when there is enough of it. */
+    val drainPerHour: Double,
+    val measured: Boolean,
+    val minutesLeft: Int?,
+    val listeningMinutesToday: Int,
+    val caseNeedsCharge: Boolean,
+    val lowestBud: String?
+)
+
+object BatteryInsights {
+    /** WF-1000XM5 rating: about 8 h with noise cancelling, so ~12.5 %/h before we have data. */
+    private const val RATED_DRAIN_PER_HOUR = 12.5
+    private const val MAX_GAP_MS = 15L * 60 * 1000
+
+    fun outlook(samples: List<BatterySample>, now: BatteryState): BatteryOutlook {
+        val measured = measuredDrain(samples)
+        val rate = measured ?: RATED_DRAIN_PER_HOUR
+        val buds = listOfNotNull(
+            now.left?.takeIf { it in 1..100 && !now.leftCharging }?.let { "Left" to it },
+            now.right?.takeIf { it in 1..100 && !now.rightCharging }?.let { "Right" to it }
+        )
+        val lowest = buds.minByOrNull { it.second }
+        val minutes = lowest?.let { (it.second / rate * 60).roundToInt() }
+        val case = now.case
+        return BatteryOutlook(
+            drainPerHour = rate,
+            measured = measured != null,
+            minutesLeft = minutes,
+            listeningMinutesToday = listeningToday(samples),
+            caseNeedsCharge = case != null && case in 1..25 && !now.caseCharging,
+            lowestBud = lowest?.first
+        )
+    }
+
+    /** Average discharge rate across stretches where a bud was out of the case and falling. */
+    fun measuredDrain(samples: List<BatterySample>): Double? {
+        var drop = 0.0
+        var hours = 0.0
+        for (side in listOf<(BatterySample) -> Pair<Int?, Boolean>>(
+            { it.left to it.leftCharging }, { it.right to it.rightCharging }
+        )) {
+            samples.zipWithNext().forEach { (a, b) ->
+                val (la, ca) = side(a)
+                val (lb, cb) = side(b)
+                if (la == null || lb == null || ca || cb) return@forEach
+                if (la !in 1..100 || lb !in 1..100) return@forEach
+                val gap = b.time - a.time
+                if (gap <= 0 || gap > MAX_GAP_MS || lb > la) return@forEach
+                drop += (la - lb)
+                hours += gap / 3_600_000.0
+            }
+        }
+        if (hours < 0.75 || drop < 4) return null
+        return (drop / hours).coerceIn(3.0, 40.0)
+    }
+
+    /** Time the earbuds were out and connected today, from the 5 minute refresh cadence. */
+    fun listeningToday(samples: List<BatterySample>): Int {
+        val start = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        var ms = 0L
+        samples.filter { it.time >= start }.zipWithNext().forEach { (a, b) ->
+            val out = (a.left != null && !a.leftCharging) || (a.right != null && !a.rightCharging)
+            val gap = b.time - a.time
+            if (out && gap in 1..MAX_GAP_MS) ms += gap
+        }
+        return (ms / 60_000).toInt()
+    }
+
+    fun formatMinutes(minutes: Int): String {
+        val h = minutes / 60
+        val m = minutes % 60
+        return when {
+            h == 0 -> "$m min"
+            m == 0 -> "$h h"
+            else -> "$h h $m min"
+        }
+    }
+}
+
+/** Gentle, once-per-cycle alerts for low buds and a low case. */
+object BatteryNudges {
+    private const val CHANNEL = "battery_alerts"
+    private const val PREFS = "battery_nudges"
+
+    fun check(context: Context, state: BatteryState) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val outlook = BatteryInsights.outlook(BatteryHistory.load(context, System.currentTimeMillis() - 7L * 86_400_000), state)
+
+        for ((side, level, charging) in listOf(
+            Triple("Left", state.left, state.leftCharging),
+            Triple("Right", state.right, state.rightCharging)
+        )) {
+            val key = "low_${side.lowercase()}"
+            if (level == null || charging || level > 30) {
+                prefs.edit().remove(key).apply()
+                continue
+            }
+            if (level in 1..15 && !prefs.getBoolean(key, false)) {
+                val left = (level / outlook.drainPerHour * 60).roundToInt()
+                notify(
+                    context, 3001 + side.length,
+                    "$side earbud is at $level%",
+                    "About ${BatteryInsights.formatMinutes(left)} of sunshine left. Pop it in the case soon."
+                )
+                prefs.edit().putBoolean(key, true).apply()
+            }
+        }
+
+        val case = state.case
+        val lastCaseNudge = prefs.getLong("case_nudge", 0L)
+        if (case != null && case in 1..20 && !state.caseCharging &&
+            System.currentTimeMillis() - lastCaseNudge > 20L * 3_600_000
+        ) {
+            notify(context, 3010, "Case is at $case%", "Give it a charge tonight so tomorrow starts full.")
+            prefs.edit().putLong("case_nudge", System.currentTimeMillis()).apply()
+        }
+    }
+
+    private fun notify(context: Context, id: Int, title: String, text: String) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL, "Battery alerts", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Low earbud and case battery reminders"
+            }
+        )
+        val open = PendingIntent.getActivity(
+            context, 21, Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        manager.notify(
+            id,
+            android.app.Notification.Builder(context, CHANNEL)
+                .setSmallIcon(R.drawable.ic_sunpods_mark)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build()
+        )
+    }
+}

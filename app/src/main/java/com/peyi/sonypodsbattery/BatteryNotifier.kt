@@ -14,6 +14,7 @@ object BatteryNotifier {
 
     fun show(context: Context, state: BatteryState) {
         if (state.left == null && state.right == null) return
+        BatteryNudges.check(context, state)
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Battery updates", NotificationManager.IMPORTANCE_LOW).apply {
