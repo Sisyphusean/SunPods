@@ -47,6 +47,7 @@ class BatteryPollingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         pollingActive = true
         startAsForeground()
+        AutomationEngine.start(applicationContext)
         handler.removeCallbacks(poll)
         handler.postDelayed(poll, INTERVAL_MS)
         return START_NOT_STICKY
@@ -54,6 +55,7 @@ class BatteryPollingService : Service() {
 
     override fun onDestroy() {
         pollingActive = false
+        AutomationEngine.stop()
         handler.removeCallbacks(poll)
         pollingScope.cancel()
         RefreshCoordinator.closeSessionForServiceStop(applicationContext)

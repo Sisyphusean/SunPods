@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 
 package com.peyi.sonypodsbattery
 
@@ -224,7 +224,10 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                     color = colors.onSurfaceVariant
                 )
                 Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     Series.entries.forEach { s ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(8.dp).clip(CircleShape).background(seriesColor.getValue(s)))
@@ -233,7 +236,7 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                         }
                     }
                     if (point.anyBudCharging()) {
-                        Text("Charging", style = MaterialTheme.typography.labelLarge, color = colors.primary, modifier = Modifier.align(Alignment.CenterVertically))
+                        Text("Charging", style = MaterialTheme.typography.labelLarge, color = colors.primary, maxLines = 1, softWrap = false)
                     }
                 }
                 Spacer(Modifier.height(16.dp))
@@ -260,7 +263,7 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Series.entries.forEach { s ->
                         val on = s.name !in hidden
                         FilterChip(
@@ -559,7 +562,7 @@ private fun StatTile(stat: Stat, selected: Boolean, modifier: Modifier, onClick:
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(stat.label, style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
-            Text(stat.value, style = MaterialTheme.typography.titleLarge, maxLines = 1)
+            Text(stat.value, style = MaterialTheme.typography.titleLarge, maxLines = 2)
             Text(stat.detail, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 2)
         }
     }

@@ -41,6 +41,7 @@ object SonyControlSessionManager {
     private var connectingSocket: BluetoothSocket? = null
     private var activeSession: SonyBatteryClient.SonySession? = null
     private var connectionGeneration = 0L
+    @Volatile private var lastGood: Pair<java.util.UUID, Boolean>? = null
 
     @Synchronized
     fun currentState(): SonySessionState = state
@@ -115,7 +116,8 @@ object SonyControlSessionManager {
             connectionGeneration
         }
         var lastError: Exception? = null
-        for (uuid in listOf(UUID_V2, UUID_V1)) for (insecure in listOf(true, false)) {
+        val attempts = listOf(UUID_V2, UUID_V1).flatMap { u -> listOf(true, false).map { u to it } }
+        for ((uuid, insecure) in listOfNotNull(lastGood) + (attempts - listOfNotNull(lastGood).toSet())) {
             var socket: BluetoothSocket? = null
             try {
                 socket = if (insecure) device.createInsecureRfcommSocketToServiceRecord(uuid)
@@ -134,6 +136,7 @@ object SonyControlSessionManager {
                     activeSocket = socket
                     activeAddress = address
                     activeSession = session
+                    lastGood = uuid to insecure
                     updateStateLocked(context, SonySessionState.CONNECTED)
                 }
                 DiagnosticsStore.add(
@@ -289,7 +292,7 @@ class SonyBatteryClient(private val context: Context) {
                     frame.payload[0] == 0x23.toByte() && frame.payload[1] == 0x09.toByte()
             } ?: throw IOException("Earbud battery was not reported")
             send(byteArrayOf(0x22, 0x0a))
-            val caseFrame = waitFor(1_800) { frame ->
+            val caseFrame = waitFor(700) { frame ->
                 frame.type == SonyProtocol.DATA_MDR && frame.payload.size >= 4 &&
                     frame.payload[0] == 0x23.toByte() && frame.payload[1] == 0x0a.toByte()
             }

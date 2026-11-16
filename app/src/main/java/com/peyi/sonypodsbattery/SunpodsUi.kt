@@ -229,7 +229,7 @@ internal fun SunCard(modifier: Modifier = Modifier, content: @Composable ColumnS
 }
 
 @Composable
-private fun RowDivider(inset: Dp = 72.dp) {
+internal fun RowDivider(inset: Dp = 72.dp) {
     HorizontalDivider(Modifier.padding(start = inset, end = 20.dp), thickness = 1.dp, color = dividerColor)
 }
 
@@ -296,7 +296,7 @@ fun SunpodsApp(
                         selected = tab == item,
                         onClick = { tab = item },
                         icon = { Icon(item.icon, contentDescription = null) },
-                        label = { Text(item.label) }
+                        label = { Text(item.label, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }
                     )
                 }
             }
@@ -428,7 +428,7 @@ private fun InfoRow(title: String, value: String) {
 
 /** Bottom sheet that lists options as radio rows with an optional explanation each. */
 @Composable
-private fun <T> ChoiceSheet(
+internal fun <T> ChoiceSheet(
     title: String,
     options: List<T>,
     selected: T?,
@@ -965,7 +965,9 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
                 }
             }
         }
-        Footer("You can also tap the earbuds above to switch.")
+        val context = LocalContext.current
+        val automation = remember(battery.listeningMode, battery.updatedAt) { AutomationStore.active(context) }
+        Footer(automation?.let { "Set by an automation: $it. Pick a mode to take over." } ?: "You can also tap the earbuds above to switch.")
     }
 }
 
@@ -1220,6 +1222,8 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
         Footer("Tap an earbud to choose what its touch sensor does.")
     }
 
+    AutomationsCard()
+
     val chatRows = buildList<@Composable () -> Unit> {
         add { ToggleRow(Icons.Rounded.RecordVoiceOver, "Speak-to-Chat", "Start talking and music pauses, ambient sound comes in", settings.speakToChat, vm::setSpeakToChat) }
         if (settings.speakToChat == true) {
@@ -1430,5 +1434,5 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.10.2"
+    const val VERSION = "2.10.3"
 }

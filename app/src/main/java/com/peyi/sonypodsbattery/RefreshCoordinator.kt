@@ -680,6 +680,7 @@ private object SonyCommandCoordinator {
         if (manualReconnectAttempt) DiagnosticsStore.add(app, "Manual refresh attempting reconnect")
 
         DiagnosticsStore.add(app, "Refresh started")
+        val t0 = System.currentTimeMillis()
         val target = command.device ?: client.findEarbuds()
         if (target != null) {
             when (A2dpConnectionHelper.isConnected(app, target)) {
@@ -720,7 +721,18 @@ private object SonyCommandCoordinator {
         val state = if (target == null) {
             persistCheckedState(previous.copy(status = "Pair your WF-1000XM5 in Android settings first"))
         } else try {
-            val result = client.read(target)
+            val wasConnected = SonyControlSessionManager.currentState() == SonySessionState.CONNECTED
+            val tRead = System.currentTimeMillis()
+            val result = try {
+                client.read(target)
+            } catch (stale: SonyControlChannelUnavailableException) {
+                if (!wasConnected) throw stale
+                // The kept socket died quietly: reopen once instead of failing the refresh.
+                DiagnosticsStore.add(app, "Refresh: kept session was stale, reopening")
+                SonyControlSessionManager.closeForCommandRetry(app)
+                client.read(target)
+            }
+            DiagnosticsStore.add(app, "Refresh timing: link check ${tRead - t0} ms, read ${System.currentTimeMillis() - tRead} ms (${if (wasConnected) "kept session" else "new session"})")
             if (!command.automatic) {
                 if (manualReconnectAttempt) DiagnosticsStore.add(app, "Manual refresh restored connection")
                 EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, target)

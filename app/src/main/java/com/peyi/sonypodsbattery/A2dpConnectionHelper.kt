@@ -2,70 +2,59 @@ package com.peyi.sonypodsbattery
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothA2dp
-import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
-import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 
+/**
+ * Is this exact pair of earbuds on A2DP right now? The profile proxy is opened once and kept,
+ * because binding it costs a few hundred milliseconds and every refresh asks this first.
+ */
 object A2dpConnectionHelper {
+    @Volatile
+    private var proxy: BluetoothA2dp? = null
+
     @SuppressLint("MissingPermission")
     suspend fun isConnected(context: Context, device: BluetoothDevice): Boolean? {
+        val service = proxy ?: bind(context) ?: return null
+        return try {
+            service.connectedDevices.any { it.address == device.address }
+        } catch (_: SecurityException) {
+            null
+        } catch (_: Exception) {
+            // A dead proxy (Bluetooth restarted): drop it and bind afresh next time.
+            proxy = null
+            null
+        }
+    }
+
+    private suspend fun bind(context: Context): BluetoothA2dp? {
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: return null
-        val serviceResult = CompletableDeferred<BluetoothA2dp?>()
-        val serviceReference = AtomicReference<BluetoothA2dp?>(null)
+        val result = CompletableDeferred<BluetoothA2dp?>()
         val listener = object : BluetoothProfile.ServiceListener {
             override fun onServiceConnected(profile: Int, service: BluetoothProfile) {
                 val a2dp = service as? BluetoothA2dp
-                serviceReference.set(a2dp)
-                if (!serviceResult.complete(a2dp) && a2dp != null) {
-                    closeProxy(adapter, a2dp)
-                }
+                proxy = a2dp
+                result.complete(a2dp)
             }
 
             override fun onServiceDisconnected(profile: Int) {
-                serviceResult.complete(null)
+                proxy = null
+                result.complete(null)
             }
         }
-
         val requested = try {
-            adapter.getProfileProxy(context, listener, BluetoothProfile.A2DP)
+            adapter.getProfileProxy(context.applicationContext, listener, BluetoothProfile.A2DP)
         } catch (_: SecurityException) {
             return null
         } catch (_: IllegalArgumentException) {
             return null
         }
         if (!requested) return null
-
-        return try {
-            val service = withTimeoutOrNull(PROFILE_QUERY_TIMEOUT_MS) { serviceResult.await() }
-            if (service == null) return null
-            try {
-                service.connectedDevices.any { connectedDevice ->
-                    connectedDevice.address == device.address
-                }
-            } catch (_: SecurityException) {
-                null
-            } catch (_: IllegalArgumentException) {
-                null
-            }
-        } finally {
-            serviceReference.get()?.let { closeProxy(adapter, it) }
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun closeProxy(adapter: BluetoothAdapter, service: BluetoothA2dp) {
-        try {
-            adapter.closeProfileProxy(BluetoothProfile.A2DP, service)
-        } catch (_: SecurityException) {
-            // Cleanup is best effort when Bluetooth permission changes.
-        } catch (_: IllegalArgumentException) {
-            // Some platform implementations reject an already closed proxy.
-        }
+        return withTimeoutOrNull(PROFILE_QUERY_TIMEOUT_MS) { result.await() }
     }
 
     private const val PROFILE_QUERY_TIMEOUT_MS = 800L

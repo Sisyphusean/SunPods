@@ -488,13 +488,13 @@ private fun StepButton(symbol: String, delta: Int) {
 
 class RefreshWidgetAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        // Show "Updating" with a spinner straight away; the refresh redraws the widget when it lands.
+        // Start talking to the earbuds first, then show "Updating" while that runs.
         val now = System.currentTimeMillis()
+        RefreshCoordinator.enqueueRefresh(context.applicationContext)
         for (id in GlanceAppWidgetManager(context).getGlanceIds(SonyPodsBatteryWidget::class.java)) {
             updateAppWidgetState(context, id) { it[REFRESH_STARTED] = now }
             SonyPodsBatteryWidget().update(context, id)
         }
-        RefreshCoordinator.enqueueRefresh(context.applicationContext)
         WidgetRedrawWorker.schedule(context, WORKING_TIMEOUT_MS / 1000 + 1)
     }
 }
