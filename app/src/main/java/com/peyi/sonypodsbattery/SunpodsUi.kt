@@ -1455,5 +1455,5 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.11.0"
+    const val VERSION = "2.11.1"
 }

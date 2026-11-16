@@ -171,15 +171,30 @@ private fun ListeningLeftCard(battery: BatteryState, outlook: BatteryOutlook) {
 
 // ---------------------------------------------------------------------- history chart
 
-private enum class Series(val label: String) { LEFT("Left"), RIGHT("Right"), CASE("Case") }
+/*
+ * History as bars, like a phone's battery screen. Readings arrive in bursts while the buds are
+ * out, so a line either breaks into dashes or invents slopes across hours nobody measured. A bar
+ * per time slot shows only what was seen: an empty slot simply has no bar.
+ */
+private enum class Series(val label: String) { BUDS("Earbuds"), CASE("Case") }
 
+private fun BatterySample.budLevel(): Int? = listOfNotNull(left, right).filter { it in 1..100 }.minOrNull()
 private fun BatterySample.level(series: Series): Int? = when (series) {
-    Series.LEFT -> left
-    Series.RIGHT -> right
-    Series.CASE -> case
-}?.takeIf { it in 1..100 }
+    Series.BUDS -> budLevel()
+    Series.CASE -> case?.takeIf { it in 1..100 }
+}
 
 private fun BatterySample.anyBudCharging() = leftCharging || rightCharging
+private fun BatterySample.charging(series: Series) = if (series == Series.CASE) caseCharging else anyBudCharging()
+
+/** One slot of the chart: the last reading taken inside it, if any. */
+private data class Slot(val start: Long, val end: Long, val sample: BatterySample?)
+
+private fun slots(samples: List<BatterySample>, from: Long, to: Long, count: Int): List<Slot> {
+    val width = (to - from) / count
+    val byIndex = samples.groupBy { ((it.time - from) / width).toInt().coerceIn(0, count - 1) }
+    return (0 until count).map { i -> Slot(from + i * width, from + (i + 1) * width, byIndex[i]?.lastOrNull()) }
+}
 
 @Composable
 private fun HistoryCard(samples: List<BatterySample>, now: Long) {
@@ -187,28 +202,27 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
     val colors = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
     var week by rememberSaveable { mutableStateOf(false) }
-    var hidden by rememberSaveable { mutableStateOf(setOf<String>()) }
-    var selected by remember { mutableStateOf<BatterySample?>(null) }
+    var seriesName by rememberSaveable { mutableStateOf(Series.BUDS.name) }
+    val series = Series.valueOf(seriesName)
+    var picked by remember { mutableStateOf<Int?>(null) }
     val span = if (week) 7 * DAY else DAY
     val from = now - span
+    val count = if (week) 56 else 48
     val shown = remember(samples, week) { samples.filter { it.time >= from } }
-    // Right gets a cool blue so the two buds never read as one line.
-    val right = if (colors.isLight) Color(0xFF3B6EA8) else Color(0xFF9CC2F2)
-    val left = if (colors.isLight) Color(0xFFB8740F) else Color(0xFFF2B65A)
-    val seriesColor = mapOf(Series.LEFT to left, Series.RIGHT to right, Series.CASE to colors.outline)
+    val slotList = remember(shown, from, count) { slots(shown, from, now, count) }
 
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             SectionHeader("History", Modifier.weight(1f).padding(top = 12.dp))
             SingleChoiceSegmentedButtonRow(Modifier.width(180.dp)) {
-                SegmentedButton(selected = !week, onClick = { week = false; selected = null }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("24 h") }
-                SegmentedButton(selected = week, onClick = { week = true; selected = null }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("7 days") }
+                SegmentedButton(selected = !week, onClick = { week = false; picked = null }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("24 h") }
+                SegmentedButton(selected = week, onClick = { week = true; picked = null }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("7 days") }
             }
         }
         Spacer(Modifier.height(4.dp))
         SunCard {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
-                if (shown.size < 2) {
+                if (shown.isEmpty()) {
                     Text(
                         "Your battery story starts here. SunPods notes a reading every few minutes while your buds are out, and nothing leaves your phone.",
                         style = MaterialTheme.typography.bodyMedium,
@@ -217,10 +231,16 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                     )
                     return@Column
                 }
-                // Readout: the touched moment, or the latest reading.
-                val point = selected ?: shown.last()
+                // Readout: the touched slot, or the newest reading.
+                val slot = picked?.let { slotList.getOrNull(it) }
+                val point = slot?.sample ?: shown.last()
+                val clock = DateFormat.getTimeFormat(context)
                 Text(
-                    if (selected == null) "Latest, ${whenLabel(context, point.time, now)}" else whenLabel(context, point.time, now),
+                    when {
+                        slot == null -> "Latest, ${whenLabel(context, point.time, now).replaceFirstChar { it.lowercase() }}"
+                        slot.sample == null -> "${clock.format(java.util.Date(slot.start))} to ${clock.format(java.util.Date(slot.end))}, no reading"
+                        else -> whenLabel(context, point.time, now)
+                    },
                     style = MaterialTheme.typography.labelLarge,
                     color = colors.onSurfaceVariant
                 )
@@ -229,176 +249,132 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Series.entries.forEach { s ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(8.dp).clip(CircleShape).background(seriesColor.getValue(s)))
+                    val show = slot == null || slot.sample != null
+                    listOf("Left" to point.left, "Right" to point.right, "Case" to point.case).forEach { (name, v) ->
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(name, style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
                             Spacer(Modifier.width(6.dp))
-                            val value = if (selected != null) point.level(s) else shown.lastOrNull { it.level(s) != null }?.level(s)
-                            Text(s.label.first().toString(), style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
-                            Spacer(Modifier.width(4.dp))
-                            Text(value?.let { "$it%" } ?: "--", style = MaterialTheme.typography.titleMedium)
+                            Text(if (show) v?.takeIf { it in 1..100 }?.let { "$it%" } ?: "--" else "--", style = MaterialTheme.typography.titleMedium)
                         }
                     }
-                    if (point.anyBudCharging()) {
-                        Text("Charging", style = MaterialTheme.typography.labelLarge, color = colors.primary, maxLines = 1, softWrap = false)
+                    if (show && point.anyBudCharging()) {
+                        Text("Charging", style = MaterialTheme.typography.labelLarge, color = chargeColor(), maxLines = 1, softWrap = false)
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                val chartDescription = "Battery history chart. Touch and drag to see readings."
-                ScrubChart(
-                    samples = shown,
-                    from = from,
-                    to = now,
-                    hidden = hidden,
-                    seriesColor = seriesColor,
-                    selected = selected,
-                    onSelect = { s ->
-                        if (s != selected) {
-                            selected = s
-                            if (s != null) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                Row(Modifier.fillMaxWidth()) {
+                    BarChart(
+                        slots = slotList,
+                        series = series,
+                        picked = picked,
+                        onPick = { i ->
+                            if (i != picked) {
+                                picked = i
+                                if (i != null) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                        },
+                        modifier = Modifier.weight(1f).height(180.dp)
+                            .semantics { contentDescription = "Battery history bars. Touch and drag to see each time." }
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.height(180.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                        listOf("100%", "50%", "0%").forEach {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth().height(200.dp).semantics { contentDescription = chartDescription }
-                )
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(Modifier.fillMaxWidth().padding(end = 40.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     axisLabels(context, from, now, week).forEach {
                         Text(it, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Series.entries.forEach { s ->
-                        val on = s.name !in hidden
                         FilterChip(
-                            selected = on,
-                            onClick = { hidden = if (on) hidden + s.name else hidden - s.name },
+                            selected = s == series,
+                            onClick = { seriesName = s.name; picked = null },
                             label = { Text(s.label) },
-                            leadingIcon = {
-                                if (on) Icon(Icons.Rounded.Check, null, Modifier.size(FilterChipDefaults.IconSize))
-                                else Box(Modifier.size(8.dp).clip(CircleShape).background(seriesColor.getValue(s)))
-                            }
+                            leadingIcon = if (s == series) {
+                                { Icon(Icons.Rounded.Check, null, Modifier.size(FilterChipDefaults.IconSize)) }
+                            } else null
                         )
                     }
                 }
             }
         }
-        Footer("Touch and drag across the chart to see any moment. Shaded parts are time in the case.")
+        Footer(
+            "Each bar is ${if (week) "3 hours" else "half an hour"}" +
+                (if (series == Series.BUDS) ", showing whichever earbud was lower" else "") +
+                ". Green bars were charging. Gaps are times SunPods had no reading."
+        )
     }
 }
 
 @Composable
-private fun ScrubChart(
-    samples: List<BatterySample>,
-    from: Long,
-    to: Long,
-    hidden: Set<String>,
-    seriesColor: Map<Series, Color>,
-    selected: BatterySample?,
-    onSelect: (BatterySample?) -> Unit,
+private fun chargeColor() = if (MaterialTheme.colorScheme.isLight) Color(0xFF2E7D32) else Color(0xFF7BD88F)
+
+@Composable
+private fun BarChart(
+    slots: List<Slot>,
+    series: Series,
+    picked: Int?,
+    onPick: (Int?) -> Unit,
     modifier: Modifier
 ) {
     val colors = MaterialTheme.colorScheme
     val grid = colors.outlineVariant
-    val charging = colors.primary.copy(alpha = 0.08f)
-    val low = colors.error.copy(alpha = 0.035f)
-    val lowLine = colors.error.copy(alpha = 0.35f)
-    val cursor = colors.onSurface
-    val dotRing = cardColor
-    val reveal = remember { androidx.compose.animation.core.Animatable(0f) }
-    androidx.compose.runtime.LaunchedEffect(from / 3_600_000, hidden) {
-        reveal.snapTo(0f)
-        reveal.animateTo(1f, tween(800, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+    val normal = colors.primary
+    val charge = chargeColor()
+    val low = colors.error
+    val cursor = colors.onSurface.copy(alpha = 0.12f)
+    val grow = remember { androidx.compose.animation.core.Animatable(0f) }
+    androidx.compose.runtime.LaunchedEffect(slots.size, series) {
+        grow.snapTo(0f)
+        grow.animateTo(1f, tween(700, easing = androidx.compose.animation.core.FastOutSlowInEasing))
     }
-    fun nearest(x: Float, width: Float): BatterySample? {
-        val t = from + (x / width).coerceIn(0f, 1f) * (to - from)
-        return samples.minByOrNull { abs(it.time - t) }
-    }
+    fun index(x: Float, width: Float) = ((x / width) * slots.size).toInt().coerceIn(0, slots.lastIndex)
     Canvas(
         modifier
-            .pointerInput(samples, from, to) {
+            .pointerInput(slots) {
                 detectTapGestures(onTap = { pos ->
-                    val hit = nearest(pos.x, size.width.toFloat())
-                    onSelect(if (hit == selected) null else hit)
+                    val i = index(pos.x, size.width.toFloat())
+                    onPick(if (i == picked) null else i)
                 })
             }
-            .pointerInput(samples, from, to) {
+            .pointerInput(slots) {
                 detectHorizontalDragGestures(
-                    onDragStart = { pos -> onSelect(nearest(pos.x, size.width.toFloat())) },
+                    onDragStart = { pos -> onPick(index(pos.x, size.width.toFloat())) },
                     onHorizontalDrag = { change, _ ->
                         change.consume()
-                        onSelect(nearest(change.position.x, size.width.toFloat()))
+                        onPick(index(change.position.x, size.width.toFloat()))
                     }
                 )
             }
     ) {
         val w = size.width
         val h = size.height
-        val pad = 4.dp.toPx()
-        fun x(t: Long) = ((t - from).toFloat() / (to - from)) * w
-        fun y(level: Int) = pad + (1f - level / 100f) * (h - 2 * pad)
-        // Low zone: a faint wash and a hairline at 20%, not a block.
-        drawRect(low, topLeft = Offset(0f, y(20)), size = Size(w, h - y(20)))
-        drawLine(lowLine, Offset(0f, y(20)), Offset(w, y(20)), strokeWidth = 1.dp.toPx(),
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 8f)))
-        samples.zipWithNext().forEach { (a, b) ->
-            if (a.anyBudCharging() && b.time - a.time < 3 * 3_600_000L) {
-                drawRect(charging, topLeft = Offset(x(a.time), 0f), size = Size(x(b.time) - x(a.time), h))
-            }
-        }
         for (level in listOf(0, 50, 100)) {
-            drawLine(grid, Offset(0f, y(level)), Offset(w, y(level)), strokeWidth = 1.dp.toPx(),
-                pathEffect = if (level == 50) PathEffect.dashPathEffect(floatArrayOf(8f, 8f)) else null)
+            val y = h - level / 100f * h
+            drawLine(grid, Offset(0f, y), Offset(w, y), strokeWidth = 1.dp.toPx(),
+                pathEffect = if (level == 50) PathEffect.dashPathEffect(floatArrayOf(6f, 8f)) else null)
         }
-        clipRect(right = w * reveal.value) {
-        for (s in Series.entries) {
-            if (s.name in hidden) continue
-            val color = seriesColor.getValue(s)
-            val runs = mutableListOf<MutableList<Offset>>()
-            var lastTime = Long.MIN_VALUE / 2
-            for (p in samples) {
-                val level = p.level(s) ?: continue
-                val point = Offset(x(p.time), y(level))
-                if (runs.isEmpty() || p.time - lastTime > 45L * 60 * 1000) runs += mutableListOf(point) else runs.last() += point
-                lastTime = p.time
-            }
-            val stroke = 3.dp.toPx()
-            runs.zipWithNext().forEach { (a, b) ->
-                // Bridge breaks of up to 6 hours: the level carried on while SunPods wasn't looking.
-                val gap = (b.first().x - a.last().x) / w * (to - from)
-                if (gap < 6 * 3_600_000f) drawLine(
-                    color.copy(alpha = 0.35f), a.last(), b.first(), strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(2f, 8f))
-                )
-            }
-            for (run in runs) {
-                if (run.size == 1) {
-                    drawCircle(color, stroke * 0.9f, run.first())
-                    continue
-                }
-                val path = Path().apply {
-                    moveTo(run.first().x, run.first().y)
-                    run.drop(1).forEach { lineTo(it.x, it.y) }
-                }
-                drawPath(
-                    path, color,
-                    style = Stroke(
-                        width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round,
-                        pathEffect = if (s == Series.CASE) PathEffect.dashPathEffect(floatArrayOf(10f, 10f)) else null
-                    )
-                )
-            }
-        }
-        }
-        if (selected != null) {
-            val cx = x(selected.time)
-            drawLine(cursor.copy(alpha = 0.5f), Offset(cx, 0f), Offset(cx, h), strokeWidth = 1.5.dp.toPx())
-            for (s in Series.entries) {
-                if (s.name in hidden) continue
-                val level = selected.level(s) ?: continue
-                drawCircle(dotRing, 7.dp.toPx(), Offset(cx, y(level)))
-                drawCircle(seriesColor.getValue(s), 5.dp.toPx(), Offset(cx, y(level)))
-            }
+        val slotW = w / slots.size
+        val barW = (slotW * 0.62f).coerceAtLeast(1.5.dp.toPx())
+        val radius = androidx.compose.ui.geometry.CornerRadius(barW / 2, barW / 2)
+        slots.forEachIndexed { i, slot ->
+            val left = i * slotW + (slotW - barW) / 2
+            if (i == picked) drawRect(cursor, topLeft = Offset(i * slotW, 0f), size = Size(slotW, h))
+            val sample = slot.sample ?: return@forEachIndexed
+            val level = sample.level(series) ?: return@forEachIndexed
+            val color = when {
+                sample.charging(series) -> charge
+                level <= 20 -> low
+                else -> normal
+            }.let { if (picked != null && i != picked) it.copy(alpha = 0.45f) else it }
+            val barH = (level / 100f * h * grow.value).coerceAtLeast(barW)
+            drawRoundRect(color, topLeft = Offset(left, h - barH), size = Size(barW, barH), cornerRadius = radius)
         }
     }
 }
@@ -517,8 +493,8 @@ private data class Stat(val label: String, val value: String, val detail: String
 
 @Composable
 private fun StatsGrid(battery: BatteryState, samples: List<BatterySample>, outlook: BatteryOutlook, now: Long) {
-    val leftRate = remember(samples) { BatteryInsights.measuredDrain(samples, Series.LEFT.ordinal) }
-    val rightRate = remember(samples) { BatteryInsights.measuredDrain(samples, Series.RIGHT.ordinal) }
+    val leftRate = remember(samples) { BatteryInsights.measuredDrain(samples, 0) }
+    val rightRate = remember(samples) { BatteryInsights.measuredDrain(samples, 1) }
     val charged = remember(samples) { BatteryInsights.lastTakenOut(samples) }
     val case = battery.case?.takeIf { it in 1..100 }
 
