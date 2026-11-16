@@ -83,7 +83,7 @@ object DiagnosticsStore {
     }
 
     fun text(context: Context): String = buildString {
-        appendLine("Sunpods diagnostics")
+        appendLine("SunPods diagnostics")
         appendLine("Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
         appendLine("App ${SunpodsInfo.VERSION}")
         append(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "No events yet"))

@@ -24,7 +24,7 @@ object BatteryNotifier {
         ).joinToString("   ")
         val open = PendingIntent.getActivity(context, 20, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = android.app.Notification.Builder(context, CHANNEL)
-            .setSmallIcon(R.drawable.ic_battery)
+            .setSmallIcon(R.drawable.ic_sunpods_mark)
             .setContentTitle("WF-1000XM5")
             .setContentText(content)
             .setContentIntent(open)

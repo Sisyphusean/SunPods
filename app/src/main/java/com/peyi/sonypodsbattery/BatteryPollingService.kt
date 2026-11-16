@@ -65,7 +65,7 @@ class BatteryPollingService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Background battery refresh", NotificationManager.IMPORTANCE_LOW))
         val notification = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_battery)
+            .setSmallIcon(R.drawable.ic_sunpods_mark)
             .setContentTitle("Sony Pods Battery")
             .setContentText("Refreshing WF-1000XM5 battery every 5 minutes while connected")
             .setOngoing(true)

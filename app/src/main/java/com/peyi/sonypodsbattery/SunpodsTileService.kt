@@ -43,7 +43,7 @@ class SunpodsTileService : TileService() {
             ListeningMode.NOISE_CANCELLING -> "Noise cancelling"
             ListeningMode.AMBIENT -> "Ambient sound"
             ListeningMode.OFF -> "Noise control off"
-            null -> "Sunpods"
+            null -> "SunPods"
         }
         val levels = listOfNotNull(
             state.left?.let { "L $it%" },
@@ -53,7 +53,7 @@ class SunpodsTileService : TileService() {
         tile.state = if (mode == ListeningMode.OFF || mode == null) Tile.STATE_INACTIVE else Tile.STATE_ACTIVE
         tile.icon = Icon.createWithResource(
             this,
-            if (mode == ListeningMode.AMBIENT) R.drawable.ic_waveform else R.drawable.ic_noise_cancelling
+            when (mode) { ListeningMode.AMBIENT -> R.drawable.ic_mode_ambient; ListeningMode.OFF -> R.drawable.ic_mode_off; else -> R.drawable.ic_mode_nc }
         )
         tile.updateTile()
     }

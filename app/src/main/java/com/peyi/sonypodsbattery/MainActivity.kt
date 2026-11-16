@@ -69,7 +69,7 @@ class MainActivity : ComponentActivity() {
     private fun shareDiagnostics() {
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "Sunpods diagnostics")
+            putExtra(Intent.EXTRA_SUBJECT, "SunPods diagnostics")
             putExtra(Intent.EXTRA_TEXT, DiagnosticsStore.text(this@MainActivity))
         }, "Share diagnostics"))
     }

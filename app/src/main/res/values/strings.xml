@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Sunpods</string>
-    <string name="widget_label">Sunpods</string>
+    <string name="app_name">SunPods</string>
+    <string name="widget_label">SunPods</string>
     <string name="widget_description">Battery and noise control for your WF-1000XM5</string>
-    <string name="mini_widget_label">Sunpods battery</string>
+    <string name="mini_widget_label">SunPods battery</string>
     <string name="mini_widget_description">Compact WF-1000XM5 battery levels</string>
     <string name="tile_label">Noise control</string>
 </resources>
