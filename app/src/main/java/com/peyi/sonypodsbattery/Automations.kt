@@ -70,8 +70,8 @@ object AutomationStore {
     )
 
     fun setRule(context: Context, trigger: Trigger, rule: Rule) {
-        p(context).edit().putBoolean("${trigger.name}_on", rule.enabled).putString("${trigger.name}_action", rule.action.name).apply()
-        AutomationEngine.current?.evaluate()
+        p(context).edit().putBoolean("${trigger.name}_on", rule.enabled).putString("${trigger.name}_action", rule.action.name).commit()
+        AutomationEngine.current?.let { it.listen(); it.evaluate() }
     }
 
     fun places(context: Context): List<Place> = runCatching {
@@ -82,8 +82,8 @@ object AutomationStore {
     fun setPlaces(context: Context, places: List<Place>) {
         val a = JSONArray()
         places.forEach { a.put(JSONObject().put("ssid", it.ssid).put("action", it.action.name)) }
-        p(context).edit().putString("places", a.toString()).apply()
-        AutomationEngine.current?.evaluate()
+        p(context).edit().putString("places", a.toString()).commit()
+        AutomationEngine.current?.let { it.listen(); it.evaluate() }
     }
 
     /** Which automation is in charge right now, for the Home screen. */
@@ -176,28 +176,67 @@ class AutomationEngine private constructor(private val context: Context) {
         context.getSystemService(NotificationManager::class.java)?.currentInterruptionFilter
             ?.let { it != NotificationManager.INTERRUPTION_FILTER_ALL && it != NotificationManager.INTERRUPTION_FILTER_UNKNOWN } ?: false
 
+    private var listeningCall = false
+    private var listeningSteps = false
+    private var listeningFocus = false
+    private var listeningWifi = false
+
     private fun start() {
-        if (Build.VERSION.SDK_INT >= 31) runCatching { audio?.addOnModeChangedListener(context.mainExecutor, modeListener) }
-        inCall = audio?.mode == AudioManager.MODE_IN_CALL || audio?.mode == AudioManager.MODE_IN_COMMUNICATION
-        if (context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED) {
-            sensors?.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let {
-                sensors.registerListener(stepListener, it, SensorManager.SENSOR_DELAY_NORMAL)
-            }
-        }
-        context.registerReceiver(focusReceiver, IntentFilter(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED))
-        focus = readFocus()
-        runCatching {
-            connectivity?.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), wifiCallback)
-        }
-        ssid = currentSsid(context)
+        listen()
         evaluate()
     }
 
+    /** Matches what's registered to the rules that are on. Called again whenever a rule changes. */
+    fun listen() {
+        val wantCall = AutomationStore.rule(context, Trigger.CALL).enabled && Build.VERSION.SDK_INT >= 31
+        val wantSteps = AutomationStore.rule(context, Trigger.WALKING).enabled &&
+            context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+        val wantFocus = AutomationStore.rule(context, Trigger.FOCUS).enabled
+        val wantWifi = AutomationStore.places(context).isNotEmpty()
+
+        if (wantCall != listeningCall) {
+            if (wantCall) runCatching { audio?.addOnModeChangedListener(context.mainExecutor, modeListener) }
+            else runCatching { audio?.removeOnModeChangedListener(modeListener) }
+            listeningCall = wantCall
+        }
+        inCall = wantCall && (audio?.mode == AudioManager.MODE_IN_CALL || audio?.mode == AudioManager.MODE_IN_COMMUNICATION)
+
+        if (wantSteps != listeningSteps) {
+            if (wantSteps) {
+                sensors?.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let {
+                    // Batched: the phone's sensor hub collects steps and hands them over every 10 s or so.
+                    sensors.registerListener(stepListener, it, SensorManager.SENSOR_DELAY_NORMAL, 10_000_000)
+                }
+            } else {
+                runCatching { sensors?.unregisterListener(stepListener) }
+                walking = false
+                recentSteps.clear()
+            }
+            listeningSteps = wantSteps
+        }
+
+        if (wantFocus != listeningFocus) {
+            if (wantFocus) context.registerReceiver(focusReceiver, IntentFilter(NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED))
+            else runCatching { context.unregisterReceiver(focusReceiver) }
+            listeningFocus = wantFocus
+        }
+        focus = wantFocus && readFocus()
+
+        if (wantWifi != listeningWifi) {
+            if (wantWifi) runCatching {
+                connectivity?.registerNetworkCallback(NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build(), wifiCallback)
+            } else runCatching { connectivity?.unregisterNetworkCallback(wifiCallback) }
+            listeningWifi = wantWifi
+        }
+        ssid = if (wantWifi) currentSsid(context) else null
+    }
+
     private fun stop() {
-        if (Build.VERSION.SDK_INT >= 31) runCatching { audio?.removeOnModeChangedListener(modeListener) }
-        runCatching { sensors?.unregisterListener(stepListener) }
-        runCatching { context.unregisterReceiver(focusReceiver) }
-        runCatching { connectivity?.unregisterNetworkCallback(wifiCallback) }
+        if (listeningCall) runCatching { audio?.removeOnModeChangedListener(modeListener) }
+        if (listeningSteps) runCatching { sensors?.unregisterListener(stepListener) }
+        if (listeningFocus) runCatching { context.unregisterReceiver(focusReceiver) }
+        if (listeningWifi) runCatching { connectivity?.unregisterNetworkCallback(wifiCallback) }
+        listeningCall = false; listeningSteps = false; listeningFocus = false; listeningWifi = false
         main.removeCallbacksAndMessages(null)
         AutomationStore.setActive(context, null)
     }

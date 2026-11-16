@@ -42,7 +42,7 @@ data class LastSeen(
 object LastSeenStore {
     private const val PREFS = "last_seen"
     private const val FRESH_MS = 2L * 60 * 1000
-    private const val CONNECTED_THROTTLE_MS = 10L * 60 * 1000
+    private const val CONNECTED_THROTTLE_MS = 30L * 60 * 1000
 
     fun enabled(context: Context): Boolean = prefs(context).getBoolean("enabled", false)
     fun setEnabled(context: Context, on: Boolean) {
@@ -84,7 +84,10 @@ object LastSeenStore {
         capture(context, atDisconnect = true)
     }
 
-    /** While connected, refreshes the "last place they were with you" at most every 10 minutes. */
+    /**
+     * While connected, refreshes the "last place they were with you" at most every 30 minutes, and
+     * only from a location the phone already worked out for something else. No GPS is switched on.
+     */
     suspend fun captureWhileConnected(context: Context) {
         val current = load(context)
         if (current != null && System.currentTimeMillis() - current.time < CONNECTED_THROTTLE_MS) return
@@ -95,7 +98,7 @@ object LastSeenStore {
     private suspend fun capture(context: Context, atDisconnect: Boolean) {
         if (!enabled(context) || !hasLocationPermission(context)) return
         val fix = try {
-            bestFix(context)
+            if (atDisconnect) bestFix(context) else passiveFix(context)
         } catch (e: SecurityException) {
             DiagnosticsStore.add(context, "Last seen: location not allowed right now")
             null
@@ -108,6 +111,15 @@ object LastSeenStore {
             .putBoolean("at_disconnect", atDisconnect)
             .apply()
         DiagnosticsStore.add(context, "Last seen saved (${if (atDisconnect) "disconnect" else "connected"}), ±${fix.accuracy.toInt()} m")
+    }
+
+    /** A recent location the phone already has; costs nothing. */
+    @SuppressLint("MissingPermission")
+    private fun passiveFix(context: Context): Location? {
+        val lm = context.getSystemService(LocationManager::class.java) ?: return null
+        return lm.getProviders(true).mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+            .maxByOrNull { it.time }
+            ?.takeIf { System.currentTimeMillis() - it.time < CONNECTED_THROTTLE_MS }
     }
 
     @SuppressLint("MissingPermission")

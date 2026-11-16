@@ -23,6 +23,12 @@ class BatteryPollingService : Service() {
     @Volatile
     private var pollingActive = false
     private var failures = 0
+    private var lastLevels: Triple<Int?, Int?, Int?>? = null
+    private var lastChangeAt = System.currentTimeMillis()
+
+    /** Steady levels (buds idle in the case, or a long listen) don't need checking as often. */
+    private fun nextInterval() =
+        if (System.currentTimeMillis() - lastChangeAt > STEADY_AFTER_MS) STEADY_INTERVAL_MS else INTERVAL_MS
     private val poll: Runnable = object : Runnable {
         override fun run() {
             if (!pollingActive || EarbudConnectionStateStore.current(applicationContext) == EarbudConnectionState.DISCONNECTED) return
@@ -34,11 +40,16 @@ class BatteryPollingService : Service() {
                 )
                 if (!pollingActive || EarbudConnectionStateStore.current(applicationContext) == EarbudConnectionState.DISCONNECTED) return@launch
                 failures = if (state.status.startsWith("Updated")) 0 else failures + 1
+                val levels = Triple(state.left, state.right, state.case)
+                if (levels != lastLevels || state.leftCharging || state.rightCharging || state.caseCharging) {
+                    lastLevels = levels
+                    lastChangeAt = System.currentTimeMillis()
+                }
                 if (failures == 0) LastSeenStore.captureWhileConnected(applicationContext)
                 if (failures >= MAX_FAILURES) {
                     stopSelf()
                 } else {
-                    handler.postDelayed(poll, INTERVAL_MS)
+                    handler.postDelayed(poll, nextInterval())
                 }
             }
         }
@@ -81,6 +92,8 @@ class BatteryPollingService : Service() {
         private const val CHANNEL = "background_refresh"
         private const val NOTIFICATION_ID = 2002
         private const val INTERVAL_MS = 5 * 60 * 1000L
+        private const val STEADY_INTERVAL_MS = 15 * 60 * 1000L
+        private const val STEADY_AFTER_MS = 20 * 60 * 1000L
         private const val MAX_FAILURES = 3
 
         fun start(context: Context) {
