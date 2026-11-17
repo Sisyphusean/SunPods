@@ -81,6 +81,7 @@ private val DESIRED_AMBIENT_LEVEL_KEY = intPreferencesKey("desired_ambient_level
 private val PENDING_AMBIENT_LEVEL_KEY = intPreferencesKey("pending_ambient_level")
 private val LAST_USER_ACTION_TIME = longPreferencesKey("last_user_action_time")
 private val REFRESH_STARTED = longPreferencesKey("refresh_started")
+internal val REDRAW_AT = longPreferencesKey("redraw_at")
 private val PENDING_MODE_KEY = stringPreferencesKey("pending_mode")
 private val PENDING_MODE_AT = longPreferencesKey("pending_mode_at")
 private const val WORKING_TIMEOUT_MS = 15_000L
@@ -97,6 +98,7 @@ class SonyPodsBatteryWidget : GlanceAppWidget() {
                 val snapshot = widgetSnapshot(context)
                 val storedState = snapshot.state
                 val preferences = currentState<Preferences>()
+                preferences[REDRAW_AT]
                 val currentMode = preferences[CURRENT_AUDIO_MODE_KEY] ?: AudioMode.NC.name
                 val desiredAmbientLevel = preferences[DESIRED_AMBIENT_LEVEL_KEY]
                     ?: storedState.ambientLevel
@@ -128,9 +130,24 @@ class SonyPodsBatteryWidgetReceiver : GlanceAppWidgetReceiver() {
 
 object SonyPodsBatteryWidgetUpdater {
     suspend fun updateAll(context: Context) {
-        SonyPodsBatteryWidget().updateAll(context)
-        SunpodsMiniWidget().updateAll(context)
+        redraw(context, SonyPodsBatteryWidget::class.java) { SonyPodsBatteryWidget() }
+        redraw(context, SunpodsMiniWidget::class.java) { SunpodsMiniWidget() }
         SunpodsTileService.requestUpdate(context)
+    }
+
+    /**
+     * Glance only recomposes a running widget when its own state changes, so new battery data in
+     * BatteryStore alone left the widget frozen (stuck on "Updating"). Bump a key to force it.
+     */
+    private suspend fun <T : GlanceAppWidget> redraw(context: Context, type: Class<T>, make: () -> T) {
+        val widget = make()
+        val now = System.currentTimeMillis()
+        for (id in GlanceAppWidgetManager(context).getGlanceIds(type)) {
+            runCatching {
+                updateAppWidgetState(context, id) { it[REDRAW_AT] = now }
+                widget.update(context, id)
+            }
+        }
     }
 
     suspend fun syncReportedMode(context: Context, reportedMode: AudioMode): Boolean {

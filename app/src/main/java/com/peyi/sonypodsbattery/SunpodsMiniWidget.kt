@@ -12,6 +12,8 @@ import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
+import androidx.glance.currentState
+import androidx.datastore.preferences.core.Preferences
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.LinearProgressIndicator
@@ -38,6 +40,7 @@ import androidx.glance.text.TextStyle
 class SunpodsMiniWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
+            currentState<Preferences>()[REDRAW_AT] // recompose when SonyPodsBatteryWidgetUpdater bumps it
             SunpodsGlanceTheme(context) { palette ->
                 MiniContent(widgetSnapshot(context), palette)
             }
