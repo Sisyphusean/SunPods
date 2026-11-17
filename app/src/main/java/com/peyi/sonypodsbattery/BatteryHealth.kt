@@ -22,7 +22,12 @@ import kotlin.random.Random
  *  - The estimate is a time-weighted median of stretch rates over the last 30 days (wider if
  *    there's too little), with a bootstrap range, so one odd day can't move it.
  *  - Left against right uses only time when both buds were out together. Volume, codec, mode
- *    and temperature were identical, so a steady gap is wear, not usage.
+ *    and temperature were identical, so a steady gap is wear, not usage. It is checked hour by
+ *    hour, and an hour only counts when both buds were clearly being worn.
+ *  - Lopsided use: a bud working alone (the other charging, or out but not worn) drains faster
+ *    because it carries the phone link by itself, so solo and paired listening are kept apart,
+ *    and paired listening is preferred. A bud draining under 5%/h with music playing isn't in
+ *    an ear (worn, the XM5 never drains that slowly), so those stretches are dropped.
  *
  * Stretches are kept for two years in battery_health.csv, far longer than the raw history,
  * so the trend against your own first month builds up over time.
@@ -39,14 +44,22 @@ internal object BatteryHealth {
     private const val MAX_RATE = 60.0
     /** Hours of clean listening per bud before a number is shown. */
     private const val ENOUGH_HOURS = 2.5
+    /** Below this with music playing, a bud is out of the case but not being worn. */
+    private const val MIN_WORN_RATE = 5.0
+    /** Shared time is compared in chunks of up to an hour. */
+    private const val CHUNK_HOURS = 1.0
 
     /** Sony's WF-1000XM5 ratings in % per hour; ambient isn't rated separately. */
     fun ratedHours(mode: Char): Double? = when (mode) { 'N' -> 8.0; 'O' -> 12.0; else -> null }
 
-    data class Stretch(val start: Long, val end: Long, val side: Int, val mode: Char, val hours: Double, val drop: Double, val rate: Double)
+    data class Stretch(
+        val start: Long, val end: Long, val side: Int, val mode: Char, val hours: Double, val drop: Double, val rate: Double,
+        /** The other bud was charging, missing or not worn for most of it. */
+        val solo: Boolean = false
+    )
     data class Paired(val start: Long, val end: Long, val hours: Double, val dropL: Double, val dropR: Double)
 
-    data class Bud(val hoursPerCharge: Double, val low: Double, val high: Double, val listened: Double)
+    data class Bud(val hoursPerCharge: Double, val low: Double, val high: Double, val listened: Double, val solo: Boolean = false)
     data class Report(
         val mode: Char,
         val left: Bud?,
@@ -114,17 +127,36 @@ internal object BatteryHealth {
             val drop = (first - last).toDouble()
             if (hours < MIN_HOURS || drop < MIN_DROP) return@mapNotNull null
             val rate = slope(run.map { (it.time - t0) / 3_600_000.0 to side(it, sd).first!!.toDouble() })
-            if (rate <= 0 || rate > MAX_RATE) return@mapNotNull null
-            Stretch(t0, run.last().time, sd, run.first().mode ?: '?', hours, drop, rate)
+            if (rate < MIN_WORN_RATE || rate > MAX_RATE) return@mapNotNull null
+            Stretch(t0, run.last().time, sd, run.first().mode ?: '?', hours, drop, rate, solo = otherAbsent(run, 1 - sd))
         }
     }
 
-    /** Time both buds were out and clean together, with each bud's drop over exactly that time. */
+    /**
+     * Whether the other bud was absent for most of [run]: charging in the case, not reported, or
+     * out of the case but draining so slowly it can't have been in an ear.
+     */
+    private fun otherAbsent(run: List<BatterySample>, other: Int): Boolean {
+        val present = run.filter { s -> side(s, other).let { (lvl, ch) -> lvl != null && !ch } }
+        if (present.size * 2 < run.size) return true
+        val hours = (present.last().time - present.first().time) / 3_600_000.0
+        if (hours < 0.25) return false
+        val rate = slope(present.map { (it.time - present.first().time) / 3_600_000.0 to side(it, other).first!!.toDouble() })
+        return rate < MIN_WORN_RATE
+    }
+
+    /**
+     * Shared time when both buds were out, clean and clearly worn, in chunks of up to an hour,
+     * with each bud's drop over exactly that time.
+     */
     fun paired(samples: List<BatterySample>): List<Paired> {
         val out = mutableListOf<Paired>()
         var start = -1L; var hours = 0.0; var dl = 0.0; var dr = 0.0
         fun close(end: Long) {
-            if (start >= 0 && hours >= MIN_HOURS && dl >= 5 && dr >= 5) out.add(Paired(start, end, hours, dl, dr))
+            val worn = hours > 0 && dl / hours >= MIN_WORN_RATE && dr / hours >= MIN_WORN_RATE
+            // A 2x gap within one hour isn't wear; it's one bud not being worn for part of it.
+            val plausible = dl > 0 && dr / dl in 0.5..2.0
+            if (start >= 0 && hours >= 0.4 && dl >= 4 && dr >= 4 && worn && plausible) out.add(Paired(start, end, hours, dl, dr))
             start = -1L; hours = 0.0; dl = 0.0; dr = 0.0
         }
         for (i in 1 until samples.size) {
@@ -134,6 +166,7 @@ internal object BatteryHealth {
                 hours += (b.time - a.time) / 3_600_000.0
                 dl += a.left!! - b.left!!
                 dr += a.right!! - b.right!!
+                if (hours >= CHUNK_HOURS) close(b.time)
             } else close(a.time)
         }
         close(samples.lastOrNull()?.time ?: 0L)
@@ -159,7 +192,7 @@ internal object BatteryHealth {
         if (addS.isEmpty() && addP.isEmpty()) return
         val cutoff = System.currentTimeMillis() - KEEP_MS
         val lines = (oldS + addS).filter { it.end >= cutoff }.sortedBy { it.start }.map {
-            "S,${it.start},${it.end},${it.side},${it.mode},${"%.4f".format(java.util.Locale.ROOT, it.hours)},${it.drop},${"%.4f".format(java.util.Locale.ROOT, it.rate)}"
+            "S,${it.start},${it.end},${it.side},${it.mode},${"%.4f".format(java.util.Locale.ROOT, it.hours)},${it.drop},${"%.4f".format(java.util.Locale.ROOT, it.rate)},${if (it.solo) 1 else 0}"
         } + (oldP + addP).filter { it.end >= cutoff }.sortedBy { it.start }.map {
             "P,${it.start},${it.end},${"%.4f".format(java.util.Locale.ROOT, it.hours)},${it.dropL},${it.dropR}"
         }
@@ -174,7 +207,7 @@ internal object BatteryHealth {
             val x = line.split(",")
             runCatching {
                 when (x[0]) {
-                    "S" -> s += Stretch(x[1].toLong(), x[2].toLong(), x[3].toInt(), x[4][0], x[5].toDouble(), x[6].toDouble(), x[7].toDouble())
+                    "S" -> s += Stretch(x[1].toLong(), x[2].toLong(), x[3].toInt(), x[4][0], x[5].toDouble(), x[6].toDouble(), x[7].toDouble(), x.getOrNull(8) == "1")
                     "P" -> p += Paired(x[1].toLong(), x[2].toLong(), x[3].toDouble(), x[4].toDouble(), x[5].toDouble())
                 }
             }
@@ -198,15 +231,21 @@ internal object BatteryHealth {
         return meds[30] to meds[269]
     }
 
-    private fun bud(list: List<Stretch>, rnd: Random): Bud? {
+    private fun enough(list: List<Stretch>) = list.size >= 3 && list.sumOf { it.hours } >= ENOUGH_HOURS
+
+    /** Paired listening when there's enough of it, else solo listening (flagged as such). */
+    private fun bud(all: List<Stretch>, rnd: Random): Bud? {
+        val paired = all.filter { !it.solo }
+        val solo = paired.isEmpty() || !enough(paired)
+        val list = if (solo) all.filter { it.solo } else paired
         val hours = list.sumOf { it.hours }
-        if (hours < ENOUGH_HOURS || list.size < 3) return null
+        if (!enough(list)) return null
         val items = list.map { it.rate to it.hours }
         val med = weightedMedian(items)
         val (lo, hi) = range(items, rnd)
         val v = 100 / med
         // The bootstrap only sees the spread in your data; real life (cold, volume) adds some.
-        return Bud(v, minOf(100 / hi, v * 0.95), maxOf(100 / lo, v * 1.05), hours)
+        return Bud(v, minOf(100 / hi, v * 0.95), maxOf(100 / lo, v * 1.05), hours, solo)
     }
 
     fun report(context: Context, now: Long = System.currentTimeMillis()): Report? {
@@ -222,6 +261,9 @@ internal object BatteryHealth {
         val windowDays = listOf(30, 60, 90, 180).firstOrNull { d ->
             val w = all.filter { it.end >= now - d * DAY }
             (0..1).all { sd -> w.filter { it.side == sd }.sumOf { it.hours } >= ENOUGH_HOURS }
+        } ?: listOf(30, 60, 90, 180).firstOrNull { d ->
+            // Only one bud gets used: size the window for that one.
+            all.filter { it.end >= now - d * DAY }.sumOf { it.hours } >= ENOUGH_HOURS
         } ?: 180
         val recent = all.filter { it.end >= now - windowDays * DAY }
         // Report the mode you listen in most, compared only with itself.
@@ -242,8 +284,13 @@ internal object BatteryHealth {
         val firstStart = modeAll.minOfOrNull { it.start }
         var sinceFirst: Double? = null
         if (firstStart != null && now - firstStart > 60 * DAY) {
-            val first = modeAll.filter { it.start < firstStart + 30 * DAY }
-            val later = inMode
+            var first = modeAll.filter { it.start < firstStart + 30 * DAY }
+            var later = inMode
+            // Compare paired with paired when both months have enough, so a change in how often
+            // you use one bud alone doesn't read as wear.
+            if (first.filter { !it.solo }.sumOf { it.hours } >= 2 * ENOUGH_HOURS && later.filter { !it.solo }.sumOf { it.hours } >= 2 * ENOUGH_HOURS) {
+                first = first.filter { !it.solo }; later = later.filter { !it.solo }
+            }
             if (first.sumOf { it.hours } >= 2 * ENOUGH_HOURS && later.sumOf { it.hours } >= 2 * ENOUGH_HOURS) {
                 val r0 = weightedMedian(first.map { it.rate to it.hours })
                 val r1 = weightedMedian(later.map { it.rate to it.hours })

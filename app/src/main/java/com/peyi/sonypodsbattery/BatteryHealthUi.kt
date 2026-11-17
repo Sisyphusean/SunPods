@@ -98,6 +98,8 @@ private fun BudHealth(side: String, bud: BatteryHealth.Bud?, modifier: Modifier)
         } else {
             Text(hm(bud.hoursPerCharge), style = MaterialTheme.typography.titleLarge)
             Text("${hm(bud.low)} to ${hm(bud.high)}", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+            // Alone, a bud carries the phone link by itself and drains a little faster.
+            if (bud.solo) Text("From use on its own", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
     }
 }
