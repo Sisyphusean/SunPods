@@ -22,7 +22,8 @@ internal fun audioLinkUp(context: Context): Boolean {
     return try {
         if (!adapter.isEnabled) return false
         val audio = adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.A2DP) == android.bluetooth.BluetoothProfile.STATE_CONNECTED ||
-            adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.HEADSET) == android.bluetooth.BluetoothProfile.STATE_CONNECTED
+            adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.HEADSET) == android.bluetooth.BluetoothProfile.STATE_CONNECTED ||
+            LeAudio.anyConnected(context)
         audio && EarbudConnectionStateStore.a2dpState(context) != A2dpConnectionState.DISCONNECTED
     } catch (_: SecurityException) {
         true

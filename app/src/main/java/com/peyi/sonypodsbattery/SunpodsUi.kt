@@ -1284,6 +1284,8 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
 
     if (settings.promptsOn != null || settings.promptVolume != null) VoicePromptsGroup(settings, vm)
 
+    CallsGroup(settings, vm)
+
     // Only what these earbuds say they support, named the way they name it.
     val general = settings.general.orEmpty()
     if (general.isNotEmpty()) {
@@ -1492,7 +1494,7 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.21.3"
+    const val VERSION = "2.22.0"
 }
 
 private val PROMPT_VOLUMES = listOf(-2, -1, 0, 1, 2)
@@ -1611,6 +1613,42 @@ private fun YourDataGroup() {
                 }) { Text("Restore") }
             },
             dismissButton = { TextButton(onClick = { pending = null }) { Text("Cancel") } }
+        )
+    }
+}
+
+/** Controls tab: hear your own call mic, and switch between Classic and LE Audio. */
+@Composable
+private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
+    val context = LocalContext.current
+    var testing by remember { mutableStateOf(false) }
+    var choosing by remember { mutableStateOf(false) }
+    var confirm by remember { mutableStateOf<Boolean?>(null) }
+    val le = remember(settings.readAt) { LeAudio.anyConnected(context) }
+    val rows = mutableListOf<@Composable () -> Unit>()
+    rows += { NavRow(Icons.Rounded.Mic, "Test your call mic", "Hear yourself the way callers do") { testing = true } }
+    if (settings.leModeSupported == true) rows += {
+        NavRow(Icons.Rounded.BluetoothAudio, "Connection mode", if (le) "LE Audio" else "Classic") { choosing = true }
+    }
+    Group(
+        "Calls",
+        footer = if (settings.leModeSupported == true) "LE Audio often makes your voice clearer on calls. If your earbuds don't reconnect after switching, open Bluetooth settings, tap WF-1000XM5 and turn on LE Audio." else null,
+        rows = rows
+    )
+    if (testing) MicTestSheet(onDismiss = { testing = false })
+    if (choosing) ChoiceSheet(
+        "Connection mode", listOf(false, true), le,
+        label = { if (it) "LE Audio" else "Classic" },
+        detail = { if (it) "Clearer calls on phones that support it. Connect to 2 devices turns off." else "Works with every phone and device. Connect to 2 devices available." },
+        onDismiss = { choosing = false }
+    ) { pick -> choosing = false; if (pick != le) confirm = pick }
+    confirm?.let { on ->
+        AlertDialog(
+            onDismissRequest = { confirm = null },
+            title = { Text(if (on) "Switch to LE Audio?" else "Switch to Classic?") },
+            text = { Text(if (on) "Your earbuds disconnect and reconnect using LE Audio. Connect to 2 devices turns off while it's on." else "Your earbuds disconnect and reconnect using Classic Bluetooth.") },
+            confirmButton = { TextButton(onClick = { confirm = null; vm.setLeAudio(on) }) { Text("Switch") } },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } }
         )
     }
 }

@@ -19,6 +19,8 @@ object A2dpConnectionHelper {
 
     @SuppressLint("MissingPermission")
     suspend fun isConnected(context: Context, device: BluetoothDevice): Boolean? {
+        // In LE Audio mode the earbuds aren't on A2DP at all.
+        if (LeAudio.anyConnected(context) && LeAudio.connectedEarbuds(context).isNotEmpty()) return true
         val service = proxy ?: bind(context) ?: return null
         return try {
             service.connectedDevices.any { it.address == device.address }

@@ -37,8 +37,8 @@ object SonyControlSessionManager {
 
     private var state = SonySessionState.DISCONNECTED
     private var activeAddress: String? = null
-    private var activeSocket: BluetoothSocket? = null
-    private var connectingSocket: BluetoothSocket? = null
+    private var activeSocket: SonyLink? = null
+    private var connectingSocket: SonyLink? = null
     private var activeSession: SonyBatteryClient.SonySession? = null
     private const val IDLE_DROP_MS = 90_000L
     private var connectionGeneration = 0L
@@ -122,16 +122,21 @@ object SonyControlSessionManager {
             connectionGeneration
         }
         var lastError: Exception? = null
+        // In LE Audio mode there's no Classic link to open; go straight to the LE control channel.
+        if (LeAudio.anyConnected(context)) {
+            openGatt(context, device, generation)?.let { return it }
+        }
         val attempts = listOf(UUID_V2, UUID_V1).flatMap { u -> listOf(true, false).map { u to it } }
         for ((uuid, insecure) in listOfNotNull(lastGood) + (attempts - listOfNotNull(lastGood).toSet())) {
-            var socket: BluetoothSocket? = null
+            var socket: SonyLink? = null
             try {
-                socket = if (insecure) device.createInsecureRfcommSocketToServiceRecord(uuid)
+                val raw = if (insecure) device.createInsecureRfcommSocketToServiceRecord(uuid)
                 else device.createRfcommSocketToServiceRecord(uuid)
+                socket = RfcommLink(raw)
                 synchronized(this) {
                     connectingSocket = socket
                 }
-                connectWithTimeout(socket)
+                connectWithTimeout(raw)
                 val session = SonyBatteryClient.SonySession(socket)
                 session.initialize()
                 synchronized(this) {
@@ -172,6 +177,36 @@ object SonyControlSessionManager {
             }
         }
         throw SonyControlChannelUnavailableException(lastError)
+    }
+
+    /** Tries the LE control channel on each of the earbuds' LE devices, then the paired device. */
+    @SuppressLint("MissingPermission")
+    private fun openGatt(context: Context, device: BluetoothDevice, generation: Long): SonyBatteryClient.SonySession? {
+        val candidates = (LeAudio.connectedEarbuds(context) + device).distinctBy { it.address }
+        for (candidate in candidates) {
+            var link: SonyLink? = null
+            try {
+                link = GattLink.open(context, candidate) { DiagnosticsStore.add(context, it) }
+                synchronized(this) { connectingSocket = link }
+                val session = SonyBatteryClient.SonySession(link)
+                session.initialize()
+                synchronized(this) {
+                    if (connectionGeneration != generation || state != SonySessionState.CONNECTING) throw IOException("cancelled")
+                    connectingSocket = null
+                    activeSocket = link
+                    activeAddress = device.address
+                    activeSession = session
+                    updateStateLocked(context, SonySessionState.CONNECTED)
+                }
+                DiagnosticsStore.add(context, "LE session opened on ${candidate.address}")
+                return session
+            } catch (error: Exception) {
+                DiagnosticsStore.add(context, "LE session failure on ${candidate.address}: ${error.message ?: error.javaClass.simpleName}")
+                synchronized(this) { if (connectingSocket === link) connectingSocket = null }
+                runCatching { link?.close() }
+            }
+        }
+        return null
     }
 
     @Synchronized
@@ -256,11 +291,11 @@ class SonyBatteryClient(private val context: Context) {
         }
     }
 
-    internal class SonySession(private val socket: BluetoothSocket) {
-        private val input = socket.inputStream
+    internal class SonySession(private val socket: SonyLink) {
+        private val input = socket.input
         /** When the earbuds last sent anything; they quietly drop an idle link after a few minutes. */
         @Volatile var lastHeard = System.currentTimeMillis()
-        private val output = socket.outputStream
+        private val output = socket.output
         private val decoder = SonyProtocol.Decoder()
         private var sequence = 0
 

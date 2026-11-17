@@ -166,6 +166,9 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         change("Voice prompts", { it.copy(promptsOn = on) }) { s, r -> SonyFeatures.setPrompts(s, r, on) }
     }
 
+    /** Classic or LE Audio. The earbuds reconnect afterwards. */
+    fun setLeAudio(on: Boolean) = change("Connection mode", { it }) { s, r -> SonyFeatures.setLeAudio(s, r, on) }
+
     fun setPromptVolume(volume: Int) = change("Voice prompt volume", { it.copy(promptVolume = volume) }) { s, r ->
         SonyFeatures.setPromptVolume(s, r, volume)
     }

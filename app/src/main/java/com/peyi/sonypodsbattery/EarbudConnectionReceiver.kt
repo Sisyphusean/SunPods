@@ -98,11 +98,15 @@ object EarbudConnectionStateStore {
     }
 }
 
+/** BluetoothLeAudio.ACTION_LE_AUDIO_CONNECTION_STATE_CHANGED (Android 13), same extras as A2DP. */
+internal const val LE_AUDIO_CONNECTION_STATE_CHANGED = "android.bluetooth.action.LE_AUDIO_CONNECTION_STATE_CHANGED"
+
 class EarbudConnectionReceiver : BroadcastReceiver() {
     @SuppressLint("MissingPermission")
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
         if (action != BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED &&
+            action != LE_AUDIO_CONNECTION_STATE_CHANGED &&
             action != BluetoothDevice.ACTION_ACL_DISCONNECTED
         ) return
 

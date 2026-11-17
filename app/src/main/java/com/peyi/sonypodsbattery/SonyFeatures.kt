@@ -129,6 +129,10 @@ data class DeviceSettings(
     /** null until the slots have been probed once; empty means the earbuds offer none. */
     val general: List<GeneralSetting>? = null,
     val promptsOn: Boolean? = null,
+    /** The earbuds can switch between Classic and LE Audio (AUDIO param 0x05). */
+    val leModeSupported: Boolean? = null,
+    /** Sound or connection quality priority that goes with the LE Audio switch. */
+    val lePrior: Int? = null,
     /** -2 (quietest) to +2 (loudest). */
     val promptVolume: Int? = null,
     val promptTail: Int? = null,
@@ -190,12 +194,32 @@ internal object SonyFeatures {
         r = readNoiseCycle(s, r)
         r = readGeneral(s, r)
         r = readPrompts(s, r)
+        r = readLeMode(s, r)
         return r.copy(readAt = System.currentTimeMillis())
     }
 
     private fun readPrompts(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
         val v = VoicePrompts.read(s)
         return r.copy(promptsOn = v.on ?: r.promptsOn, promptVolume = v.volume ?: r.promptVolume, promptTail = v.tail ?: r.promptTail)
+    }
+
+    /*
+     * Classic or LE Audio (Sound Connect: AudioInquiredType.CONNECTION_MODE_CLASSIC_AUDIO_LE_AUDIO):
+     *   GET 0xe6 [0x05] -> RET 0xe7 [0x05, prior]
+     *   SET 0xe8 [0x05, prior, 0 = LE Audio on / 1 = off]
+     *   NTFY 0xe9 [0x05, prior, stream: 1 LE Audio, 2 Classic]
+     */
+    private const val AUDIO_LE_MODE = 0x05
+
+    private fun readLeMode(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
+        if (r.leModeSupported == false) return r
+        val p = s.request(bytes(AUDIO_GET_PARAM, AUDIO_LE_MODE), timeoutMs = 700) ?: return r.copy(leModeSupported = r.leModeSupported ?: false)
+        return r.copy(leModeSupported = true, lePrior = if (p.size >= 3) u(p[2]) else r.lePrior)
+    }
+
+    fun setLeAudio(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
+        s.command(bytes(AUDIO_GET_PARAM + 2, AUDIO_LE_MODE, r.lePrior ?: 0, if (on) 0x00 else 0x01))
+        return r
     }
 
     fun setPrompts(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
@@ -459,6 +483,7 @@ object SettingsStore {
                     }
                 } else null,
                 promptsOn = bool("vg"), promptVolume = int("vgVol"), promptTail = int("vgTail"),
+                leModeSupported = bool("leSup"), lePrior = int("lePrior"),
                 readAt = if (o.has("at")) o.getLong("at") else 0L
             )
         } catch (_: Exception) {
@@ -491,6 +516,8 @@ object SettingsStore {
             })
         }
         s.promptsOn?.let { o.put("vg", it) }
+        s.leModeSupported?.let { o.put("leSup", it) }
+        s.lePrior?.let { o.put("lePrior", it) }
         s.promptVolume?.let { o.put("vgVol", it) }
         s.promptTail?.let { o.put("vgTail", it) }
         o.put("at", s.readAt)
