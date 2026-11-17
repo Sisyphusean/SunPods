@@ -88,7 +88,10 @@ private const val WORKING_TIMEOUT_MS = 15_000L
 private val AudioModeKey = ActionParameters.Key<String>("audio_mode_action")
 private const val MODE_SYNC_GRACE_PERIOD_MS = 4_000L
 
-class SonyPodsBatteryWidget : GlanceAppWidget() {
+open class SonyPodsBatteryWidget : GlanceAppWidget() {
+    /** Noise control buttons under the levels. The medium widget is levels only. */
+    protected open val controls = true
+
     override val stateDefinition = PreferencesGlanceStateDefinition
     override val sizeMode = SizeMode.Exact
 
@@ -117,7 +120,8 @@ class SonyPodsBatteryWidget : GlanceAppWidget() {
                     ambientLevel = desiredAmbientLevel,
                     refreshing = refreshing,
                     palette = palette,
-                    snapshot = snapshot
+                    snapshot = snapshot,
+                    controls = controls
                 )
             }
         }
@@ -128,9 +132,19 @@ class SonyPodsBatteryWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = SonyPodsBatteryWidget()
 }
 
+/** Medium: the large widget's header and levels, without the noise control row. */
+class SunpodsMediumWidget : SonyPodsBatteryWidget() {
+    override val controls = false
+}
+
+class SunpodsMediumWidgetReceiver : GlanceAppWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = SunpodsMediumWidget()
+}
+
 object SonyPodsBatteryWidgetUpdater {
     suspend fun updateAll(context: Context) {
         redraw(context, SonyPodsBatteryWidget::class.java) { SonyPodsBatteryWidget() }
+        redraw(context, SunpodsMediumWidget::class.java) { SunpodsMediumWidget() }
         redraw(context, SunpodsMiniWidget::class.java) { SunpodsMiniWidget() }
         SunpodsTileService.requestUpdate(context)
     }
@@ -230,7 +244,8 @@ private fun WidgetContent(
     ambientLevel: Int,
     refreshing: Boolean,
     palette: WidgetPalette,
-    snapshot: WidgetSnapshot
+    snapshot: WidgetSnapshot,
+    controls: Boolean = true
 ) {
     val size = LocalSize.current
     val wide = size.width >= 290.dp
@@ -255,6 +270,7 @@ private fun WidgetContent(
             Spacer(GlanceModifier.width(6.dp))
             BatteryTile("Case", usable(state.case), state.caseCharging, palette, GlanceModifier.defaultWeight())
         }
+        if (!controls) return@Column
         Spacer(GlanceModifier.height(6.dp))
         Row(modifier = GlanceModifier.fillMaxWidth().height(48.dp)) {
             ModeButton(R.drawable.ic_mode_nc, "Noise cancelling", "ANC", AudioMode.NC, currentMode, pendingMode, wide, palette, GlanceModifier.defaultWeight())
@@ -508,9 +524,14 @@ class RefreshWidgetAction : ActionCallback {
         // Start talking to the earbuds first, then show "Updating" while that runs.
         val now = System.currentTimeMillis()
         RefreshCoordinator.enqueueRefresh(context.applicationContext)
-        for (id in GlanceAppWidgetManager(context).getGlanceIds(SonyPodsBatteryWidget::class.java)) {
+        val manager = GlanceAppWidgetManager(context)
+        for (id in manager.getGlanceIds(SonyPodsBatteryWidget::class.java)) {
             updateAppWidgetState(context, id) { it[REFRESH_STARTED] = now }
             SonyPodsBatteryWidget().update(context, id)
+        }
+        for (id in manager.getGlanceIds(SunpodsMediumWidget::class.java)) {
+            updateAppWidgetState(context, id) { it[REFRESH_STARTED] = now }
+            SunpodsMediumWidget().update(context, id)
         }
         WidgetRedrawWorker.schedule(context, WORKING_TIMEOUT_MS / 1000 + 1)
     }

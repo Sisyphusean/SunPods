@@ -76,6 +76,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Earbuds
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Sensors
+import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.BluetoothAudio
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BatteryStd
 import androidx.compose.material.icons.rounded.Bolt
@@ -554,7 +559,7 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
                     rows = listOf(
                         { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "Restores detail in compressed music", settings.dseeOn, vm::setDsee) },
                         { ToggleRow(Icons.Rounded.RecordVoiceOver, "Speak-to-Chat", "Talk to pause music", settings.speakToChat, vm::setSpeakToChat) },
-                        { ToggleRow(Icons.Rounded.Pause, "Pause when removed", "Resumes when you put them back", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) }
+                        { ToggleRow(Icons.Rounded.Sensors, "Pause when removed", "Resumes when you put them back", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) }
                     )
                 )
             }
@@ -824,7 +829,7 @@ private fun LastSeenCard() {
                     Text(
                         buildString {
                             append(if (spot.atDisconnect) "Disconnected here " else "Last connected here ")
-                            append(relative(spot.time))
+                            append(relative(spot.seenUntil))
                             if (spot.accuracyM > 0f) append(", within ${spot.accuracyM.roundToInt()} m")
                         },
                         style = MaterialTheme.typography.bodyMedium,
@@ -1053,7 +1058,7 @@ private fun SoundScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
             { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "AI upscaling for compressed music. Uses a little more battery.", settings.dseeOn, vm::setDsee) },
             {
                 var open by remember { mutableStateOf(false) }
-                NavRow(Icons.Rounded.SettingsInputAntenna, "Connection priority", settings.priority?.label ?: "Not read yet") { open = true }
+                NavRow(Icons.Rounded.BluetoothAudio, "Connection priority", settings.priority?.label ?: "Not read yet") { open = true }
                 if (open) {
                     ChoiceSheet(
                         "Connection priority",
@@ -1247,7 +1252,7 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
             }
             add {
                 var open by remember { mutableStateOf(false) }
-                NavRow(Icons.Rounded.SwapHoriz, "End chat mode", settings.speakToChatTimeout?.label ?: "Not read yet") { open = true }
+                NavRow(Icons.Rounded.Timer, "End chat mode", settings.speakToChatTimeout?.label ?: "Not read yet") { open = true }
                 if (open) {
                     ChoiceSheet("End chat mode after", SpeakToChatTimeout.entries.toList(), settings.speakToChatTimeout,
                         label = { it.label }, onDismiss = { open = false }) { vm.setSpeakToChatConfig(sensitivity, it) }
@@ -1260,7 +1265,7 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
     Group(
         "Wearing detection",
         rows = listOf(
-            { ToggleRow(Icons.Rounded.Pause, "Pause when removed", "Music pauses when you take an earbud out", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) },
+            { ToggleRow(Icons.Rounded.Sensors, "Pause when removed", "Music pauses when you take an earbud out", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) },
             { ToggleRow(Icons.Rounded.PowerSettingsNew, "Power off when removed", "Saves battery when both earbuds are out", settings.autoOffWhenRemoved, vm::setAutoOff) }
         )
     )
@@ -1284,8 +1289,8 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
 
 private fun generalIcon(key: String) = when {
     key.startsWith("MULTIPOINT") -> Icons.Rounded.Devices
-    key.startsWith("SIDETONE") -> Icons.Rounded.RecordVoiceOver
-    key.startsWith("TWS_ONE_SIDE") -> Icons.Rounded.Hearing
+    key.startsWith("SIDETONE") -> Icons.Rounded.Mic
+    key.startsWith("TWS_ONE_SIDE") -> Icons.Rounded.Earbuds
     else -> Icons.Rounded.Tune
 }
 
@@ -1355,7 +1360,7 @@ private fun DeviceScreen(
                     val r = size.height / 2
                     scale(scaleX = size.width / size.height * 0.9f, scaleY = 1f, pivot = center) {
                         drawCircle(
-                            androidx.compose.ui.graphics.Brush.radialGradient(listOf(SolarAmber.copy(alpha = 0.22f), Color.Transparent), center, r),
+                            androidx.compose.ui.graphics.Brush.radialGradient(listOf(colors.primary.copy(alpha = 0.22f), Color.Transparent), center, r),
                             r, center
                         )
                     }
@@ -1459,5 +1464,5 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.12.6"
+    const val VERSION = "2.13.0"
 }

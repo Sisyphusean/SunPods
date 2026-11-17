@@ -19,6 +19,11 @@ import androidx.compose.material.icons.rounded.BluetoothSearching
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.Watch
+import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material.icons.rounded.Tablet
+import androidx.compose.material.icons.rounded.Smartphone
+import androidx.compose.material.icons.rounded.Laptop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -131,6 +136,18 @@ internal fun DevicesCard(connected: Boolean) {
     }
 }
 
+/** A guess from the name, since the earbuds don't say what kind of device it is. */
+private fun deviceIcon(name: String) = name.lowercase().let { n ->
+    when {
+        Regex("\\b(tv|bravia|television|fire ?stick|chromecast)\\b").containsMatchIn(n) -> Icons.Rounded.Tv
+        Regex("ipad|tablet|\\btab\\b").containsMatchIn(n) -> Icons.Rounded.Tablet
+        Regex("watch").containsMatchIn(n) -> Icons.Rounded.Watch
+        Regex("laptop|book|\\bpc\\b|desktop|\\bmac|windows|thinkpad|surface").containsMatchIn(n) -> Icons.Rounded.Laptop
+        Regex("iphone|phone|galaxy|pixel|xperia|oneplus|redmi|xiaomi").containsMatchIn(n) -> Icons.Rounded.Smartphone
+        else -> Icons.Rounded.Devices
+    }
+}
+
 /** Survives leaving the tab, so the list shows at once next time. */
 private object DevicesCache {
     @Volatile var last: PairedDevices? = null
@@ -163,7 +180,7 @@ private fun DeviceRow(
             .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        RowIcon(if (isPhone) Icons.Rounded.PhoneAndroid else Icons.Rounded.Devices, active = device.connected)
+        RowIcon(if (isPhone) Icons.Rounded.PhoneAndroid else deviceIcon(device.name), active = device.connected)
         Spacer(Modifier.width(16.dp))
         Column(Modifier.weight(1f)) {
             Text(device.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)

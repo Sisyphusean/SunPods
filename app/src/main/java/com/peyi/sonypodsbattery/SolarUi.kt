@@ -266,7 +266,7 @@ internal fun SolarHero(
                     scale(scaleX = size.width / size.height * 0.92f, scaleY = 1f, pivot = center) {
                         drawCircle(
                             Brush.radialGradient(
-                                listOf(SolarAmber.copy(alpha = glow), Color.Transparent),
+                                listOf(colors.primary.copy(alpha = glow), Color.Transparent),
                                 center = center,
                                 radius = r
                             ),
@@ -333,7 +333,7 @@ internal fun SolarHero(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(8.dp).clip(CircleShape)
-                    .background(if (connected) SolarAmber else colors.outline)
+                    .background(if (connected) colors.primary else colors.outline)
             )
             Spacer(Modifier.width(8.dp))
             Text(

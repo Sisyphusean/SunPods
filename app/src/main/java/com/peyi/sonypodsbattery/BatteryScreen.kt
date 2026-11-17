@@ -31,7 +31,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryAlert
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Inventory2
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -610,7 +609,7 @@ private fun AlertsCard() {
                 }
             }
             HorizontalDivider(Modifier.padding(start = 72.dp, end = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
-            ToggleRow(Icons.Rounded.Inventory2, "Low case", "A reminder to charge the case at 20%", case) {
+            ToggleRow(SunIcons.Case, "Low case", "A reminder to charge the case at 20%", case) {
                 case = it; BatteryNudges.setCaseAlerts(context, it)
             }
         }

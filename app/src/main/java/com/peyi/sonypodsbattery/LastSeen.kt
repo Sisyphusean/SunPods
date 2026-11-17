@@ -34,7 +34,10 @@ data class LastSeen(
     val lat: Double,
     val lng: Double,
     val accuracyM: Float,
+    /** When the location itself was taken. */
     val time: Long,
+    /** The last moment the earbuds were known to be connected here; what "Last connected" shows. */
+    val seenUntil: Long = time,
     /** True when captured at the moment the earbuds disconnected; false for a "still connected here" fix. */
     val atDisconnect: Boolean
 )
@@ -62,12 +65,13 @@ object LastSeenStore {
             lng = p.getString("lng", null)?.toDoubleOrNull() ?: return null,
             accuracyM = p.getFloat("accuracy", 0f),
             time = p.getLong("time", 0L),
+            seenUntil = maxOf(p.getLong("seen_until", 0L), p.getLong("time", 0L)),
             atDisconnect = p.getBoolean("at_disconnect", false)
         )
     }
 
     fun clear(context: Context) {
-        prefs(context).edit().remove("lat").remove("lng").remove("accuracy").remove("time").remove("at_disconnect").apply()
+        prefs(context).edit().remove("lat").remove("lng").remove("accuracy").remove("time").remove("seen_until").remove("at_disconnect").apply()
     }
 
     fun hasLocationPermission(context: Context): Boolean =
@@ -79,6 +83,7 @@ object LastSeenStore {
 
     /** Saves the spot where the earbuds just disconnected. */
     suspend fun captureAtDisconnect(context: Context) {
+        stamp(context)
         val current = load(context)
         if (current != null && current.atDisconnect && System.currentTimeMillis() - current.time < 60_000) return
         capture(context, atDisconnect = true)
@@ -89,9 +94,19 @@ object LastSeenStore {
      * only from a location the phone already worked out for something else. No GPS is switched on.
      */
     suspend fun captureWhileConnected(context: Context) {
+        stamp(context)
         val current = load(context)
         if (current != null && System.currentTimeMillis() - current.time < CONNECTED_THROTTLE_MS) return
         capture(context, atDisconnect = false)
+    }
+
+    /**
+     * Notes "still with you" without touching location, so the time stays right even when the
+     * place is only refreshed every 30 minutes or a fix at disconnect fails.
+     */
+    private fun stamp(context: Context) {
+        if (!enabled(context) || !prefs(context).contains("time")) return
+        prefs(context).edit().putLong("seen_until", System.currentTimeMillis()).apply()
     }
 
     @SuppressLint("MissingPermission")
@@ -108,6 +123,7 @@ object LastSeenStore {
             .putString("lng", fix.longitude.toString())
             .putFloat("accuracy", if (fix.hasAccuracy()) fix.accuracy else 0f)
             .putLong("time", System.currentTimeMillis())
+            .putLong("seen_until", System.currentTimeMillis())
             .putBoolean("at_disconnect", atDisconnect)
             .apply()
         DiagnosticsStore.add(context, "Last seen saved (${if (atDisconnect) "disconnect" else "connected"}), ±${fix.accuracy.toInt()} m")
