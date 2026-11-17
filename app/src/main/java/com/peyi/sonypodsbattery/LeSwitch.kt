@@ -86,8 +86,13 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, onDone: () -> 
             }
         }
         log("didn't reach $target in 45 s")
+        if (on) {
+            // Don't leave the earbuds half switched: their LE Audio setting turns off Connect to 2 devices.
+            val reverted = RefreshCoordinator.awaitSession(context, "Connection mode") { s -> SonyFeatures.setLeAudio(s, settings, false) }
+            log("put the earbuds back on Classic: ${reverted.getOrNull() ?: "couldn't"}")
+        }
         state = Switch.Failed(
-            if (on) "Your earbuds didn't connect with LE Audio. Open Bluetooth settings, tap WF-1000XM5 and turn on LE Audio there. If your phone doesn't show that option, it can't use LE Audio with these earbuds."
+            if (on) "Your phone didn't connect using LE Audio, so your earbuds are back on Classic. Some phones only allow LE Audio with approved earbuds. On Samsung and Pixel you can allow it in Developer options: turn on Bypass LE Audio allowlist, reconnect your earbuds, then try again."
             else "Your earbuds didn't come back on Classic. Open Bluetooth settings, tap WF-1000XM5 and turn LE Audio off."
         )
     }

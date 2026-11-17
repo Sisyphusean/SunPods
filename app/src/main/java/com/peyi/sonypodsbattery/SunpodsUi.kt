@@ -1494,7 +1494,7 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.22.1"
+    const val VERSION = "2.22.2"
 }
 
 private val PROMPT_VOLUMES = listOf(-2, -1, 0, 1, 2)
