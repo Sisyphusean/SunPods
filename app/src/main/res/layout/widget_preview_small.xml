@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static preview for the widget picker and the "Add to Home screen" sheet. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/wp_page_bg"
+    android:gravity="center_vertical"
+    android:orientation="vertical"
+    android:paddingStart="14dp"
+    android:paddingEnd="14dp">
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="SunPods"
+        android:textColor="@color/wp_sub"
+        android:textSize="11sp" />
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="L 80%   R 78%   Case 64%"
+        android:textColor="@color/wp_text"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+</LinearLayout>
