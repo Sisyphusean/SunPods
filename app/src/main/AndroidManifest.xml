@@ -47,7 +47,8 @@
 
         <receiver
             android:name=".EarbudConnectionReceiver"
-            android:exported="false">
+            android:exported="true"
+            android:permission="android.permission.BLUETOOTH_CONNECT">
             <intent-filter>
                 <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED" />
                 <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
