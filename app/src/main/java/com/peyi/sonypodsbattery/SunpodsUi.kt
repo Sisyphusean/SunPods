@@ -85,6 +85,7 @@ import androidx.compose.material.icons.rounded.SaveAlt
 import androidx.compose.material.icons.rounded.SettingsBackupRestore
 import androidx.compose.material.icons.rounded.TableChart
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Earbuds
 import androidx.compose.material.icons.rounded.Mic
@@ -1402,6 +1403,11 @@ private fun DeviceScreen(
         "Appearance",
         rows = listOf(
             {
+                var picking by remember { mutableStateOf(false) }
+                NavRow(Icons.Rounded.Widgets, "Add a widget", "Small, medium or large") { picking = true }
+                if (picking) WidgetPickerSheet(onDismiss = { picking = false })
+            },
+            {
                 ToggleRow(
                     Icons.Rounded.Palette, "Match wallpaper colours",
                     "Use your wallpaper colours instead of SunPods amber", dynamicColor, onDynamicColorChange
@@ -1486,7 +1492,7 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.21.1"
+    const val VERSION = "2.21.2"
 }
 
 private val PROMPT_VOLUMES = listOf(-2, -1, 0, 1, 2)

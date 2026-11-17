@@ -780,8 +780,8 @@ private fun DoneStep(vm: SunpodsViewModel, onDone: () -> Unit) {
     val context = LocalContext.current
     val battery by vm.battery.collectAsState()
     val connected = battery.left != null || battery.right != null
-    val widgets = remember { AppWidgetManager.getInstance(context) }
     var pinned by remember { mutableStateOf(false) }
+    var picking by remember { mutableStateOf(false) }
     Page(
         progress = 1f, icon = Icons.Rounded.CheckCircle,
         title = "You're all set",
@@ -790,11 +790,11 @@ private fun DoneStep(vm: SunpodsViewModel, onDone: () -> Unit) {
         onPrimary = { OnboardingStore.setDone(context, true); onDone() }
     ) {
         if (connected) { Levels(battery); Spacer(Modifier.height(24.dp)) }
-        if (pinned) Text("Check your home screen for the widget.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (widgets.isRequestPinAppWidgetSupported && !pinned) {
-            SetupRow(Icons.Rounded.Widgets, "Add widget", "See your battery on the home screen. More sizes are in your widget list.", done = false, action = "Add") {
-                pinned = widgets.requestPinAppWidget(ComponentName(context, SunpodsMediumWidgetReceiver::class.java), null, null)
-            }
-        }
+        SetupRow(
+            Icons.Rounded.Widgets, "Add a widget",
+            if (pinned) "Added. Check your home screen, or add another size." else "See your battery on the home screen. Small, medium or large.",
+            done = false, action = "Choose"
+        ) { picking = true }
+        if (picking) WidgetPickerSheet(onDismiss = { picking = false }, onRequested = { pinned = true })
     }
 }
