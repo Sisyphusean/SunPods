@@ -295,7 +295,7 @@ fun SunpodsApp(
                 title = { Text(if (tab == Tab.HOME) "SunPods" else tab.label) },
                 actions = {
                     IconButton(onClick = refresh, enabled = !busy) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh from earbuds")
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh battery and settings")
                     }
                 },
                 colors = TopAppBarDefaults.largeTopAppBarColors(
@@ -410,7 +410,7 @@ internal fun ToggleRow(icon: ImageVector?, title: String, subtitle: String, chec
             onValueChange = onChange
         ),
         headlineContent = { Text(title) },
-        supportingContent = { Text(if (known) subtitle else "Pull down to read from your earbuds") },
+        supportingContent = { Text(if (known) subtitle else "Pull down to refresh") },
         leadingContent = icon?.let { { RowIcon(it, active = checked == true) } },
         trailingContent = { Switch(checked = checked == true, enabled = known, onCheckedChange = null) },
         colors = TransparentItem
@@ -483,7 +483,7 @@ private fun PermissionBanner(onRequest: () -> Unit) {
         Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Allow Nearby devices", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
             Text(
-                "SunPods talks to your earbuds over Bluetooth. Nothing leaves your phone.",
+                "SunPods needs this to talk to your earbuds over Bluetooth.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
@@ -569,8 +569,8 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
                     "Quick settings",
                     rows = listOf(
                         { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "Restores detail in compressed music", settings.dseeOn, vm::setDsee) },
-                        { ToggleRow(Icons.Rounded.RecordVoiceOver, "Speak-to-Chat", "Talk to pause music", settings.speakToChat, vm::setSpeakToChat) },
-                        { ToggleRow(Icons.Rounded.Sensors, "Pause when removed", "Resumes when you put them back", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) }
+                        { ToggleRow(Icons.Rounded.RecordVoiceOver, "Speak-to-Chat", "Pauses music when you start talking", settings.speakToChat, vm::setSpeakToChat) },
+                        { ToggleRow(Icons.Rounded.Sensors, "Pause when removed", "Pauses music when you take an earbud out", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) }
                     )
                 )
             }
@@ -603,7 +603,7 @@ private fun BatteryCard(battery: BatteryState, busy: Boolean) {
         Footer(
             when {
                 busy -> "Checking your earbuds…"
-                battery.updatedAt == 0L -> "Pull down to read your earbuds."
+                battery.updatedAt == 0L -> "Pull down to refresh."
                 outlook.caseNeedsCharge -> "Case is low. Charge it tonight."
                 outlook.minutesLeft != null -> "About ${BatteryInsights.formatMinutes(outlook.minutesLeft)} of listening left. Updated ${relative(battery.updatedAt)}."
                 else -> "Updated ${relative(battery.updatedAt)}."
@@ -773,8 +773,8 @@ private fun LastSeenCard() {
                         Text("Remember where you left them", style = MaterialTheme.typography.titleMedium)
                     }
                     Text(
-                        if (enabled) "Location is off for SunPods, so the last spot can't be saved."
-                        else "SunPods can save the spot where your earbuds disconnect, so you know where to look. It stays on this phone.",
+                        if (enabled) "Location is off for SunPods, so Last seen can't save where your earbuds disconnect."
+                        else "SunPods can save where your earbuds disconnect, so you know where to look. It stays on this phone.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant
                     )
@@ -811,7 +811,7 @@ private fun LastSeenCard() {
         SunCard {
             if (spot == null) {
                 Text(
-                    "The spot will be saved the next time your earbuds disconnect.",
+                    "SunPods saves the spot next time your earbuds disconnect.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = colors.onSurfaceVariant,
                     modifier = Modifier.padding(20.dp)
@@ -866,7 +866,7 @@ private fun LastSeenCard() {
                 RowDivider(inset = 20.dp)
                 Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp)) {
                     Text(
-                        "Allow location all the time so the spot is saved even when SunPods is closed.",
+                        "Allow location all the time to save the spot even when SunPods is closed.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant
                     )
@@ -985,7 +985,7 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
         }
         val context = LocalContext.current
         val automation = remember(battery.listeningMode, battery.updatedAt) { AutomationStore.active(context) }
-        Footer(automation?.let { "Set by an automation: $it. Pick a mode to take over." } ?: "You can also tap the earbuds above to switch.")
+        Footer(automation?.let { "Set by an automation: $it. Pick a mode to override it." } ?: "You can also tap the earbuds picture to switch modes.")
     }
 }
 
@@ -1059,14 +1059,14 @@ private fun SoundScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
                 }
             }
         }
-        Footer("Custom 1 and 2 keep your own shape. Tap Customise to start editing.")
+        Footer("Custom 1 and 2 save your own settings. Tap Customise to edit.")
     }
 
     Group(
         "Audio quality",
-        footer = settings.codec?.let { "Playing over $it right now. Changing priority makes the earbuds reconnect briefly." },
+        footer = settings.codec?.let { "Now playing over $it. Changing priority briefly reconnects your earbuds." },
         rows = listOf(
-            { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "AI upscaling for compressed music. Uses a little more battery.", settings.dseeOn, vm::setDsee) },
+            { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "Restores detail in compressed music. Uses a little more battery.", settings.dseeOn, vm::setDsee) },
             {
                 var open by remember { mutableStateOf(false) }
                 NavRow(Icons.Rounded.BluetoothAudio, "Connection priority", settings.priority?.label ?: "Not read yet") { open = true }
@@ -1101,7 +1101,7 @@ private fun EqPanel(settings: DeviceSettings, vm: SunpodsViewModel) {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
                 Text(settings.eqPreset?.label ?: "Not read yet", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    if (editable) "Drag the sliders to shape your sound." else "A fixed Sony preset.",
+                    if (editable) "Drag the sliders to shape your sound." else "A Sony preset. Choose Custom to edit.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.onSurfaceVariant
                 )
@@ -1153,7 +1153,7 @@ private fun EqPanel(settings: DeviceSettings, vm: SunpodsViewModel) {
                         TextButton(onClick = {
                             values = List(6) { 0 }
                             vm.setEqBands(0, List(5) { 0 })
-                        }) { Text("Flatten") }
+                        }) { Text("Reset to flat") }
                     } else {
                         FilledTonalButton(onClick = { vm.setEqPreset(EqPreset.CUSTOM_1) }) {
                             Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -1237,13 +1237,13 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
                 }
             }
         }
-        Footer("Tap an earbud to choose what its touch sensor does.")
+        Footer("Tap an earbud to choose what its touch control does.")
     }
 
     AutomationsCard()
 
     val chatRows = buildList<@Composable () -> Unit> {
-        add { ToggleRow(Icons.Rounded.RecordVoiceOver, "Speak-to-Chat", "Start talking and music pauses, ambient sound comes in", settings.speakToChat, vm::setSpeakToChat) }
+        add { ToggleRow(Icons.Rounded.RecordVoiceOver, "Speak-to-Chat", "Pauses music and lets sound in when you talk", settings.speakToChat, vm::setSpeakToChat) }
         if (settings.speakToChat == true) {
             add {
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
@@ -1277,7 +1277,7 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
         "Wearing detection",
         rows = listOf(
             { ToggleRow(Icons.Rounded.Sensors, "Pause when removed", "Music pauses when you take an earbud out", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) },
-            { ToggleRow(Icons.Rounded.PowerSettingsNew, "Power off when removed", "Saves battery when both earbuds are out", settings.autoOffWhenRemoved, vm::setAutoOff) }
+            { ToggleRow(Icons.Rounded.PowerSettingsNew, "Power off when removed", "Turns off when both earbuds are out, to save battery", settings.autoOffWhenRemoved, vm::setAutoOff) }
         )
     )
 
@@ -1345,7 +1345,7 @@ private fun touchHint(function: TouchFunction): String = when (function) {
     TouchFunction.AMBIENT_SOUND_CONTROL -> "Tap: switch noise mode. Hold: Quick Attention."
     TouchFunction.PLAYBACK_CONTROL -> "Tap: play/pause. Double: next. Triple: previous. Hold: assistant."
     TouchFunction.VOLUME_CONTROL -> "Tap: volume up. Hold: volume down."
-    TouchFunction.NONE -> "Touches on this side do nothing."
+    TouchFunction.NONE -> "Touch does nothing on this side."
 }
 
 // ======================================================================
@@ -1391,8 +1391,8 @@ private fun DeviceScreen(
         rows = listOf(
             { InfoRow("Firmware", settings.firmware ?: "Not read yet") },
             { InfoRow("Codec", settings.codec ?: "Not read yet") },
-            { InfoRow("Battery read", if (battery.updatedAt == 0L) "Never" else relative(battery.updatedAt)) },
-            { InfoRow("Settings read", if (settings.readAt == 0L) "Never" else relative(settings.readAt)) }
+            { InfoRow("Battery checked", if (battery.updatedAt == 0L) "Never" else relative(battery.updatedAt)) },
+            { InfoRow("Settings checked", if (settings.readAt == 0L) "Never" else relative(settings.readAt)) }
         )
     )
 
@@ -1404,7 +1404,7 @@ private fun DeviceScreen(
             {
                 ToggleRow(
                     Icons.Rounded.Palette, "Match wallpaper colours",
-                    "Use Material You colours instead of SunPods amber", dynamicColor, onDynamicColorChange
+                    "Use your wallpaper colours instead of SunPods amber", dynamicColor, onDynamicColorChange
                 )
             }
         )
@@ -1416,7 +1416,7 @@ private fun DeviceScreen(
         "Help",
         rows = listOf(
             { NavRow(Icons.Rounded.Bluetooth, "Bluetooth settings", "Pair, forget or reconnect", onOpenBluetoothSettings) },
-            { NavRow(Icons.Rounded.BugReport, "Share diagnostics", "Send the connection log", onShareDiagnostics) },
+            { NavRow(Icons.Rounded.BugReport, "Share diagnostics", "Send a log to help fix problems", onShareDiagnostics) },
             {
                 val context = LocalContext.current
                 NavRow(Icons.Rounded.RestartAlt, "Set up again", "Permissions, pairing and extras, step by step") {
@@ -1425,7 +1425,7 @@ private fun DeviceScreen(
                 }
             }
         ),
-        footer = "No account, no sign-in, no internet. Sony allows one control connection at a time, so close Sound Connect while using SunPods.\n\nSunPods ${SunpodsInfo.VERSION}"
+        footer = "No account and no internet. Your earbuds allow one control app at a time, so close Sony Sound Connect while using SunPods.\n\nSunPods ${SunpodsInfo.VERSION}"
     )
 }
 
@@ -1486,7 +1486,7 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.20.0"
+    const val VERSION = "2.21.0"
 }
 
 private val PROMPT_VOLUMES = listOf(-2, -1, 0, 1, 2)
@@ -1501,7 +1501,7 @@ private fun VoicePromptsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
     var end by remember { mutableStateOf(QuietHours.endHour(context)) }
     val rows = mutableListOf<@Composable () -> Unit>()
     rows += {
-        ToggleRow(Icons.Rounded.RecordVoiceOver, "Voice prompts", "Announcements like \"Battery about 20%\" and mode names", settings.promptsOn) { vm.setPrompts(it) }
+        ToggleRow(Icons.Rounded.RecordVoiceOver, "Voice prompts", "Spoken alerts like \"Battery about 20%\"", settings.promptsOn) { vm.setPrompts(it) }
     }
     if (settings.promptVolume != null) rows += {
         var open by remember { mutableStateOf(false) }
@@ -1533,7 +1533,7 @@ private fun VoicePromptsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
     }
     Group(
         "Voice prompts",
-        footer = if (quiet) "Switched on the earbuds, so it holds even with SunPods closed. If the earbuds connect during quiet hours, the connection prompt may still play once." else null,
+        footer = if (quiet) "Quiet hours are set on your earbuds, so they work even when SunPods is closed. The connection prompt may still play once if your earbuds connect during quiet hours." else null,
         rows = rows
     )
 }
@@ -1557,7 +1557,7 @@ private fun YourDataGroup() {
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
             val ok = withContext(Dispatchers.IO) { runCatching { Backup.write(context, uri, Backup.historyCsv(context)) }.isSuccess }
-            toast(if (ok) "Battery history exported" else "Couldn't export")
+            toast(if (ok) "Battery history exported" else "Couldn't export battery history")
         }
     }
     val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1566,22 +1566,22 @@ private fun YourDataGroup() {
             val result = withContext(Dispatchers.IO) {
                 runCatching { Backup.read(context, uri).let { it to Backup.inspect(it) } }
             }
-            result.onSuccess { pending = it }.onFailure { toast(it.message ?: "Couldn't read that file") }
+            result.onSuccess { pending = it }.onFailure { toast(it.message ?: "Couldn't open that file. Choose a SunPods backup.") }
         }
     }
 
     Group(
         "Your data",
         rows = listOf(
-            { NavRow(Icons.Rounded.SaveAlt, "Back up", "Settings, automations, Last seen and battery history to one file") { save.launch(Backup.suggestedName()) } },
-            { NavRow(Icons.Rounded.SettingsBackupRestore, "Restore", "From a SunPods backup file") { open.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) } },
+            { NavRow(Icons.Rounded.SaveAlt, "Back up", "Save settings, automations, Last seen and battery history to a file") { save.launch(Backup.suggestedName()) } },
+            { NavRow(Icons.Rounded.SettingsBackupRestore, "Restore", "Bring back data from a SunPods backup") { open.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) } },
             {
-                NavRow(Icons.Rounded.TableChart, "Export battery history", "As a CSV for spreadsheets") {
+                NavRow(Icons.Rounded.TableChart, "Export battery history", "Save as a CSV file for spreadsheets") {
                     csv.launch("SunPods-battery-history-" + java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date()) + ".csv")
                 }
             }
         ),
-        footer = "Files stay where you save them. SunPods has no internet access, so nothing is uploaded. A backup includes your Last seen location, so keep it somewhere private."
+        footer = "Files stay where you save them. SunPods has no internet access. Backups include your Last seen location, so keep them private."
     )
 
     pending?.let { (text, s) ->
@@ -1592,7 +1592,7 @@ private fun YourDataGroup() {
             text = {
                 Text(
                     "Saved $date from SunPods ${s.appVersion}: ${s.settings} settings, ${s.historyRows} battery readings and ${s.healthRows} battery health records.\n\n" +
-                        "Your settings are replaced. Battery history is merged, so nothing recorded here is lost. SunPods restarts afterwards."
+                        "Your settings will be replaced. Battery history is merged, so nothing is lost. SunPods restarts afterwards."
                 )
             },
             confirmButton = {
@@ -1600,7 +1600,7 @@ private fun YourDataGroup() {
                     pending = null
                     scope.launch {
                         val ok = withContext(Dispatchers.IO) { runCatching { Backup.restore(context, text) }.isSuccess }
-                        if (ok) Backup.restart(context) else toast("Couldn't restore that backup")
+                        if (ok) Backup.restart(context) else toast("Couldn't restore that backup. Try another file.")
                     }
                 }) { Text("Restore") }
             },

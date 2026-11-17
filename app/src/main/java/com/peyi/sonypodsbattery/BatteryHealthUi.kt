@@ -63,7 +63,7 @@ internal fun BatteryHealthCard(refreshKey: Long) {
                     Text("Learning your batteries", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Needs about 2½ hours of listening per earbud with music playing. Partial charges are fine: any stretch between 95% and 10% counts.",
+                        "Listen for about 2½ hours with each earbud to see their health. Short sessions count, so you never need to run them flat.",
                         style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant
                     )
                     return@Column
@@ -79,7 +79,7 @@ internal fun BatteryHealthCard(refreshKey: Long) {
                     val pct = (best / rated * 100).roundToInt().coerceAtMost(100)
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        "Sony rates ${hm(rated)}. Your weaker bud manages about $pct% of that at your volume and codec.",
+                        "Sony rates them at ${hm(rated)}. Your weaker earbud lasts about $pct% of that at your usual settings.",
                         style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant
                     )
                 }
@@ -92,7 +92,7 @@ internal fun BatteryHealthCard(refreshKey: Long) {
 
                 if (r.costs.isNotEmpty()) {
                     Spacer(Modifier.height(16.dp))
-                    Text("What costs battery, from your listening", style = MaterialTheme.typography.titleSmall)
+                    Text("What uses the most battery", style = MaterialTheme.typography.titleSmall)
                     Spacer(Modifier.height(6.dp))
                     r.costs.take(4).forEach { c ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -110,8 +110,8 @@ internal fun BatteryHealthCard(refreshKey: Long) {
         }
         val listened = listOfNotNull(report?.left?.listened, report?.right?.listened).maxOrNull()
         Footer(
-            if (listened != null) "From ${hm(listened)} of clean listening in the last ${report!!.windowDays} days, adjusted to your usual setup, so changing volume, codec or settings doesn't read as wear. Only time with music playing counts."
-            else "Health is read from how fast each bud drains while you listen, so you never need to run them flat."
+            if (listened != null) "Based on ${hm(listened)} of listening in the last ${report!!.windowDays} days, adjusted to your usual settings. Changing the volume or codec won't count as wear."
+            else "Health comes from how fast each earbud drains while you listen."
         )
     }
 }
@@ -128,18 +128,18 @@ private fun BudHealth(side: String, bud: BatteryHealth.Bud?, modifier: Modifier)
             Text(hm(bud.hoursPerCharge), style = MaterialTheme.typography.titleLarge)
             Text("${hm(bud.low)} to ${hm(bud.high)}", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
             // Alone, a bud carries the phone link by itself and drains a little faster.
-            if (bud.solo) Text("From use on its own", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+            if (bud.solo) Text("Used on its own", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
     }
 }
 
 private fun balanceText(imb: Triple<Double, Double, Double>?): String {
-    if (imb == null) return "Left and right are compared once both have been out together for a few hours."
+    if (imb == null) return "Left and right are compared after you've worn both for a few hours."
     val (ratio, lo, hi) = imb
     return when {
-        lo > 1.08 -> "Right runs down ${((ratio - 1) * 100).roundToInt()}% faster than left. A steady gap like this usually means the right battery has worn more."
-        hi < 0.92 -> "Left runs down ${((1 / ratio - 1) * 100).roundToInt()}% faster than right. A steady gap like this usually means the left battery has worn more."
-        else -> "Both buds are wearing evenly."
+        lo > 1.08 -> "Right drains ${((ratio - 1) * 100).roundToInt()}% faster than left. A steady gap like this usually means the right battery has worn more."
+        hi < 0.92 -> "Left drains ${((1 / ratio - 1) * 100).roundToInt()}% faster than right. A steady gap like this usually means the left battery has worn more."
+        else -> "Both earbuds are wearing evenly."
     }
 }
 
@@ -152,7 +152,7 @@ private fun trendText(r: BatteryHealth.Report): String {
         return when {
             pct < 3 -> "About the same as your first month ($since)."
             change < 0 -> "Lasts about $pct% less per charge than in $since."
-            else -> "Lasts about $pct% longer per charge than in $since, likely lighter use."
+            else -> "Lasts about $pct% longer per charge than in $since, probably from lighter use."
         }
     }
     val start = r.trackingSince?.let { SimpleDateFormat("d MMMM", Locale.getDefault()).format(Date(it)) }

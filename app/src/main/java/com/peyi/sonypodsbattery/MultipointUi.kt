@@ -101,8 +101,8 @@ internal fun DevicesCard(connected: Boolean) {
                     playing = list.playing(d),
                     busy = busy == d.address,
                     enabled = busy == null,
-                    onConnect = { run(d.address, "Connect ${d.name}", "${d.name} didn't connect. Make sure its Bluetooth is on and it's nearby.") { Multipoint.act(it, d, DeviceAction.CONNECT) } },
-                    onDisconnect = { run(d.address, "Disconnect ${d.name}", "Couldn't disconnect ${d.name}.") { Multipoint.act(it, d, DeviceAction.DISCONNECT) } },
+                    onConnect = { run(d.address, "Connect ${d.name}", "Couldn't connect to ${d.name}. Check its Bluetooth is on and it's nearby.") { Multipoint.act(it, d, DeviceAction.CONNECT) } },
+                    onDisconnect = { run(d.address, "Disconnect ${d.name}", "Couldn't disconnect ${d.name}. Try again.") { Multipoint.act(it, d, DeviceAction.DISCONNECT) } },
                     onPlayHere = { run(d.address, "Play on ${d.name}", "Couldn't move audio to ${d.name}. It may be on a call.") { Multipoint.playOn(it, d) } },
                     onForget = { forgetting = d }
                 )
@@ -112,23 +112,23 @@ internal fun DevicesCard(connected: Boolean) {
                 busy = "pair"
                 scope.launch {
                     val ok = RefreshCoordinator.awaitSession(context, "Pairing mode") { Multipoint.setPairingMode(it, on) }.getOrDefault(false)
-                    if (ok) pairing = on else note = "The earbuds didn't switch pairing mode."
+                    if (ok) pairing = on else note = "Couldn't start pairing mode. Try again."
                     busy = null
                 }
             }
         }
-        Footer(note ?: "Turn on Connect to 2 devices to use two at once. Forgetting a device removes it from the earbuds; to use it again, pair from that device.")
+        Footer(note ?: "To use two devices at once, turn on Connect to 2 devices. A forgotten device has to pair again to reconnect.")
     }
 
     forgetting?.let { d ->
         AlertDialog(
             onDismissRequest = { forgetting = null },
             title = { Text("Forget ${d.name}?") },
-            text = { Text("The earbuds will no longer connect to it. To use it again, pair it from its Bluetooth settings.") },
+            text = { Text("Your earbuds won't connect to it any more. To use it again, pair from its Bluetooth settings.") },
             confirmButton = {
                 TextButton(onClick = {
                     forgetting = null
-                    run(d.address, "Forget ${d.name}", "Couldn't forget ${d.name}.") { Multipoint.act(it, d, DeviceAction.FORGET) }
+                    run(d.address, "Forget ${d.name}", "Couldn't forget ${d.name}. Try again.") { Multipoint.act(it, d, DeviceAction.FORGET) }
                 }) { Text("Forget") }
             },
             dismissButton = { TextButton(onClick = { forgetting = null }) { Text("Cancel") } }
@@ -198,7 +198,7 @@ private fun DeviceRow(
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     if (!device.connected) DropdownMenuItem(text = { Text("Connect") }, onClick = { menu = false; onConnect() })
-                    if (device.connected && !playing) DropdownMenuItem(text = { Text("Play audio from here") }, onClick = { menu = false; onPlayHere() })
+                    if (device.connected && !playing) DropdownMenuItem(text = { Text("Switch audio to this device") }, onClick = { menu = false; onPlayHere() })
                     // Dropping or forgetting this phone would cut SunPods off; do that in Android's Bluetooth settings.
                     if (device.connected && !isPhone) DropdownMenuItem(text = { Text("Disconnect") }, onClick = { menu = false; onDisconnect() })
                     if (!isPhone) DropdownMenuItem(text = { Text("Forget", color = colors.error) }, onClick = { menu = false; onForget() })
@@ -230,7 +230,7 @@ private fun PairRow(pairing: Boolean, enabled: Boolean, onChange: (Boolean) -> U
         }
         AnimatedVisibility(pairing) {
             Text(
-                "Your earbuds are discoverable. On the other device, open Bluetooth settings and choose your WF-1000XM5.",
+                "Your earbuds are ready to pair. On the other device, open Bluetooth settings and choose WF-1000XM5.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 76.dp, end = 20.dp, bottom = 14.dp)

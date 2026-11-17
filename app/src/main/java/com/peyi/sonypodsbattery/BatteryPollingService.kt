@@ -77,11 +77,11 @@ class BatteryPollingService : Service() {
 
     private fun startAsForeground() {
         val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Background battery refresh", NotificationManager.IMPORTANCE_LOW))
+        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Battery checks", NotificationManager.IMPORTANCE_LOW))
         val notification = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_sunpods_mark)
-            .setContentTitle("Sony Pods Battery")
-            .setContentText("Refreshing WF-1000XM5 battery every 5 minutes while connected")
+            .setContentTitle("SunPods")
+            .setContentText("Checking your earbuds' battery while they're connected")
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)

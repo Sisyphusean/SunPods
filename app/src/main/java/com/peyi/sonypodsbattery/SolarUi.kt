@@ -296,7 +296,7 @@ internal fun SolarHero(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     enabled = connected,
-                    onClickLabel = "Switch noise mode",
+                    onClickLabel = "Change noise control",
                     onClick = onCycle
                 )
                 .semantics {

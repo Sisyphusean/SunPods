@@ -379,7 +379,7 @@ private fun Header(state: BatteryState, context: Context, refreshing: Boolean, c
                 } else {
                     Image(
                         provider = ImageProvider(R.drawable.ic_refresh),
-                        contentDescription = "Refresh",
+                        contentDescription = "Refresh battery",
                         colorFilter = ColorFilter.tint(colors.onSurfaceVariant),
                         modifier = GlanceModifier.size(20.dp)
                     )

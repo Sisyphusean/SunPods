@@ -96,7 +96,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
                 }
                 _battery.value = state
                 if (!state.status.startsWith("Updated") && audioLinkUp(app)) {
-                    _message.value = "Couldn't reach your earbuds. If Sony Sound Connect is open, close it and pull down."
+                    _message.value = "Couldn't reach your earbuds. Close Sony Sound Connect if it's open, then pull down to try again."
                 }
                 if (_battery.value.left != null || _battery.value.right != null) {
                     launch { LastSeenStore.captureWhileConnected(app) }
@@ -203,7 +203,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
                         _settings.value = before
                         _message.value = when (error) {
                             is EarbudsUnavailableException -> error.message
-                            else -> "$label didn't apply. Check the earbuds are connected and Sound Connect is closed."
+                            else -> "$label wasn't changed. Check your earbuds are connected and Sony Sound Connect is closed."
                         }
                     }
             }

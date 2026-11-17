@@ -271,8 +271,8 @@ object BatteryNudges {
                 val left = (level / outlook.drainPerHour * 60).roundToInt()
                 notify(
                     context, 3001 + side.length,
-                    "$side earbud is at $level%",
-                    "About ${BatteryInsights.formatMinutes(left)} of sunshine left. Pop it in the case soon."
+                    "$side earbud at $level%",
+                    "About ${BatteryInsights.formatMinutes(left)} of listening left. Put it in the case to charge."
                 )
                 prefs.edit().putBoolean(key, true).apply()
             }
@@ -283,7 +283,7 @@ object BatteryNudges {
         if (caseAlerts(context) && case != null && case in 1..20 && !state.caseCharging &&
             System.currentTimeMillis() - lastCaseNudge > 20L * 3_600_000
         ) {
-            notify(context, 3010, "Case is at $case%", "Give it a charge tonight so tomorrow starts full.")
+            notify(context, 3010, "Case at $case%", "Charge it tonight so your earbuds are full tomorrow.")
             prefs.edit().putLong("case_nudge", System.currentTimeMillis()).apply()
         }
     }
@@ -303,7 +303,7 @@ object BatteryNudges {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, "Battery alerts", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Low earbud and case battery reminders"
+                description = "Alerts when your earbuds or case run low"
             }
         )
         val open = PendingIntent.getActivity(

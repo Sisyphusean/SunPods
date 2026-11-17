@@ -136,10 +136,10 @@ private fun ListeningLeftCard(battery: BatteryState, outlook: BatteryOutlook) {
             )
             Text(
                 when {
-                    minutes == null && buds.isEmpty() && (battery.leftCharging || battery.rightCharging) -> "Both buds are charging in the case."
-                    minutes == null -> "Take your buds out to see an estimate."
-                    outlook.measured -> "From how you listened this week. ${outlook.lowestBud} bud runs out first."
-                    else -> "From Sony's rating until SunPods learns your habits."
+                    minutes == null && buds.isEmpty() && (battery.leftCharging || battery.rightCharging) -> "Both earbuds are charging in the case."
+                    minutes == null -> "Take your earbuds out to see how long they'll last."
+                    outlook.measured -> "Based on this week's listening. ${outlook.lowestBud} earbud runs out first."
+                    else -> "Based on Sony's rating until SunPods learns how you listen."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.onPrimaryContainer
@@ -213,7 +213,7 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
 
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            SectionHeader("History", Modifier.weight(1f).padding(top = 12.dp))
+            SectionHeader("Battery history", Modifier.weight(1f).padding(top = 12.dp))
             SingleChoiceSegmentedButtonRow(Modifier.width(180.dp)) {
                 SegmentedButton(selected = !week, onClick = { week = false; picked = null }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("24 h") }
                 SegmentedButton(selected = week, onClick = { week = true; picked = null }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("7 days") }
@@ -224,7 +224,7 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
                 if (shown.isEmpty()) {
                     Text(
-                        "Your battery story starts here. SunPods notes a reading every few minutes while your buds are out, and nothing leaves your phone.",
+                        "Battery history appears here once your earbuds are out of the case. Readings stay on this phone.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 24.dp)
@@ -274,7 +274,7 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                             }
                         },
                         modifier = Modifier.weight(1f).height(180.dp)
-                            .semantics { contentDescription = "Battery history bars. Touch and drag to see each time." }
+                            .semantics { contentDescription = "Battery history chart. Touch and drag to read each bar." }
                     )
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.height(180.dp), verticalArrangement = Arrangement.SpaceBetween) {
@@ -306,8 +306,8 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
         }
         Footer(
             "Each bar is ${if (week) "3 hours" else "half an hour"}" +
-                (if (series == Series.BUDS) ", showing whichever earbud was lower" else "") +
-                ". Green bars were charging. Gaps are times SunPods had no reading."
+                (if (series == Series.BUDS) ", showing the lower earbud" else "") +
+                ". Green means charging. Gaps mean no reading."
         )
     }
 }
@@ -431,7 +431,7 @@ private fun WeekCard(samples: List<BatterySample>, now: Long) {
                     style = MaterialTheme.typography.headlineSmall
                 )
                 Text(
-                    if (average == 0) "Listening time shows up here as you use your buds."
+                    if (average == 0) "Your listening time appears here as you use your earbuds."
                     else "You average ${BatteryInsights.formatMinutes(average)} on days you listen.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.onSurfaceVariant
@@ -483,7 +483,7 @@ private fun WeekCard(samples: List<BatterySample>, now: Long) {
                 }
             }
         }
-        Footer("Tap a day to see it.")
+        Footer("Tap a day for details.")
     }
 }
 
@@ -502,12 +502,12 @@ private fun StatsGrid(battery: BatteryState, samples: List<BatterySample>, outlo
         Stat(
             "Drain", "${outlook.drainPerHour.roundToInt()}% an hour",
             if (outlook.measured) "Measured this week" else "Sony's rating",
-            "How fast a bud empties while you listen. SunPods measures it from your own readings once it has about an hour of listening."
+            "How fast an earbud empties while you listen. SunPods measures it after about an hour of listening."
         ),
         Stat(
             "Out of the case", charged?.let { relativeShort(it, now) } ?: "--",
             if (charged == null) "Not seen yet" else "Since the last charge",
-            "When you last took the buds out of the case after charging."
+            "When you last took your earbuds out of the case after charging."
         ),
         Stat(
             "Balance",
@@ -518,13 +518,13 @@ private fun StatsGrid(battery: BatteryState, samples: List<BatterySample>, outlo
                 else -> "Right faster"
             },
             if (leftRate == null || rightRate == null) "Needs more listening" else "L ${leftRate.roundToInt()}%  R ${rightRate.roundToInt()}% an hour",
-            "Compares how fast each bud drains. A big gap can mean one bud handles calls or touch controls more, or its battery is ageing."
+            "Compares how fast each earbud drains. A big gap can mean one handles calls or touch controls more, or its battery is ageing."
         ),
         Stat(
             "Case reserve",
             case?.let { "%.1f charges".format(it / 100.0 * 2) } ?: "--",
-            case?.let { "Case at $it%" } ?: "Open the case to read it",
-            "A full WF-1000XM5 case refills both buds about twice, so this is how many more top ups it holds."
+            case?.let { "Case at $it%" } ?: "Open the case to check it",
+            "A full WF-1000XM5 case recharges both earbuds about twice. This shows how many charges it has left."
         )
     )
     var open by rememberSaveable { mutableIntStateOf(-1) }
@@ -589,7 +589,7 @@ private fun AlertsCard() {
     Column {
         SectionHeader("Alerts")
         SunCard {
-            ToggleRow(Icons.Rounded.BatteryAlert, "Low earbud", "Tells you when a bud is running out", buds) {
+            ToggleRow(Icons.Rounded.BatteryAlert, "Low earbud battery", "Alerts you when an earbud runs low", buds) {
                 buds = it; BatteryNudges.setBudAlerts(context, it)
             }
             AnimatedVisibility(buds, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
@@ -610,7 +610,7 @@ private fun AlertsCard() {
                 }
             }
             HorizontalDivider(Modifier.padding(start = 72.dp, end = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
-            ToggleRow(SunIcons.Case, "Low case", "A reminder to charge the case at 20%", case) {
+            ToggleRow(SunIcons.Case, "Low case battery", "Reminds you to charge the case at 20%", case) {
                 case = it; BatteryNudges.setCaseAlerts(context, it)
             }
         }

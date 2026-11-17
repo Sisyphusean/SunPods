@@ -83,7 +83,7 @@ internal fun KeepRunningCard(check: Int) {
             }
             Spacer(Modifier.height(10.dp))
             Text(
-                "Your phone is limiting SunPods in the background, so the widget goes stale, automations miss moments and battery history has gaps. Allow it to run unrestricted.",
+                "Your phone is limiting SunPods in the background. The widget can fall behind and alerts may not arrive.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

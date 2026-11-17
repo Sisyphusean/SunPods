@@ -99,7 +99,7 @@ data class GeneralSetting(val slot: Int, val key: String, val on: Boolean?) {
         private val GS_TITLES = mapOf(
             "MULTIPOINT_SETTING" to ("Connect to 2 devices" to "Stay connected to your phone and another device at once"),
             "SIDETONE_SETTING" to ("Hear your voice on calls" to "Plays your own voice back so you don't shout"),
-            "TWS_ONE_SIDE_USE_NCASM_SETTING" to ("Noise control with one earbud" to "Keep cancelling or ambient when only one earbud is in"),
+            "TWS_ONE_SIDE_USE_NCASM_SETTING" to ("Noise control with one earbud" to "Keeps noise control on when you wear one earbud"),
             "FACETAP_SETTING" to ("Tap your face to control" to "Tap near the earbud instead of on it")
         )
 

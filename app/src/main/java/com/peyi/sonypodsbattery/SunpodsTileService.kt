@@ -49,7 +49,7 @@ class SunpodsTileService : TileService() {
             state.left?.let { "L $it%" },
             state.right?.let { "R $it%" }
         ).joinToString("  ")
-        tile.subtitle = levels.ifEmpty { "Tap to switch" }
+        tile.subtitle = levels.ifEmpty { "Tap to change mode" }
         tile.state = if (mode == ListeningMode.OFF || mode == null) Tile.STATE_INACTIVE else Tile.STATE_ACTIVE
         tile.icon = Icon.createWithResource(
             this,

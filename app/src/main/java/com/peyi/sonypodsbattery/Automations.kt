@@ -34,7 +34,7 @@ import org.json.JSONObject
 enum class AutoAction(val label: String) {
     NC("Noise cancelling"),
     AMBIENT("Ambient sound"),
-    AMBIENT_VOICE("Ambient, focus on voice"),
+    AMBIENT_VOICE("Ambient sound with voice focus"),
     OFF("Noise control off");
 
     val mode: ListeningMode
@@ -248,7 +248,7 @@ class AutomationEngine private constructor(private val context: Context) {
         val winner: Pair<String, AutoAction>? = when {
             inCall && rules.getValue(Trigger.CALL).enabled -> "During a call" to rules.getValue(Trigger.CALL).action
             walking && rules.getValue(Trigger.WALKING).enabled -> "Walking" to rules.getValue(Trigger.WALKING).action
-            focus && rules.getValue(Trigger.FOCUS).enabled -> "Focus is on" to rules.getValue(Trigger.FOCUS).action
+            focus && rules.getValue(Trigger.FOCUS).enabled -> "Focus or Do Not Disturb" to rules.getValue(Trigger.FOCUS).action
             place != null -> "At ${place.ssid}" to place.action
             else -> null
         }

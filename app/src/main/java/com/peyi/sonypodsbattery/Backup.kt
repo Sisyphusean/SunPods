@@ -77,7 +77,7 @@ internal object Backup {
 
     fun write(context: Context, uri: Uri, text: String) {
         context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
-            ?: throw IllegalStateException("Couldn't open the file to write")
+            ?: throw IllegalStateException("Couldn't save to that file")
     }
 
     fun read(context: Context, uri: Uri): String =
@@ -88,9 +88,9 @@ internal object Backup {
 
     /** Checks the file and says what's in it, without changing anything. */
     fun inspect(text: String): Summary {
-        val o = runCatching { JSONObject(text) }.getOrNull() ?: throw IllegalArgumentException("This isn't a SunPods backup.")
-        if (o.optString("format") != FORMAT) throw IllegalArgumentException("This isn't a SunPods backup.")
-        if (o.optInt("version") > VERSION) throw IllegalArgumentException("This backup is from a newer SunPods. Update SunPods first.")
+        val o = runCatching { JSONObject(text) }.getOrNull() ?: throw IllegalArgumentException("This file isn't a SunPods backup. Choose a file that starts with SunPods-backup.")
+        if (o.optString("format") != FORMAT) throw IllegalArgumentException("This file isn't a SunPods backup. Choose a file that starts with SunPods-backup.")
+        if (o.optInt("version") > VERSION) throw IllegalArgumentException("This backup is from a newer version of SunPods. Update SunPods, then try again.")
         val files = o.optJSONObject("files") ?: JSONObject()
         fun rows(name: String) = files.optString(name).lineSequence().count { it.isNotBlank() }
         val prefs = o.optJSONObject("prefs") ?: JSONObject()

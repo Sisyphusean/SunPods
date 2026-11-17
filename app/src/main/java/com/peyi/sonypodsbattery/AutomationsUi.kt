@@ -57,21 +57,21 @@ internal fun AutomationsCard() {
             key(tick) {
                 RuleRow(Icons.Rounded.Call, Trigger.CALL, "During calls", "Hear yourself and the room while you talk") { tick++ }
                 RowDivider()
-                RuleRow(Icons.Rounded.DirectionsWalk, Trigger.WALKING, "While walking", "Let traffic and people in when you're on the move") { on ->
+                RuleRow(Icons.Rounded.DirectionsWalk, Trigger.WALKING, "While walking", "Hear traffic and people around you while you walk") { on ->
                     if (on && context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
                         walkLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
                         false
                     } else { tick++; true }
                 }
                 RowDivider()
-                RuleRow(Icons.Rounded.DoNotDisturbOn, Trigger.FOCUS, "In Focus or Do Not Disturb", "Shut the world out when your phone is quiet") { tick++ }
+                RuleRow(Icons.Rounded.DoNotDisturbOn, Trigger.FOCUS, "In Focus or Do Not Disturb", "Cut out noise while you focus") { tick++ }
                 RowDivider()
                 PlacesSection(onNeedLocation = {
                     placeLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
                 }) { tick++ }
             }
         }
-        Footer("Runs on your phone while the earbuds are connected. When the moment passes, your earlier mode comes back, unless you changed it yourself.")
+        Footer("Works while your earbuds are connected. Afterwards your previous mode comes back, unless you changed it yourself.")
     }
 }
 
@@ -133,7 +133,7 @@ private fun PlacesSection(onNeedLocation: () -> Unit, onChange: () -> Unit) {
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Text("At a place", style = MaterialTheme.typography.bodyLarge)
-                Text("Pick a mode for a Wi-Fi network, like home or the office", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Set a mode for a Wi-Fi network, like home or work", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         places.forEach { place ->
@@ -151,8 +151,8 @@ private fun PlacesSection(onNeedLocation: () -> Unit, onChange: () -> Unit) {
         }
         Row(Modifier.padding(start = 44.dp, top = 4.dp)) {
             when {
-                !hasLocation -> TextButton(onClick = onNeedLocation) { Text("Allow location to read Wi-Fi names") }
-                here == null -> Text("Connect to Wi-Fi to add it here.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(12.dp))
+                !hasLocation -> TextButton(onClick = onNeedLocation) { Text("Allow location to see Wi-Fi names") }
+                here == null -> Text("Connect to a Wi-Fi network to add it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(12.dp))
                 places.none { it.ssid == here } -> TextButton(onClick = { editing = Place(here, AutoAction.NC) }) {
                     Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
@@ -162,7 +162,7 @@ private fun PlacesSection(onNeedLocation: () -> Unit, onChange: () -> Unit) {
         }
         if (places.isNotEmpty() && !hasBackground) {
             Text(
-                "Places work best with location allowed all the time, so SunPods can see the Wi-Fi while it's in the background.",
+                "For places to work in the background, allow location all the time.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 56.dp, top = 4.dp)
