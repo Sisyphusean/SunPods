@@ -13,7 +13,7 @@ internal object FeatureProbe {
     private const val PREFS = "feature_probe"
 
     fun due(context: Context) =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("version", null) != SunpodsInfo.VERSION
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("lines", null) == null
 
     fun run(s: SonyBatteryClient.SonySession): List<String> {
         val out = mutableListOf<String>()

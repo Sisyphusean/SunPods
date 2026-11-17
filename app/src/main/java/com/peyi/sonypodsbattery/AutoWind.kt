@@ -47,7 +47,13 @@ internal object AutoWind {
      */
     fun sync(context: Context, s: SonyBatteryClient.SonySession) {
         if (supported(context) == false) return
-        val reply = s.request(byteArrayOf(0x66, TYPE.toByte()), 800) ?: return
+        val reply = s.request(byteArrayOf(0x66, TYPE.toByte()), 800)
+        if (reply == null) {
+            // The WF-1000XM5 doesn't answer this type at all (it only offers 0x17, dual NC without wind modes).
+            p(context).edit().putBoolean("supported", false).apply()
+            DiagnosticsStore.add(context, "Auto wind: not offered by these earbuds")
+            return
+        }
         val ok = reply.size >= 8 && u(reply[1]) == TYPE && u(reply[4]) <= 1 && u(reply[5]) in 0..5
         if (supported(context) == null) {
             p(context).edit().putBoolean("supported", ok).apply()
