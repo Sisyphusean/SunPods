@@ -70,15 +70,30 @@ internal object Multipoint {
         PairedDevices(list, if (i < p.size) u(p[i]) else 0)
     }.getOrNull()
 
-    /** Connect, disconnect or forget; waits for the earbuds to say how it went. */
+    /**
+     * Connect, disconnect or forget. Done as soon as either the earbuds confirm it, or their device
+     * list shows it happened (the WF-1000XM5 doesn't always send the confirmation, e.g. for forget,
+     * and waiting for one that never comes made it slow and wrongly report a failure).
+     */
     fun act(s: SonyBatteryClient.SonySession, device: PairedDevice, action: DeviceAction): Boolean {
         val inq = inquired ?: CLASSIC
         s.send(byteArrayOf(SET_EXTENDED.toByte(), inq.toByte(), action.code.toByte()) + device.address.toByteArray(Charsets.US_ASCII), TABLE2)
-        val reply = s.waitFor(15_000) { f ->
-            f.type == TABLE2 && f.payload.size >= 4 && u(f.payload[0]) == NTFY_EXTENDED &&
-                u(f.payload[1]) == inq && u(f.payload[3]) in DONE
-        } ?: return false
-        return u(reply.payload[3]) in OK
+        val deadline = System.currentTimeMillis() + 12_000
+        while (System.currentTimeMillis() < deadline) {
+            val reply = s.waitFor(1_500) { f ->
+                f.type == TABLE2 && f.payload.size >= 4 && u(f.payload[0]) == NTFY_EXTENDED && u(f.payload[3]) in DONE
+            }
+            if (reply != null) return u(reply.payload[3]) in OK
+            val list = read(s) ?: continue
+            val now = list.list.firstOrNull { it.address.equals(device.address, ignoreCase = true) }
+            val reached = when (action) {
+                DeviceAction.FORGET -> now == null
+                DeviceAction.CONNECT -> now?.connected == true
+                DeviceAction.DISCONNECT -> now != null && !now.connected
+            }
+            if (reached) return true
+        }
+        return false
     }
 
     /** Moves music playback to [device]. */
