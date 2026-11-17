@@ -84,6 +84,7 @@ import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material.icons.rounded.SaveAlt
 import androidx.compose.material.icons.rounded.SettingsBackupRestore
 import androidx.compose.material.icons.rounded.TableChart
+import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Earbuds
 import androidx.compose.material.icons.rounded.Mic
@@ -1415,7 +1416,14 @@ private fun DeviceScreen(
         "Help",
         rows = listOf(
             { NavRow(Icons.Rounded.Bluetooth, "Bluetooth settings", "Pair, forget or reconnect", onOpenBluetoothSettings) },
-            { NavRow(Icons.Rounded.BugReport, "Share diagnostics", "Send the connection log", onShareDiagnostics) }
+            { NavRow(Icons.Rounded.BugReport, "Share diagnostics", "Send the connection log", onShareDiagnostics) },
+            {
+                val context = LocalContext.current
+                NavRow(Icons.Rounded.RestartAlt, "Set up again", "Permissions, pairing and extras, step by step") {
+                    OnboardingStore.setDone(context, false)
+                    Backup.restart(context)
+                }
+            }
         ),
         footer = "No account, no sign-in, no internet. Sony allows one control connection at a time, so close Sound Connect while using SunPods.\n\nSunPods ${SunpodsInfo.VERSION}"
     )
@@ -1478,7 +1486,7 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.19.0"
+    const val VERSION = "2.20.0"
 }
 
 private val PROMPT_VOLUMES = listOf(-2, -1, 0, 1, 2)

@@ -22,6 +22,7 @@ class MainActivity : ComponentActivity() {
     private val vm: SunpodsViewModel by viewModels()
     private var hasPermission by mutableStateOf(false)
     private var dynamicColor by mutableStateOf(false)
+    private var onboarding by mutableStateOf(false)
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -50,8 +51,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         hasPermission = hasBluetoothPermission()
         dynamicColor = getSharedPreferences("ui", MODE_PRIVATE).getBoolean("dynamic_color", false)
+        onboarding = !OnboardingStore.done(this)
         setContent {
             SunpodsTheme(dynamicColor = dynamicColor) {
+                if (onboarding) {
+                    Onboarding(vm) {
+                        onboarding = false
+                        hasPermission = hasBluetoothPermission()
+                        if (hasPermission) vm.refreshAll()
+                    }
+                    return@SunpodsTheme
+                }
                 SunpodsApp(
                     vm = vm,
                     hasPermission = hasPermission,
@@ -68,7 +78,8 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
-        if (!hasPermission) askForPermissions() else BackgroundAccess.askOnce(this)
+        // First run: setup asks for everything with explanations, so don't fire bare prompts.
+        if (!onboarding) { if (!hasPermission) askForPermissions() else BackgroundAccess.askOnce(this) }
     }
 
     override fun onResume() {

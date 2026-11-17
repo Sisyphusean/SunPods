@@ -29,7 +29,7 @@ internal object Backup {
     /** Preference files backed up, and keys inside them that stay behind. */
     private val PREFS: Map<String, Set<String>> = mapOf(
         "ui" to emptySet(),
-        "sunpods_ui" to setOf("demo_connected", "asked_battery_unrestricted", "battery_card_snoozed_until"),
+        "sunpods_ui" to setOf("demo_connected", "asked_battery_unrestricted", "battery_card_snoozed_until", "onboarding_done"),
         "automations" to setOf("active_label"),
         "battery_nudges" to emptySet(),
         "quiet_hours" to setOf("silenced", "restore", "override"),

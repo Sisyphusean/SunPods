@@ -16,6 +16,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Ask to run unrestricted so the phone doesn't stop polling, the widget and automations. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Pairing from setup uses Android's own device picker; phones without it pair in Settings. -->
+    <uses-feature android:name="android.software.companion_device_setup" android:required="false" />
 
     <queries>
         <intent>
