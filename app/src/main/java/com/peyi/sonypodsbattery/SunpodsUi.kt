@@ -75,6 +75,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Air
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Earbuds
 import androidx.compose.material.icons.rounded.Mic
@@ -972,6 +973,13 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
                     }
                 }
             }
+            val windy by vm.windy.collectAsState()
+            RowDivider(inset = 20.dp)
+            ToggleRow(
+                Icons.Rounded.Air, "Windy",
+                if (windy) "Noise control is off so wind isn't amplified. Turn off to go back." else "Stops noise cancelling and ambient sound amplifying wind",
+                windy
+            ) { vm.setWindy(it) }
         }
         val context = LocalContext.current
         val automation = remember(battery.listeningMode, battery.updatedAt) { AutomationStore.active(context) }
@@ -1465,5 +1473,5 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.13.2"
+    const val VERSION = "2.14.0"
 }

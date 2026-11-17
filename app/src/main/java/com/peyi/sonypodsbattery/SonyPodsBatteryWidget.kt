@@ -278,6 +278,8 @@ private fun WidgetContent(
             ModeButton(R.drawable.ic_mode_ambient, "Ambient sound", "Ambient", AudioMode.AMBIENT, currentMode, pendingMode, wide, palette, GlanceModifier.defaultWeight())
             Spacer(GlanceModifier.width(6.dp))
             ModeButton(R.drawable.ic_mode_off, "Noise control off", "Off", AudioMode.OFF, currentMode, pendingMode, wide, palette, GlanceModifier.defaultWeight())
+            Spacer(GlanceModifier.width(6.dp))
+            WindButton(WindMode.on(context), palette)
         }
         if (currentMode == AudioMode.AMBIENT && tall) {
             Spacer(GlanceModifier.height(6.dp))
@@ -482,6 +484,34 @@ private fun ModeButton(
 }
 
 @Composable
+private fun WindButton(on: Boolean, palette: WidgetPalette) {
+    val colors = GlanceTheme.colors
+    Box(
+        modifier = GlanceModifier.size(48.dp, 48.dp)
+            .background(if (on) colors.primary else palette.card)
+            .cornerRadius(24.dp)
+            .clickable(actionRunCallback<ToggleWindAction>()),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            provider = ImageProvider(R.drawable.ic_wind),
+            contentDescription = if (on) "Windy on, tap to go back" else "Windy",
+            colorFilter = ColorFilter.tint(if (on) colors.onPrimary else colors.onSurfaceVariant),
+            modifier = GlanceModifier.size(20.dp)
+        )
+    }
+}
+
+class ToggleWindAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        val app = context.applicationContext
+        WindMode.toggle(app)
+        SonyPodsBatteryWidgetUpdater.updateAll(app)
+        WidgetRedrawWorker.schedule(app, WORKING_TIMEOUT_MS / 1000 + 1)
+    }
+}
+
+@Composable
 private fun AmbientStepper(ambientLevel: Int, palette: WidgetPalette) {
     val colors = GlanceTheme.colors
     Row(
@@ -541,6 +571,7 @@ class SetListeningModeAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val mode = parameters[AudioModeKey]?.let(AudioMode::fromStored) ?: return
         val app = context.applicationContext
+        WindMode.clear(app)
         val current = BatteryStore.load(app)
         val preferences = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
         val ambientLevel = preferences[PENDING_AMBIENT_LEVEL_KEY]

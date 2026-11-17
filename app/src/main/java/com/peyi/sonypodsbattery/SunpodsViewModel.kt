@@ -33,7 +33,20 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     // Background refreshes (earbuds connecting, polling, the widget) save to BatteryStore. Follow
     // those saves so the open screen updates by itself instead of waiting for a pull.
     private val batteryListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        _battery.value = BatteryStore.load(app)
+        val state = BatteryStore.load(app)
+        WindMode.reconcile(app, state)
+        _windy.value = WindMode.on(app)
+        _battery.value = state
+    }
+
+    private val _windy = MutableStateFlow(WindMode.on(application))
+    val windy: StateFlow<Boolean> = _windy.asStateFlow()
+
+    /** Windy: noise control off while it's blowing, then back to what you had. */
+    fun setWindy(on: Boolean) {
+        val t = if (on) WindMode.start(app) else WindMode.stop(app)
+        _windy.value = on
+        applyMode(t.mode, t.level, t.focus)
     }
 
     /** Bumps whenever the earbuds connect or disconnect, so the screen re-checks the link. */
@@ -105,6 +118,10 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
                     RefreshCoordinator.awaitSession(app, "Read settings") { session ->
                         SonyFeatures.readAll(session, _settings.value)
                     }.onSuccess(::storeSettings)
+                    if (FeatureProbe.due(app)) {
+                        RefreshCoordinator.awaitSession(app, "Feature probe") { FeatureProbe.run(it) }
+                            .onSuccess { FeatureProbe.save(app, it) }
+                    }
                 }
             } finally {
                 _busy.value = false
@@ -113,6 +130,12 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setListeningMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean) {
+        WindMode.clear(app)
+        _windy.value = false
+        applyMode(mode, ambientLevel, focusOnVoice)
+    }
+
+    private fun applyMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean) {
         val current = _battery.value
         _battery.value = current.copy(listeningMode = mode, ambientLevel = ambientLevel, focusOnVoice = focusOnVoice)
         viewModelScope.launch {

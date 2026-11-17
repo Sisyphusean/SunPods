@@ -20,6 +20,7 @@ class SunpodsTileService : TileService() {
         if (Build.VERSION.SDK_INT >= 31 &&
             checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
         ) return
+        WindMode.clear(applicationContext)
         val state = widgetSnapshot(this).state
         val next = when (state.listeningMode) {
             ListeningMode.NOISE_CANCELLING -> ListeningMode.AMBIENT
