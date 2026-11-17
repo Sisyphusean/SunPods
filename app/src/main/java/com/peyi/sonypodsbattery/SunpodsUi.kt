@@ -523,7 +523,9 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
     val connected = (battery.left != null || battery.right != null) && linkUp
     Column(verticalArrangement = Arrangement.spacedBy(GroupGap)) {
         Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            val windHero by vm.autoWind.collectAsState()
             SolarHero(
+                windNow = windHero.enabled && windHero.windNow,
                 mode = battery.listeningMode,
                 ambientLevel = battery.ambientLevel,
                 connected = connected,
@@ -973,13 +975,27 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
                     }
                 }
             }
-            val windy by vm.windy.collectAsState()
+            val wind by vm.autoWind.collectAsState()
             RowDivider(inset = 20.dp)
-            ToggleRow(
-                Icons.Rounded.Air, "Windy",
-                if (windy) "Noise control is off so wind isn't amplified. Turn off to go back." else "Stops noise cancelling and ambient sound amplifying wind",
-                windy
-            ) { vm.setWindy(it) }
+            if (wind.supported != false) {
+                ToggleRow(
+                    Icons.Rounded.Air, "Automatic wind reduction",
+                    when {
+                        !wind.enabled -> "Off. Noise cancelling stays on full even in wind."
+                        wind.windNow -> "Wind detected. The earbuds have switched to wind reduction."
+                        wind.supported == null -> "Checks your earbuds on the next update"
+                        else -> "The earbuds switch to wind reduction by themselves when it gets windy, then back"
+                    },
+                    wind.enabled
+                ) { vm.setAutoWind(it) }
+            } else {
+                val windy by vm.windy.collectAsState()
+                ToggleRow(
+                    Icons.Rounded.Air, "Windy",
+                    if (windy) "Noise control is off so wind isn't amplified. Turn off to go back." else "Your earbuds can't detect wind themselves. Turn on to stop wind roar.",
+                    windy
+                ) { vm.setWindy(it) }
+            }
         }
         val context = LocalContext.current
         val automation = remember(battery.listeningMode, battery.updatedAt) { AutomationStore.active(context) }
@@ -1473,5 +1489,5 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.14.0"
+    const val VERSION = "2.15.0"
 }

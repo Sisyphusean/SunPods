@@ -39,6 +39,23 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         _battery.value = state
     }
 
+    private val _autoWind = MutableStateFlow(AutoWindUi.read(application))
+    val autoWind: StateFlow<AutoWindUi> = _autoWind.asStateFlow()
+
+    private val autoWindListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        _autoWind.value = AutoWindUi.read(app)
+    }
+
+    /** Turns the earbuds' own automatic wind reduction on or off. */
+    fun setAutoWind(on: Boolean) {
+        AutoWind.setEnabled(app, on)
+        _autoWind.value = AutoWindUi.read(app)
+        val b = _battery.value
+        // Resend the current mode so the earbuds get the new wind setting now.
+        if (AutoWind.supported(app) == true && b.listeningMode != null) applyMode(b.listeningMode, b.ambientLevel, b.focusOnVoice)
+        else refreshAll()
+    }
+
     private val _windy = MutableStateFlow(WindMode.on(application))
     val windy: StateFlow<Boolean> = _windy.asStateFlow()
 
@@ -70,11 +87,13 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     init {
         BatteryStore.prefs(application).registerOnSharedPreferenceChangeListener(batteryListener)
         EarbudConnectionStateStore.prefs(application).registerOnSharedPreferenceChangeListener(connectionListener)
+        application.getSharedPreferences("auto_wind", android.content.Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(autoWindListener)
     }
 
     override fun onCleared() {
         BatteryStore.prefs(app).unregisterOnSharedPreferenceChangeListener(batteryListener)
         EarbudConnectionStateStore.prefs(app).unregisterOnSharedPreferenceChangeListener(connectionListener)
+        app.getSharedPreferences("auto_wind", android.content.Context.MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(autoWindListener)
     }
 
     /** On opening the app: read the earbuds if they're connected and the numbers are over a minute old. */
