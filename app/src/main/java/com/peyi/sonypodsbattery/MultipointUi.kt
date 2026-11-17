@@ -1,5 +1,7 @@
 package com.peyi.sonypodsbattery
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
@@ -148,6 +150,7 @@ private fun DeviceRow(
 ) {
     val colors = MaterialTheme.colorScheme
     var menu by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     val state = when {
         playing -> "Playing audio"
         device.connected -> "Connected"
@@ -182,6 +185,13 @@ private fun DeviceRow(
                     // Dropping or forgetting this phone would cut SunPods off; do that in Android's Bluetooth settings.
                     if (device.connected && !isPhone) DropdownMenuItem(text = { Text("Disconnect") }, onClick = { menu = false; onDisconnect() })
                     if (!isPhone) DropdownMenuItem(text = { Text("Forget", color = colors.error) }, onClick = { menu = false; onForget() })
+                    // This phone, connected and playing, had no options at all, so the menu never opened.
+                    if (isPhone) DropdownMenuItem(text = { Text("Bluetooth settings") }, onClick = {
+                        menu = false
+                        runCatching {
+                            context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    })
                 }
             }
         }
