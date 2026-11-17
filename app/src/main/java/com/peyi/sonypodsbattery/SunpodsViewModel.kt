@@ -33,37 +33,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     // Background refreshes (earbuds connecting, polling, the widget) save to BatteryStore. Follow
     // those saves so the open screen updates by itself instead of waiting for a pull.
     private val batteryListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        val state = BatteryStore.load(app)
-        WindMode.reconcile(app, state)
-        _windy.value = WindMode.on(app)
-        _battery.value = state
-    }
-
-    private val _autoWind = MutableStateFlow(AutoWindUi.read(application))
-    val autoWind: StateFlow<AutoWindUi> = _autoWind.asStateFlow()
-
-    private val autoWindListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        _autoWind.value = AutoWindUi.read(app)
-    }
-
-    /** Turns the earbuds' own automatic wind reduction on or off. */
-    fun setAutoWind(on: Boolean) {
-        AutoWind.setEnabled(app, on)
-        _autoWind.value = AutoWindUi.read(app)
-        val b = _battery.value
-        // Resend the current mode so the earbuds get the new wind setting now.
-        if (AutoWind.supported(app) == true && b.listeningMode != null) applyMode(b.listeningMode, b.ambientLevel, b.focusOnVoice)
-        else refreshAll()
-    }
-
-    private val _windy = MutableStateFlow(WindMode.on(application))
-    val windy: StateFlow<Boolean> = _windy.asStateFlow()
-
-    /** Windy: noise control off while it's blowing, then back to what you had. */
-    fun setWindy(on: Boolean) {
-        val t = if (on) WindMode.start(app) else WindMode.stop(app)
-        _windy.value = on
-        applyMode(t.mode, t.level, t.focus)
+        _battery.value = BatteryStore.load(app)
     }
 
     /** Bumps whenever the earbuds connect or disconnect, so the screen re-checks the link. */
@@ -87,13 +57,11 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     init {
         BatteryStore.prefs(application).registerOnSharedPreferenceChangeListener(batteryListener)
         EarbudConnectionStateStore.prefs(application).registerOnSharedPreferenceChangeListener(connectionListener)
-        application.getSharedPreferences("auto_wind", android.content.Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(autoWindListener)
     }
 
     override fun onCleared() {
         BatteryStore.prefs(app).unregisterOnSharedPreferenceChangeListener(batteryListener)
         EarbudConnectionStateStore.prefs(app).unregisterOnSharedPreferenceChangeListener(connectionListener)
-        app.getSharedPreferences("auto_wind", android.content.Context.MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(autoWindListener)
     }
 
     /** On opening the app: read the earbuds if they're connected and the numbers are over a minute old. */
@@ -137,10 +105,6 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
                     RefreshCoordinator.awaitSession(app, "Read settings") { session ->
                         SonyFeatures.readAll(session, _settings.value)
                     }.onSuccess(::storeSettings)
-                    if (FeatureProbe.due(app)) {
-                        RefreshCoordinator.awaitSession(app, "Feature probe") { FeatureProbe.run(it) }
-                            .onSuccess { FeatureProbe.save(app, it) }
-                    }
                 }
             } finally {
                 _busy.value = false
@@ -149,12 +113,6 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setListeningMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean) {
-        WindMode.clear(app)
-        _windy.value = false
-        applyMode(mode, ambientLevel, focusOnVoice)
-    }
-
-    private fun applyMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean) {
         val current = _battery.value
         _battery.value = current.copy(listeningMode = mode, ambientLevel = ambientLevel, focusOnVoice = focusOnVoice)
         viewModelScope.launch {

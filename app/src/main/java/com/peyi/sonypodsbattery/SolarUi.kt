@@ -159,9 +159,8 @@ internal val SolarTypography: Typography = Typography().let { t ->
 // Product hero: rendered XM5-style buds floating over a warm glow
 // ======================================================================
 
-private fun modeTitle(mode: ListeningMode?, connected: Boolean, ambient: Int, wind: Boolean = false): String = when {
+private fun modeTitle(mode: ListeningMode?, connected: Boolean, ambient: Int): String = when {
     !connected -> "Not connected"
-    mode == ListeningMode.NOISE_CANCELLING && wind -> "Noise cancelling · reducing wind"
     mode == ListeningMode.NOISE_CANCELLING -> "Noise cancelling"
     mode == ListeningMode.AMBIENT -> "Ambient sound · $ambient"
     mode == ListeningMode.OFF -> "Noise control off"
@@ -189,7 +188,6 @@ internal class TurntableFrames(private val context: android.content.Context) {
 
 @Composable
 internal fun SolarHero(
-    windNow: Boolean = false,
     mode: ListeningMode?,
     ambientLevel: Int,
     connected: Boolean,
@@ -215,7 +213,7 @@ internal fun SolarHero(
         bump.snapTo(0.96f)
         bump.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 300f))
     }
-    val title = modeTitle(mode, connected, ambientLevel, windNow)
+    val title = modeTitle(mode, connected, ambientLevel)
 
     // Turntable: drag sideways to spin both buds (pre-rendered frames), fling for momentum,
     // and they ease back to the hero pose after a short idle. Tap still cycles noise mode.

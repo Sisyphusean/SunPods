@@ -221,10 +221,6 @@ object SonyControlSessionManager {
 }
 
 class SonyBatteryClient(private val context: Context) {
-    init {
-        AutoWind.appContext = context.applicationContext
-    }
-
     companion object {
         private val MODEL = Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE)
 
@@ -246,16 +242,12 @@ class SonyBatteryClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun read(device: BluetoothDevice): Result =
-        SonyControlSessionManager.withSession(context, device) { s ->
-            val result = s.readBattery()
-            runCatching { AutoWind.sync(context, s) }
-            result
-        }
+        SonyControlSessionManager.withSession(context, device) { it.readBattery() }
 
     @SuppressLint("MissingPermission")
     fun setListeningMode(device: BluetoothDevice, mode: ListeningMode, ambientLevel: Int = 20, focusOnVoice: Boolean = false) {
         SonyControlSessionManager.withSession(context, device) {
-            it.setAmbientSoundMode(mode, ambientLevel, focusOnVoice, AutoWind.ncValue(context))
+            it.setAmbientSoundMode(mode, ambientLevel, focusOnVoice)
         }
     }
 
@@ -287,9 +279,6 @@ class SonyBatteryClient(private val context: Context) {
                         if (frame.type == SonyProtocol.DATA_MDR || frame.type == SonyProtocol.DATA_MDR_NO2) {
                             output.write(SonyProtocol.encode(SonyProtocol.ACK, 1 - frame.sequence, byteArrayOf()))
                             output.flush()
-                        }
-                        if (frame.type == SonyProtocol.DATA_MDR && frame.payload.firstOrNull() == 0x69.toByte()) {
-                            runCatching { AutoWind.onNotify(frame.payload) }
                         }
                         if (match(frame)) return frame
                     }
@@ -331,16 +320,10 @@ class SonyBatteryClient(private val context: Context) {
         private fun charging(status: Byte) = status.toInt() == 1 || status.toInt() == 3
         private fun hex(b: ByteArray) = b.joinToString(" ") { "%02x".format(it.toInt() and 0xff) }
 
-        /** [ncValue] given: Sony's 8 byte form with the wind setting (see AutoWind). Null: the older 7 byte form. */
-        fun setAmbientSoundMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean, ncValue: Int? = null) {
+        fun setAmbientSoundMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean) {
             val enabled = if (mode == ListeningMode.OFF) 0 else 1
             val ambient = if (mode == ListeningMode.AMBIENT) 1 else 0
-            val voice: Byte = if (focusOnVoice) 0x01 else 0x00
-            val level = ambientLevel.coerceIn(1, 20).toByte()
-            send(
-                if (ncValue != null) byteArrayOf(0x68, 0x15, 0x01, enabled.toByte(), ambient.toByte(), ncValue.toByte(), voice, level)
-                else byteArrayOf(0x68, 0x15, 0x01, enabled.toByte(), ambient.toByte(), voice, level)
-            )
+            send(byteArrayOf(0x68, 0x15, 0x01, enabled.toByte(), ambient.toByte(), if (focusOnVoice) 0x01 else 0x00, ambientLevel.coerceIn(1, 20).toByte()))
             waitFor(2_500) { frame ->
                 frame.type == SonyProtocol.ACK ||
                     (frame.type == SonyProtocol.DATA_MDR && frame.payload.firstOrNull() in listOf(0x67.toByte(), 0x69.toByte()))

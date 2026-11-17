@@ -8,5 +8,4 @@
     <string name="medium_widget_label">SunPods medium</string>
     <string name="medium_widget_description">Left, right and case levels with refresh</string>
     <string name="tile_label">Noise control</string>
-    <string name="wind_tile_label">Windy</string>
 </resources>
