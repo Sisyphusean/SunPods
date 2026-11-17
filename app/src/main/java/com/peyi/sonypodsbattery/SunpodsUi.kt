@@ -10,6 +10,8 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.scale
@@ -79,6 +81,9 @@ import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.NightsStay
 import androidx.compose.material.icons.rounded.WbSunny
+import androidx.compose.material.icons.rounded.SaveAlt
+import androidx.compose.material.icons.rounded.SettingsBackupRestore
+import androidx.compose.material.icons.rounded.TableChart
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Earbuds
 import androidx.compose.material.icons.rounded.Mic
@@ -1404,6 +1409,8 @@ private fun DeviceScreen(
         )
     )
 
+    YourDataGroup()
+
     Group(
         "Help",
         rows = listOf(
@@ -1471,7 +1478,7 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.18.0"
+    const val VERSION = "2.19.0"
 }
 
 private val PROMPT_VOLUMES = listOf(-2, -1, 0, 1, 2)
@@ -1521,4 +1528,75 @@ private fun VoicePromptsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
         footer = if (quiet) "Switched on the earbuds, so it holds even with SunPods closed. If the earbuds connect during quiet hours, the connection prompt may still play once." else null,
         rows = rows
     )
+}
+
+/** Device tab: back up to a file, restore on a new phone, or export battery history for a spreadsheet. */
+@Composable
+private fun YourDataGroup() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pending by remember { mutableStateOf<Pair<String, Backup.Summary>?>(null) }
+    fun toast(text: String) = android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_LONG).show()
+
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { runCatching { Backup.write(context, uri, Backup.export(context)) }.isSuccess }
+            toast(if (ok) "Backup saved" else "Couldn't save the backup")
+        }
+    }
+    val csv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) { runCatching { Backup.write(context, uri, Backup.historyCsv(context)) }.isSuccess }
+            toast(if (ok) "Battery history exported" else "Couldn't export")
+        }
+    }
+    val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { Backup.read(context, uri).let { it to Backup.inspect(it) } }
+            }
+            result.onSuccess { pending = it }.onFailure { toast(it.message ?: "Couldn't read that file") }
+        }
+    }
+
+    Group(
+        "Your data",
+        rows = listOf(
+            { NavRow(Icons.Rounded.SaveAlt, "Back up", "Settings, automations, Last seen and battery history to one file") { save.launch(Backup.suggestedName()) } },
+            { NavRow(Icons.Rounded.SettingsBackupRestore, "Restore", "From a SunPods backup file") { open.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) } },
+            {
+                NavRow(Icons.Rounded.TableChart, "Export battery history", "As a CSV for spreadsheets") {
+                    csv.launch("SunPods-battery-history-" + java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date()) + ".csv")
+                }
+            }
+        ),
+        footer = "Files stay where you save them. SunPods has no internet access, so nothing is uploaded. A backup includes your Last seen location, so keep it somewhere private."
+    )
+
+    pending?.let { (text, s) ->
+        val date = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(s.exportedAt))
+        AlertDialog(
+            onDismissRequest = { pending = null },
+            title = { Text("Restore this backup?") },
+            text = {
+                Text(
+                    "Saved $date from SunPods ${s.appVersion}: ${s.settings} settings, ${s.historyRows} battery readings and ${s.healthRows} battery health records.\n\n" +
+                        "Your settings are replaced. Battery history is merged, so nothing recorded here is lost. SunPods restarts afterwards."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pending = null
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) { runCatching { Backup.restore(context, text) }.isSuccess }
+                        if (ok) Backup.restart(context) else toast("Couldn't restore that backup")
+                    }
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { pending = null }) { Text("Cancel") } }
+        )
+    }
 }
