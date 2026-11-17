@@ -128,6 +128,10 @@ data class DeviceSettings(
     val noiseCycle: NoiseCycle? = null,
     /** null until the slots have been probed once; empty means the earbuds offer none. */
     val general: List<GeneralSetting>? = null,
+    val promptsOn: Boolean? = null,
+    /** -2 (quietest) to +2 (loudest). */
+    val promptVolume: Int? = null,
+    val promptTail: Int? = null,
     val readAt: Long = 0L
 ) {
     val eqPreset: EqPreset? get() = EqPreset.from(eqPresetCode)
@@ -185,7 +189,23 @@ internal object SonyFeatures {
         r = readTouch(s, r)
         r = readNoiseCycle(s, r)
         r = readGeneral(s, r)
+        r = readPrompts(s, r)
         return r.copy(readAt = System.currentTimeMillis())
+    }
+
+    private fun readPrompts(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
+        val v = VoicePrompts.read(s)
+        return r.copy(promptsOn = v.on ?: r.promptsOn, promptVolume = v.volume ?: r.promptVolume, promptTail = v.tail ?: r.promptTail)
+    }
+
+    fun setPrompts(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
+        VoicePrompts.setOn(s, on)
+        return readPrompts(s, r)
+    }
+
+    fun setPromptVolume(s: SonyBatteryClient.SonySession, r: DeviceSettings, volume: Int): DeviceSettings {
+        VoicePrompts.setVolume(s, volume, r.promptTail)
+        return readPrompts(s, r)
     }
 
     /**
@@ -427,6 +447,7 @@ object SettingsStore {
                         GeneralSetting(g.getInt("slot"), g.getString("key"), if (g.has("on")) g.getBoolean("on") else null)
                     }
                 } else null,
+                promptsOn = bool("vg"), promptVolume = int("vgVol"), promptTail = int("vgTail"),
                 readAt = if (o.has("at")) o.getLong("at") else 0L
             )
         } catch (_: Exception) {
@@ -458,6 +479,9 @@ object SettingsStore {
                 list.forEach { g -> a.put(JSONObject().put("slot", g.slot).put("key", g.key).also { j -> g.on?.let { j.put("on", it) } }) }
             })
         }
+        s.promptsOn?.let { o.put("vg", it) }
+        s.promptVolume?.let { o.put("vgVol", it) }
+        s.promptTail?.let { o.put("vgTail", it) }
         o.put("at", s.readAt)
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, o.toString()).apply()
     }

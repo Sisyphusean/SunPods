@@ -242,7 +242,11 @@ class SonyBatteryClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun read(device: BluetoothDevice): Result =
-        SonyControlSessionManager.withSession(context, device) { it.readBattery() }
+        SonyControlSessionManager.withSession(context, device) { s ->
+            val result = s.readBattery()
+            runCatching { QuietHours.enforce(context, s) }
+            result
+        }
 
     @SuppressLint("MissingPermission")
     fun setListeningMode(device: BluetoothDevice, mode: ListeningMode, ambientLevel: Int = 20, focusOnVoice: Boolean = false) {

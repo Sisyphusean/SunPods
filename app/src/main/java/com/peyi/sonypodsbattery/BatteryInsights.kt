@@ -19,7 +19,11 @@ data class BatterySample(
     val case: Int?,
     val leftCharging: Boolean,
     val rightCharging: Boolean,
-    val caseCharging: Boolean
+    val caseCharging: Boolean,
+    /** Noise mode when read: N cancelling, A ambient, O off; null in older history. */
+    val mode: Char? = null,
+    /** Whether the phone was playing audio (and not in a call) when read; null in older history. */
+    val playing: Boolean? = null
 )
 
 /** Append-only log of confirmed battery reads, kept on the phone only (14 days). */
@@ -37,7 +41,11 @@ object BatteryHistory {
         val last = if (f.exists()) f.useLines { lines -> lines.lastOrNull() }?.let(::parse) else null
         val sample = BatterySample(
             state.updatedAt, state.left, state.right, state.case,
-            state.leftCharging, state.rightCharging, state.caseCharging
+            state.leftCharging, state.rightCharging, state.caseCharging,
+            mode = when (state.listeningMode) {
+                ListeningMode.NOISE_CANCELLING -> 'N'; ListeningMode.AMBIENT -> 'A'; ListeningMode.OFF -> 'O'; null -> null
+            },
+            playing = playingNow(context)
         )
         if (last != null) {
             if (sample.time <= last.time) return
@@ -45,8 +53,20 @@ object BatteryHistory {
             if (unchanged && sample.time - last.time < SAME_STATE_GAP_MS) return
         }
         f.appendText(format(sample) + "\n")
-        if (f.length() > 200_000) prune(f)
+        if (f.length() > 300_000) prune(f)
+        // Fold finished clean stretches into the long-term health log now and then.
+        val p = context.getSharedPreferences("battery_health", Context.MODE_PRIVATE)
+        if (sample.time - p.getLong("updated", 0L) > 3 * 3_600_000L) {
+            runCatching { BatteryHealth.update(context) }
+            p.edit().putLong("updated", sample.time).apply()
+        }
     }
+
+    private fun playingNow(context: Context): Boolean? = runCatching {
+        val audio = context.getSystemService(android.media.AudioManager::class.java) ?: return null
+        val call = audio.mode == android.media.AudioManager.MODE_IN_CALL || audio.mode == android.media.AudioManager.MODE_IN_COMMUNICATION
+        audio.isMusicActive && !call
+    }.getOrNull()
 
     fun load(context: Context, sinceMillis: Long = 0L): List<BatterySample> {
         val f = file(context)
@@ -62,16 +82,19 @@ object BatteryHistory {
 
     private fun format(s: BatterySample) = listOf(
         s.time, s.left ?: "", s.right ?: "", s.case ?: "",
-        if (s.leftCharging) 1 else 0, if (s.rightCharging) 1 else 0, if (s.caseCharging) 1 else 0
+        if (s.leftCharging) 1 else 0, if (s.rightCharging) 1 else 0, if (s.caseCharging) 1 else 0,
+        s.mode ?: "", when (s.playing) { true -> 1; false -> 0; null -> "" }
     ).joinToString(",")
 
     private fun parse(line: String): BatterySample? {
         val p = line.split(",")
-        if (p.size != 7) return null
+        if (p.size != 7 && p.size != 9) return null
         return BatterySample(
             p[0].toLongOrNull() ?: return null,
             p[1].toIntOrNull(), p[2].toIntOrNull(), p[3].toIntOrNull(),
-            p[4] == "1", p[5] == "1", p[6] == "1"
+            p[4] == "1", p[5] == "1", p[6] == "1",
+            mode = p.getOrNull(7)?.firstOrNull(),
+            playing = when (p.getOrNull(8)) { "1" -> true; "0" -> false; else -> null }
         )
     }
 }

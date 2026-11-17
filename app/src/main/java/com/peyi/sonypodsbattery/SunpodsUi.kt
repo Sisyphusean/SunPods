@@ -75,6 +75,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.NightsStay
+import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Earbuds
 import androidx.compose.material.icons.rounded.Mic
@@ -1271,6 +1275,8 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
         )
     )
 
+    if (settings.promptsOn != null || settings.promptVolume != null) VoicePromptsGroup(settings, vm)
+
     // Only what these earbuds say they support, named the way they name it.
     val general = settings.general.orEmpty()
     if (general.isNotEmpty()) {
@@ -1465,5 +1471,54 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.16.0"
+    const val VERSION = "2.17.0"
+}
+
+private val PROMPT_VOLUMES = listOf(-2, -1, 0, 1, 2)
+private fun promptVolumeLabel(v: Int) = when (v) { -2 -> "Quietest"; -1 -> "Quieter"; 0 -> "Normal"; 1 -> "Louder"; else -> "Loudest" }
+private fun hourLabel(h: Int) = "%02d:00".format(h)
+
+@Composable
+private fun VoicePromptsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
+    val context = LocalContext.current
+    var quiet by remember { mutableStateOf(QuietHours.enabled(context)) }
+    var start by remember { mutableStateOf(QuietHours.startHour(context)) }
+    var end by remember { mutableStateOf(QuietHours.endHour(context)) }
+    val rows = mutableListOf<@Composable () -> Unit>()
+    rows += {
+        ToggleRow(Icons.Rounded.RecordVoiceOver, "Voice prompts", "Announcements like \"Battery about 20%\" and mode names", settings.promptsOn) { vm.setPrompts(it) }
+    }
+    if (settings.promptVolume != null) rows += {
+        var open by remember { mutableStateOf(false) }
+        NavRow(Icons.Rounded.VolumeUp, "Prompt volume", promptVolumeLabel(settings.promptVolume)) { open = true }
+        if (open) ChoiceSheet("Prompt volume", PROMPT_VOLUMES, settings.promptVolume, label = ::promptVolumeLabel, onDismiss = { open = false }) {
+            vm.setPromptVolume(it)
+        }
+    }
+    rows += {
+        ToggleRow(Icons.Rounded.Bedtime, "Quiet hours", "Prompts off from ${hourLabel(start)} to ${hourLabel(end)}, then back on", quiet) {
+            quiet = it; vm.setQuietHours(it, start, end)
+        }
+    }
+    if (quiet) {
+        rows += {
+            var open by remember { mutableStateOf(false) }
+            NavRow(Icons.Rounded.NightsStay, "Starts", hourLabel(start)) { open = true }
+            if (open) ChoiceSheet("Quiet from", (0..23).toList(), start, label = ::hourLabel, onDismiss = { open = false }) {
+                start = it; vm.setQuietHours(true, it, end)
+            }
+        }
+        rows += {
+            var open by remember { mutableStateOf(false) }
+            NavRow(Icons.Rounded.WbSunny, "Ends", hourLabel(end)) { open = true }
+            if (open) ChoiceSheet("Quiet until", (0..23).toList(), end, label = ::hourLabel, onDismiss = { open = false }) {
+                end = it; vm.setQuietHours(true, start, it)
+            }
+        }
+    }
+    Group(
+        "Voice prompts",
+        footer = if (quiet) "Switched on the earbuds, so it holds even with SunPods closed. If the earbuds connect during quiet hours, the connection prompt may still play once." else null,
+        rows = rows
+    )
 }

@@ -93,6 +93,7 @@ internal fun BatteryInsightsScreen(battery: BatteryState) {
     HistoryCard(samples, now)
     WeekCard(samples, now)
     StatsGrid(battery, samples, outlook, now)
+    BatteryHealthCard(battery.updatedAt)
     AlertsCard()
 }
 

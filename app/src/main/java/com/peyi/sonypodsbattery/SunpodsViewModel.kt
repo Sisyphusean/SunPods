@@ -161,6 +161,24 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         { s -> s.copy(general = s.general?.map { if (it.slot == slot) it.copy(on = on) else it }) }
     ) { s, r -> SonyFeatures.setGeneral(s, r, slot, on) }
 
+    fun setPrompts(on: Boolean) {
+        QuietHours.overrideNow(app)
+        change("Voice prompts", { it.copy(promptsOn = on) }) { s, r -> SonyFeatures.setPrompts(s, r, on) }
+    }
+
+    fun setPromptVolume(volume: Int) = change("Voice prompt volume", { it.copy(promptVolume = volume) }) { s, r ->
+        SonyFeatures.setPromptVolume(s, r, volume)
+    }
+
+    /** Saves quiet hours and applies them at once if the window has already started or ended. */
+    fun setQuietHours(on: Boolean, start: Int, end: Int) {
+        QuietHours.set(app, on, start, end)
+        change("Quiet hours", { it }) { s, r ->
+            QuietHours.enforce(app, s)
+            r.copy(promptsOn = VoicePrompts.read(s).on ?: r.promptsOn)
+        }
+    }
+
     fun setTouch(left: TouchFunction, right: TouchFunction) = change(
         "Touch controls",
         { it.copy(touchLeft = left, touchRight = right) }
