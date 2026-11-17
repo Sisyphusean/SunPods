@@ -35,6 +35,9 @@ object EarbudConnectionStateStore {
     private const val A2DP_STATE_KEY = "a2dp_state"
     private const val TARGET_ADDRESS_KEY = "target_address"
 
+    fun prefs(context: Context): android.content.SharedPreferences =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
     fun current(context: Context): EarbudConnectionState =
         EarbudConnectionState.fromStored(
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

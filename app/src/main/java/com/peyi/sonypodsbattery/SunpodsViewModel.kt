@@ -36,12 +36,32 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         _battery.value = BatteryStore.load(app)
     }
 
+    /** Bumps whenever the earbuds connect or disconnect, so the screen re-checks the link. */
+    private val _link = MutableStateFlow(0)
+    val link: StateFlow<Int> = _link.asStateFlow()
+
+    // While the app is open, a reconnect reads everything again (levels, mode, settings) with the
+    // same retries as a pull to refresh, and a disconnect shows at once.
+    private val connectionListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key != "a2dp_state" && key != "state") return@OnSharedPreferenceChangeListener
+        _link.value++
+        _battery.value = BatteryStore.load(app)
+        if (key == "a2dp_state" && EarbudConnectionStateStore.a2dpState(app) == A2dpConnectionState.CONNECTED) {
+            viewModelScope.launch {
+                delay(1_500)
+                refreshAll()
+            }
+        }
+    }
+
     init {
         BatteryStore.prefs(application).registerOnSharedPreferenceChangeListener(batteryListener)
+        EarbudConnectionStateStore.prefs(application).registerOnSharedPreferenceChangeListener(connectionListener)
     }
 
     override fun onCleared() {
         BatteryStore.prefs(app).unregisterOnSharedPreferenceChangeListener(batteryListener)
+        EarbudConnectionStateStore.prefs(app).unregisterOnSharedPreferenceChangeListener(connectionListener)
     }
 
     /** On opening the app: read the earbuds if they're connected and the numbers are over a minute old. */

@@ -517,7 +517,8 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
     // Saved levels alone are not proof of a connection (a missed disconnect leaves them behind),
     // so also require a live Bluetooth audio link.
     val demo = remember { DemoMode.on(context) }
-    val linkUp = remember(battery, resumes) { demo || audioLinkUp(context) }
+    val link by vm.link.collectAsState()
+    val linkUp = remember(battery, resumes, link) { demo || audioLinkUp(context) }
     val connected = (battery.left != null || battery.right != null) && linkUp
     Column(verticalArrangement = Arrangement.spacedBy(GroupGap)) {
         Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -1464,5 +1465,5 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.13.0"
+    const val VERSION = "2.13.1"
 }
