@@ -22,8 +22,8 @@ android {
         applicationId = "com.peyi.sonypodsbattery"
         minSdk = 29
         targetSdk = 35
-        versionCode = 53
-        versionName = "2.17.1"
+        versionCode = 54
+        versionName = "2.18.0"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
 

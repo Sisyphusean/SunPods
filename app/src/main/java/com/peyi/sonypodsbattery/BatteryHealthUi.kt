@@ -29,6 +29,18 @@ private fun modeName(mode: Char) = when (mode) {
     'N' -> "noise cancelling"; 'A' -> "ambient sound"; 'O' -> "noise control off"; else -> "your usual mode"
 }
 
+private fun codecName(c: Char) = when (c) { 'L' -> "LDAC"; 'A' -> "AAC"; 'S' -> "SBC"; 'C' -> "LC3"; else -> null }
+
+/** "noise cancelling at 40% volume with LDAC". Settings are taken out, so numbers mean your usual setup. */
+private fun setupText(r: BatteryHealth.Report): String {
+    val s = r.setup ?: return modeName(r.mode)
+    return buildString {
+        append(modeName(s.mode))
+        append(" at ${s.volume.roundToInt()}% volume")
+        codecName(s.codec)?.let { append(" with $it") }
+    }
+}
+
 private fun hm(hours: Double) = BatteryInsights.formatMinutes((hours * 60).roundToInt())
 
 @Composable
@@ -56,7 +68,7 @@ internal fun BatteryHealthCard(refreshKey: Long) {
                     )
                     return@Column
                 }
-                Text("Per full charge, ${modeName(r.mode)}", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                Text("Per full charge, ${setupText(r)}", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     BudHealth("Left", left, Modifier.weight(1f))
@@ -77,11 +89,28 @@ internal fun BatteryHealthCard(refreshKey: Long) {
 
                 Spacer(Modifier.height(8.dp))
                 Text(trendText(r), style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+
+                if (r.costs.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    Text("What costs battery, from your listening", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(6.dp))
+                    r.costs.take(4).forEach { c ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(c.label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                            val pct = (c.change * 100).roundToInt()
+                            Text(
+                                if (pct > 0) "+$pct% drain" else "$pct% drain",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (pct > 0) colors.error else colors.primary
+                            )
+                        }
+                    }
+                }
             }
         }
         val listened = listOfNotNull(report?.left?.listened, report?.right?.listened).maxOrNull()
         Footer(
-            if (listened != null) "From ${hm(listened)} of clean listening in the last ${report!!.windowDays} days. Only time with music playing counts; the first and last few percent are left out because batteries report them unevenly."
+            if (listened != null) "From ${hm(listened)} of clean listening in the last ${report!!.windowDays} days, adjusted to your usual setup, so changing volume, codec or settings doesn't read as wear. Only time with music playing counts."
             else "Health is read from how fast each bud drains while you listen, so you never need to run them flat."
         )
     }

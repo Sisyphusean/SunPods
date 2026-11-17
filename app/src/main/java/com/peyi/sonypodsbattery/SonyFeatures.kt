@@ -246,6 +246,17 @@ internal object SonyFeatures {
         return String(p, 3, length, Charsets.US_ASCII).trim().ifBlank { null }
     }
 
+    /** Re-reads just the codec now and then during background refreshes (battery health uses it). */
+    fun refreshCodec(context: android.content.Context, s: SonyBatteryClient.SonySession) {
+        val p = context.getSharedPreferences("battery_health", android.content.Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        if (now - p.getLong("codec_at", 0L) < 30 * 60_000L) return
+        p.edit().putLong("codec_at", now).apply()
+        val stored = SettingsStore.load(context)
+        val next = readCodec(s, stored)
+        if (next.codec != stored.codec) SettingsStore.save(context, next)
+    }
+
     private fun readCodec(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
         val p = s.request(bytes(COMMON_GET_STATUS, COMMON_AUDIO_CODEC)) ?: return r
         if (p.size < 3) return r

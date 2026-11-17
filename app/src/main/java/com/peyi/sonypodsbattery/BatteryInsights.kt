@@ -23,7 +23,16 @@ data class BatterySample(
     /** Noise mode when read: N cancelling, A ambient, O off; null in older history. */
     val mode: Char? = null,
     /** Whether the phone was playing audio (and not in a call) when read; null in older history. */
-    val playing: Boolean? = null
+    val playing: Boolean? = null,
+    // What else costs battery, as it was at the time; null in older history.
+    /** Phone media volume, 0..100. */
+    val volume: Int? = null,
+    /** L LDAC, A AAC, S SBC, C LC3, X other. */
+    val codec: Char? = null,
+    val dsee: Boolean? = null,
+    val speakToChat: Boolean? = null,
+    /** Ambient level 1..20 (only meaningful in ambient mode). */
+    val ambient: Int? = null
 )
 
 /** Append-only log of confirmed battery reads, kept on the phone only (14 days). */
@@ -39,13 +48,21 @@ object BatteryHistory {
         if (state.updatedAt == 0L || (state.left == null && state.right == null)) return
         val f = file(context)
         val last = if (f.exists()) f.useLines { lines -> lines.lastOrNull() }?.let(::parse) else null
+        val settings = SettingsStore.load(context)
         val sample = BatterySample(
             state.updatedAt, state.left, state.right, state.case,
             state.leftCharging, state.rightCharging, state.caseCharging,
             mode = when (state.listeningMode) {
                 ListeningMode.NOISE_CANCELLING -> 'N'; ListeningMode.AMBIENT -> 'A'; ListeningMode.OFF -> 'O'; null -> null
             },
-            playing = playingNow(context)
+            playing = playingNow(context),
+            volume = volumeNow(context),
+            codec = settings.codec?.let { c ->
+                when { c.startsWith("LDAC") -> 'L'; c.startsWith("AAC") -> 'A'; c.startsWith("SBC") -> 'S'; c.startsWith("LC3") -> 'C'; else -> 'X' }
+            },
+            dsee = settings.dseeOn,
+            speakToChat = settings.speakToChat,
+            ambient = state.ambientLevel.takeIf { state.listeningMode == ListeningMode.AMBIENT }
         )
         if (last != null) {
             if (sample.time <= last.time) return
@@ -61,6 +78,12 @@ object BatteryHistory {
             p.edit().putLong("updated", sample.time).apply()
         }
     }
+
+    private fun volumeNow(context: Context): Int? = runCatching {
+        val audio = context.getSystemService(android.media.AudioManager::class.java) ?: return null
+        val max = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).takeIf { it > 0 } ?: return null
+        audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) * 100 / max
+    }.getOrNull()
 
     private fun playingNow(context: Context): Boolean? = runCatching {
         val audio = context.getSystemService(android.media.AudioManager::class.java) ?: return null
@@ -83,18 +106,27 @@ object BatteryHistory {
     private fun format(s: BatterySample) = listOf(
         s.time, s.left ?: "", s.right ?: "", s.case ?: "",
         if (s.leftCharging) 1 else 0, if (s.rightCharging) 1 else 0, if (s.caseCharging) 1 else 0,
-        s.mode ?: "", when (s.playing) { true -> 1; false -> 0; null -> "" }
+        s.mode ?: "", flag(s.playing),
+        s.volume ?: "", s.codec ?: "", flag(s.dsee), flag(s.speakToChat), s.ambient ?: ""
     ).joinToString(",")
+
+    private fun flag(b: Boolean?) = when (b) { true -> 1; false -> 0; null -> "" }
+    private fun flag(s: String?) = when (s) { "1" -> true; "0" -> false; else -> null }
 
     private fun parse(line: String): BatterySample? {
         val p = line.split(",")
-        if (p.size != 7 && p.size != 9) return null
+        if (p.size != 7 && p.size != 9 && p.size != 14) return null
         return BatterySample(
             p[0].toLongOrNull() ?: return null,
             p[1].toIntOrNull(), p[2].toIntOrNull(), p[3].toIntOrNull(),
             p[4] == "1", p[5] == "1", p[6] == "1",
             mode = p.getOrNull(7)?.firstOrNull(),
-            playing = when (p.getOrNull(8)) { "1" -> true; "0" -> false; else -> null }
+            playing = flag(p.getOrNull(8)),
+            volume = p.getOrNull(9)?.toIntOrNull(),
+            codec = p.getOrNull(10)?.firstOrNull(),
+            dsee = flag(p.getOrNull(11)),
+            speakToChat = flag(p.getOrNull(12)),
+            ambient = p.getOrNull(13)?.toIntOrNull()
         )
     }
 }

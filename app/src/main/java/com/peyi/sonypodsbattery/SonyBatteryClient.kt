@@ -245,6 +245,7 @@ class SonyBatteryClient(private val context: Context) {
         SonyControlSessionManager.withSession(context, device) { s ->
             val result = s.readBattery()
             runCatching { QuietHours.enforce(context, s) }
+            runCatching { SonyFeatures.refreshCodec(context, s) }
             result
         }
 
