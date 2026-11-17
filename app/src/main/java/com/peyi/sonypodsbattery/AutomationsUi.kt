@@ -113,8 +113,14 @@ private fun ActionPill(action: AutoAction, onClick: () -> Unit) {
         Modifier.fillMaxWidth().padding(start = 72.dp, end = 20.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("Switch to", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-        TextButton(onClick = onClick) { Text(action.label) }
+        Text("Switch to", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
+        Spacer(Modifier.width(16.dp))
+        TextButton(onClick = onClick, modifier = Modifier.weight(1f)) {
+            Text(
+                action.label, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.fillMaxWidth(),
+                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+        }
     }
 }
 

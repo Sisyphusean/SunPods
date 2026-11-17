@@ -57,7 +57,7 @@ import kotlin.math.sqrt
  */
 internal object MicTest {
     const val RATE = 16_000
-    const val SECONDS = 5
+    val LENGTHS = listOf(5, 10, 15, 30)
 
     data class Analysis(val voiceDb: Double, val noiseDb: Double, val clipped: Double, val device: String)
 
@@ -93,10 +93,10 @@ internal object MicTest {
 
     /** Records [SECONDS] seconds; [onLevel] gets 0..1 about ten times a second. */
     @SuppressLint("MissingPermission")
-    suspend fun record(onLevel: (Float) -> Unit): ShortArray = withContext(Dispatchers.IO) {
+    suspend fun record(seconds: Int, onLevel: (Float) -> Unit): ShortArray = withContext(Dispatchers.IO) {
         val min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val rec = AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, RATE))
-        val out = ShortArray(RATE * SECONDS)
+        val out = ShortArray(RATE * seconds)
         try {
             rec.startRecording()
             var n = 0
@@ -158,7 +158,7 @@ internal object MicTest {
 private sealed interface MicState {
     data object Idle : MicState
     data object Starting : MicState
-    data class Recording(val level: Float, val elapsed: Float) : MicState
+    data class Recording(val level: Float, val left: Int) : MicState
     data object Playing : MicState
     data class Done(val analysis: MicTest.Analysis, val samples: ShortArray) : MicState
     data class Failed(val message: String) : MicState
@@ -171,6 +171,7 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<MicState>(MicState.Idle) }
     var level by remember { mutableFloatStateOf(0f) }
+    var seconds by remember { mutableStateOf(5) }
 
     fun run() {
         state = MicState.Starting
@@ -183,9 +184,9 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
             }
             try {
                 val start = System.currentTimeMillis()
-                val samples = MicTest.record { l ->
+                val samples = MicTest.record(seconds) { l ->
                     level = l
-                    state = MicState.Recording(l, (System.currentTimeMillis() - start) / 1000f)
+                    state = MicState.Recording(l, (seconds - (System.currentTimeMillis() - start) / 1000).toInt().coerceAtLeast(0))
                 }
                 state = MicState.Playing
                 MicTest.play(samples)
@@ -214,7 +215,18 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
             val colors = MaterialTheme.colorScheme
             when (val s = state) {
                 MicState.Idle -> {
-                    Text("Talk normally for ${MicTest.SECONDS} seconds. SunPods then plays it back so you hear what callers hear. Music pauses during the test.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                    Text("Talk normally, then SunPods plays it back so you hear what callers hear. Music pauses during the test.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                    Spacer(Modifier.height(16.dp))
+                    Text("Length", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MicTest.LENGTHS.forEach { n ->
+                            androidx.compose.material3.FilterChip(
+                                selected = seconds == n, onClick = { seconds = n },
+                                label = { Text("$n s") }
+                            )
+                        }
+                    }
                     Spacer(Modifier.height(20.dp))
                     Button(onClick = ::start, modifier = Modifier.fillMaxWidth()) { Text("Start recording") }
                 }
@@ -227,7 +239,7 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
                     Spacer(Modifier.height(16.dp))
                     LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth().height(10.dp).clip(CircleShape))
                     Spacer(Modifier.height(8.dp))
-                    Text("${(MicTest.SECONDS - s.elapsed).toInt().coerceAtLeast(0)} s left", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                    Text("${s.left} s left", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
                 }
                 MicState.Playing -> {
                     Text("Playing it back through your earbuds.", style = MaterialTheme.typography.bodyMedium)

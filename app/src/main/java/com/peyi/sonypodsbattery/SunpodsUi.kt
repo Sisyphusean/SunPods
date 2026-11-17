@@ -1494,7 +1494,7 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.22.2"
+    const val VERSION = "2.22.3"
 }
 
 private val PROMPT_VOLUMES = listOf(-2, -1, 0, 1, 2)
@@ -1631,6 +1631,22 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
     rows += { NavRow(Icons.Rounded.Mic, "Test your call mic", "Hear yourself the way callers do") { testing = true } }
     if (settings.leModeSupported == true) rows += {
         NavRow(Icons.Rounded.BluetoothAudio, "Connection mode", if (le) "LE Audio" else "Classic") { choosing = true }
+    }
+    // A switch that didn't complete can leave the earbuds' LE Audio setting on while the phone
+    // still uses Classic, which turns off Connect to 2 devices.
+    if (settings.leOn == true && !le) rows += {
+        val scope = rememberCoroutineScope()
+        var busy by remember { mutableStateOf(false) }
+        NavRow(Icons.Rounded.RestartAlt, "Finish switching back to Classic", if (busy) "Updating your earbuds" else "Your earbuds still have LE Audio on. Tap to turn it off.") {
+            if (busy) return@NavRow
+            busy = true
+            scope.launch {
+                val ok = RefreshCoordinator.awaitSession(context, "Connection mode") { s -> SonyFeatures.setLeAudio(s, settings, false) }.getOrDefault(false)
+                DiagnosticsStore.add(context, "Connection mode: turned the earbuds' LE Audio setting off: $ok")
+                busy = false
+                vm.refreshAll()
+            }
+        }
     }
     Group(
         "Calls",
