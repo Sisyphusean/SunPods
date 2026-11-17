@@ -1494,7 +1494,7 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.22.0"
+    const val VERSION = "2.22.1"
 }
 
 private val PROMPT_VOLUMES = listOf(-2, -1, 0, 1, 2)
@@ -1624,7 +1624,9 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
     var testing by remember { mutableStateOf(false) }
     var choosing by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<Boolean?>(null) }
-    val le = remember(settings.readAt) { LeAudio.anyConnected(context) }
+    var switching by remember { mutableStateOf<Boolean?>(null) }
+    var tick by remember { mutableStateOf(0) }
+    val le = remember(settings.readAt, tick) { LeAudio.anyConnected(context) }
     val rows = mutableListOf<@Composable () -> Unit>()
     rows += { NavRow(Icons.Rounded.Mic, "Test your call mic", "Hear yourself the way callers do") { testing = true } }
     if (settings.leModeSupported == true) rows += {
@@ -1632,7 +1634,7 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
     }
     Group(
         "Calls",
-        footer = if (settings.leModeSupported == true) "LE Audio often makes your voice clearer on calls. If your earbuds don't reconnect after switching, open Bluetooth settings, tap WF-1000XM5 and turn on LE Audio." else null,
+        footer = if (settings.leModeSupported == true) "LE Audio often makes your voice clearer on calls. It needs a phone that supports it." else null,
         rows = rows
     )
     if (testing) MicTestSheet(onDismiss = { testing = false })
@@ -1646,9 +1648,15 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
         AlertDialog(
             onDismissRequest = { confirm = null },
             title = { Text(if (on) "Switch to LE Audio?" else "Switch to Classic?") },
-            text = { Text(if (on) "Your earbuds disconnect and reconnect using LE Audio. Connect to 2 devices turns off while it's on." else "Your earbuds disconnect and reconnect using Classic Bluetooth.") },
-            confirmButton = { TextButton(onClick = { confirm = null; vm.setLeAudio(on) }) { Text("Switch") } },
+            text = {
+                Text(
+                    (if (on) "Your earbuds disconnect and reconnect using LE Audio. Connect to 2 devices turns off while it's on."
+                    else "Your earbuds disconnect and reconnect using Classic Bluetooth.") + "\n\nWear both earbuds before you switch."
+                )
+            },
+            confirmButton = { TextButton(onClick = { confirm = null; switching = on }) { Text("Switch") } },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } }
         )
     }
+    switching?.let { on -> LeSwitchSheet(on, settings) { switching = null; tick++; vm.reloadCached() } }
 }

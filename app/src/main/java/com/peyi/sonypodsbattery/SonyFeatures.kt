@@ -129,10 +129,10 @@ data class DeviceSettings(
     /** null until the slots have been probed once; empty means the earbuds offer none. */
     val general: List<GeneralSetting>? = null,
     val promptsOn: Boolean? = null,
-    /** The earbuds can switch between Classic and LE Audio (AUDIO param 0x05). */
+    /** The earbuds can switch between Classic and LE Audio. */
     val leModeSupported: Boolean? = null,
-    /** Sound or connection quality priority that goes with the LE Audio switch. */
-    val lePrior: Int? = null,
+    /** The earbuds' own LE Audio setting is on. */
+    val leOn: Boolean? = null,
     /** -2 (quietest) to +2 (loudest). */
     val promptVolume: Int? = null,
     val promptTail: Int? = null,
@@ -204,23 +204,32 @@ internal object SonyFeatures {
     }
 
     /*
-     * Classic or LE Audio (Sound Connect: AudioInquiredType.CONNECTION_MODE_CLASSIC_AUDIO_LE_AUDIO):
-     *   GET 0xe6 [0x05] -> RET 0xe7 [0x05, prior]
-     *   SET 0xe8 [0x05, prior, 0 = LE Audio on / 1 = off]
-     *   NTFY 0xe9 [0x05, prior, stream: 1 LE Audio, 2 Classic]
+     * Classic or LE Audio, the way Sound Connect does it (LEA table 1,
+     * LEAInquiredType.CLASSIC_ONLY_LE_CLASSIC_SETTING = 0x0c):
+     *   GET 0x46 [0x0c]                 -> RET 0x47 [0x0c, 0 = LE Audio on / 1 = off]
+     *   SET 0x48 [0x0c, on/off, 0x00]   0x00 = change the setting and the connection method
+     *   GET_CAPABILITY 0x40 [0x00]      -> RET 0x41 [0x00, 3 x 17 char addresses]: the earbuds'
+     *                                      addresses, including the LE ones Android may need to pair
      */
-    private const val AUDIO_LE_MODE = 0x05
+    private const val LEA_GET_CAPABILITY = 0x40
+    private const val LEA_GET_PARAM = 0x46
+    private const val LEA_CLASSIC_LE = 0x0c
 
     private fun readLeMode(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
         if (r.leModeSupported == false) return r
-        val p = s.request(bytes(AUDIO_GET_PARAM, AUDIO_LE_MODE), timeoutMs = 700) ?: return r.copy(leModeSupported = r.leModeSupported ?: false)
-        return r.copy(leModeSupported = true, lePrior = if (p.size >= 3) u(p[2]) else r.lePrior)
+        val p = s.request(bytes(LEA_GET_PARAM, LEA_CLASSIC_LE), timeoutMs = 700) ?: return r.copy(leModeSupported = r.leModeSupported ?: false)
+        return r.copy(leModeSupported = true, leOn = if (p.size >= 3) u(p[2]) == 0 else r.leOn)
     }
 
-    fun setLeAudio(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
-        s.command(bytes(AUDIO_GET_PARAM + 2, AUDIO_LE_MODE, r.lePrior ?: 0, if (on) 0x00 else 0x01))
-        return r
+    /** The earbuds' Bluetooth addresses (Classic and LE), for pairing LE Audio if Android needs to. */
+    fun leAddresses(s: SonyBatteryClient.SonySession): List<String> {
+        val p = s.request(bytes(LEA_GET_CAPABILITY, 0x00), timeoutMs = 1_000) ?: return emptyList()
+        if (p.size < 53) return emptyList()
+        return listOf(2, 19, 36).map { String(p, it, 17, Charsets.US_ASCII) }.filter { Regex("([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}").matches(it) }
     }
+
+    fun setLeAudio(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): Boolean =
+        s.command(bytes(LEA_GET_PARAM + 2, LEA_CLASSIC_LE, if (on) 0x00 else 0x01, 0x00))
 
     fun setPrompts(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
         VoicePrompts.setOn(s, on)
@@ -483,7 +492,7 @@ object SettingsStore {
                     }
                 } else null,
                 promptsOn = bool("vg"), promptVolume = int("vgVol"), promptTail = int("vgTail"),
-                leModeSupported = bool("leSup"), lePrior = int("lePrior"),
+                leModeSupported = bool("leSup"), leOn = bool("leOn"),
                 readAt = if (o.has("at")) o.getLong("at") else 0L
             )
         } catch (_: Exception) {
@@ -517,7 +526,7 @@ object SettingsStore {
         }
         s.promptsOn?.let { o.put("vg", it) }
         s.leModeSupported?.let { o.put("leSup", it) }
-        s.lePrior?.let { o.put("lePrior", it) }
+        s.leOn?.let { o.put("leOn", it) }
         s.promptVolume?.let { o.put("vgVol", it) }
         s.promptTail?.let { o.put("vgTail", it) }
         o.put("at", s.readAt)
