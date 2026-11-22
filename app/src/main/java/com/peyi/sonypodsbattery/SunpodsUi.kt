@@ -14,6 +14,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.HealthAndSafety
 import androidx.compose.material.icons.rounded.Gesture
 import androidx.compose.material.icons.rounded.PowerOff
 import androidx.compose.material.icons.rounded.VolumeDown
@@ -1183,6 +1184,34 @@ private fun SoundScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
             }
         )
     )
+
+    SafeListeningGroup(vm)
+}
+
+/** Safe listening and volume protection, on the earbuds themselves. */
+@Composable
+private fun SafeListeningGroup(vm: SunpodsViewModel) {
+    val safe by vm.safe.collectAsState()
+    var choosing by remember { mutableStateOf(false) }
+    Group(
+        "Safe Listening",
+        footer = "Based on the World Health Organization's guidelines for safe listening.",
+        rows = listOf(
+            { ToggleRow(Icons.Rounded.HealthAndSafety, "Safe Listening", "Your earbuds keep track of how loud and how long you listen", safe.first, vm::setSafeListening) },
+            {
+                NavRow(Icons.Rounded.VolumeUp, "Volume Protection", if (safe.second) "Sensitive" else "Standard") { choosing = true }
+                if (choosing) {
+                    ChoiceSheet(
+                        "Volume Protection", listOf(false, true), safe.second,
+                        label = { if (it) "Sensitive" else "Standard" },
+                        detail = { if (it) "A lower limit, for children and sensitive ears" else "The guideline for adults" },
+                        onDismiss = { choosing = false },
+                        onPick = { choosing = false; vm.setVolumeProtection(it) }
+                    )
+                }
+            }
+        )
+    )
 }
 
 /** The sound as a live curve, with sliders under it when the preset can be edited. */
@@ -1387,16 +1416,23 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
 
     // Only what these earbuds say they support, named the way they name it.
     val general = settings.general.orEmpty()
-    if (general.isNotEmpty()) {
+    if (general.isNotEmpty() || settings.autoSwitch != null) {
+        val rows = mutableListOf<@Composable () -> Unit>()
+        general.forEach { g ->
+            rows += {
+                // Two devices at once needs Classic; the earbuds turn it off on LE Audio.
+                val offNote = if (g.key == "MULTIPOINT_SETTING") leOffNote(settings) else null
+                ToggleRow(generalIcon(g.key), g.title, g.subtitle, g.on, offNote) { on -> vm.setGeneral(g.slot, on) }
+            }
+        }
+        settings.autoSwitch?.let { on ->
+            rows += {
+                ToggleRow(Icons.Rounded.SwapHoriz, "Switch Devices Automatically", "Your earbuds move between your connected devices by themselves", on, leOffNote(settings), vm::setAutoSwitch)
+            }
+        }
         Group(
             "Connection and Calls",
-            rows = general.map { g ->
-                {
-                    // Two devices at once needs Classic; the earbuds turn it off on LE Audio.
-                    val offNote = if (g.key == "MULTIPOINT_SETTING") leOffNote(settings) else null
-                    ToggleRow(generalIcon(g.key), g.title, g.subtitle, g.on, offNote) { on -> vm.setGeneral(g.slot, on) }
-                }
-            }
+            rows = rows
         )
     }
 

@@ -190,6 +190,8 @@ data class DeviceSettings(
     val touchCap: String? = null,
     /** Nod to answer a call, shake your head to decline. null if the earbuds don't offer it. */
     val headGestures: Boolean? = null,
+    /** The earbuds switch between connected devices by themselves. null if they don't offer it. */
+    val autoSwitch: Boolean? = null,
     val noiseCycle: NoiseCycle? = null,
     /** null until the slots have been probed once; empty means the earbuds offer none. */
     val general: List<GeneralSetting>? = null,
@@ -242,6 +244,7 @@ internal object SonyFeatures {
     private const val SYSTEM_ASSIGNABLE = 0x03
     private const val SYSTEM_SPEAK_TO_CHAT = 0x0c
     private const val SYSTEM_HEAD_GESTURE = 0x0f
+    private const val SYSTEM_T2_AUTO_SWITCH = 0x0a
 
     private const val AUTO_OFF_WHEN_REMOVED = 0x10
     private const val AUTO_OFF_DISABLED = 0x11
@@ -262,6 +265,7 @@ internal object SonyFeatures {
         r = readTouch(s, r)
         r = readTouchCap(s, r)
         r = readHeadGestures(s, r)
+        r = readAutoSwitch(s, r)
         r = readNoiseCycle(s, r)
         r = readGeneral(s, r)
         r = readPrompts(s, r)
@@ -500,6 +504,17 @@ internal object SonyFeatures {
         return readHeadGestures(s, r)
     }
 
+    // Automatic device switching, table 2: GET f6 0a -> [f7, 0a, 0 on / 1 off, 0, 0, address text]
+    private fun readAutoSwitch(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
+        val p = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_T2_AUTO_SWITCH), timeoutMs = 700, type = SonyProtocol.DATA_MDR_NO2) ?: return r
+        return if (p.size >= 3) r.copy(autoSwitch = u(p[2]) == 0x00) else r
+    }
+
+    fun setAutoSwitch(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
+        s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_T2_AUTO_SWITCH, if (on) 0x00 else 0x01, 0x00, 0x00), type = SonyProtocol.DATA_MDR_NO2)
+        return readAutoSwitch(s, r)
+    }
+
     /** Turns the earbuds off, like holding both sensors: POWER_SET_STATUS [03 power off, 01 by the user]. */
     fun powerOff(s: SonyBatteryClient.SonySession) {
         s.send(bytes(0x24, 0x03, 0x01))
@@ -643,7 +658,7 @@ object SettingsStore {
                 speakToChatSensitivity = SpeakToChatSensitivity.from(int("s2cSens")),
                 speakToChatTimeout = SpeakToChatTimeout.from(int("s2cTime")),
                 pauseWhenRemoved = bool("pause"), autoOffWhenRemoved = bool("autoOff"),
-                touchLeft = TouchFunction.from(int("tl")), touchRight = TouchFunction.from(int("tr")), touchCap = str("tcap"), headGestures = bool("hg"),
+                touchLeft = TouchFunction.from(int("tl")), touchRight = TouchFunction.from(int("tr")), touchCap = str("tcap"), headGestures = bool("hg"), autoSwitch = bool("asw"),
                 noiseCycle = NoiseCycle.from(int("cycle")),
                 general = if (o.has("gs")) o.getJSONArray("gs").let { a ->
                     (0 until a.length()).map { i ->
@@ -684,6 +699,7 @@ object SettingsStore {
         s.touchRight?.let { o.put("tr", it.code) }
         s.touchCap?.let { o.put("tcap", it) }
         s.headGestures?.let { o.put("hg", it) }
+        s.autoSwitch?.let { o.put("asw", it) }
         s.noiseCycle?.let { o.put("cycle", it.code) }
         s.general?.let { list ->
             o.put("gs", org.json.JSONArray().also { a ->

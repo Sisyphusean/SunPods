@@ -26,12 +26,15 @@ object Playback {
         val playing = status?.takeIf { it.size >= 4 }?.let {
             when (u(it[3])) { 0x01 -> true; 0x02, 0x03 -> false; else -> null }
         }
-        val name = s.request(bytes(GET_PARAM, CONTROL), timeoutMs = 700)
-        val title = name?.takeIf { it.size >= 4 && u(it[2]) == 0x02 }?.let {
-            val length = u(it[3])
-            if (it.size >= 4 + length) String(it, 4, length, Charsets.UTF_8).trim() else null
-        }
-        return NowPlaying(title?.ifBlank { null }, playing)
+        return NowPlaying(s.request(bytes(GET_PARAM, CONTROL), timeoutMs = 700)?.let(::title), playing)
+    }
+
+    /** The title from a RET 0xa7 [0x01, nameStatus, len, title..] reply; null when there's none. */
+    fun title(p: ByteArray): String? {
+        if (p.size < 4 || u(p[2]) != 0x02) return null
+        val length = u(p[3])
+        if (p.size < 4 + length) return null
+        return String(p, 4, length, Charsets.UTF_8).trim().ifBlank { null }
     }
 
     internal fun control(s: SonyBatteryClient.SonySession, action: Action) {

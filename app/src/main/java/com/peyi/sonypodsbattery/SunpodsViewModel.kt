@@ -210,6 +210,32 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         { it.copy(touchLeft = left ?: it.touchLeft, touchRight = right ?: it.touchRight) }
     ) { s, r -> SonyFeatures.setTouch(s, r, left, right) }
 
+    fun setAutoSwitch(on: Boolean) = change("Automatic Switching", { it.copy(autoSwitch = on) }) { s, r ->
+        SonyFeatures.setAutoSwitch(s, r, on)
+    }
+
+    private val _safe = MutableStateFlow(SafeListening.on(application) to SafeListening.sensitive(application))
+    /** Safe listening on, and volume protection set to sensitive. */
+    val safe: StateFlow<Pair<Boolean, Boolean>> = _safe.asStateFlow()
+
+    fun setSafeListening(on: Boolean) {
+        val before = _safe.value
+        _safe.value = before.copy(first = on)
+        viewModelScope.launch {
+            val ok = RefreshCoordinator.awaitSession(app, "Safe Listening", bothEarbuds = true) { SafeListening.setOn(app, it, on) }.getOrDefault(false)
+            if (!ok) { _safe.value = before; _message.value = "Couldn't change Safe Listening. Make sure your earbuds are connected, then try again." }
+        }
+    }
+
+    fun setVolumeProtection(sensitive: Boolean) {
+        val before = _safe.value
+        _safe.value = before.copy(second = sensitive)
+        viewModelScope.launch {
+            val ok = RefreshCoordinator.awaitSession(app, "Volume Protection", bothEarbuds = true) { SafeListening.setSensitive(app, it, sensitive) }.getOrDefault(false)
+            if (!ok) { _safe.value = before; _message.value = "Couldn't change volume protection. Make sure your earbuds are connected, then try again." }
+        }
+    }
+
     fun setHeadGestures(on: Boolean) = change("Head Gestures", { it.copy(headGestures = on) }) { s, r ->
         SonyFeatures.setHeadGestures(s, r, on)
     }

@@ -13,14 +13,16 @@ object VoiceAssistantSetting {
 
     /** The current choice and the choices the earbuds offer, or null if they don't have one. */
     internal fun read(s: SonyBatteryClient.SonySession): Pair<Int?, List<Int>>? {
-        // [f1 04 keyType count value..]
-        val cap = s.request(bytes(GET_CAPABILITY, TYPE), timeoutMs = 700) ?: return null
-        if (cap.size < 4) return null
-        val count = u(cap[3])
-        val options = (0 until count).mapNotNull { i -> cap.getOrNull(4 + i)?.let(::u) }
-        if (options.isEmpty()) return null
+        val options = s.request(bytes(GET_CAPABILITY, TYPE), timeoutMs = 700)?.let(::options) ?: return null
         val now = s.request(bytes(GET_PARAM, TYPE), timeoutMs = 700)?.takeIf { it.size >= 3 }?.let { u(it[2]) }
         return now to options
+    }
+
+    /** The choices from a capability reply [f1 04 keyType count value..]; null when there are none. */
+    fun options(cap: ByteArray): List<Int>? {
+        if (cap.size < 4) return null
+        val count = u(cap[3])
+        return (0 until count).mapNotNull { i -> cap.getOrNull(4 + i)?.let(::u) }.ifEmpty { null }
     }
 
     internal fun set(s: SonyBatteryClient.SonySession, value: Int) {
@@ -65,8 +67,10 @@ object FitTest {
 
     fun sizeLabel(size: Int) = when (size) { 0 -> "SS"; 1 -> "S"; 2 -> "M"; 3 -> "L"; 4 -> "LL"; else -> "?" }
 
-    internal fun tips(s: SonyBatteryClient.SonySession): Tips? {
-        val p = s.request(bytes(0xf0, TYPE), timeoutMs = 700) ?: return null
+    internal fun tips(s: SonyBatteryClient.SonySession): Tips? = s.request(bytes(0xf0, TYPE), timeoutMs = 700)?.let(::tips)
+
+    /** Tip sizes from a capability reply [f1 06 ? nSeries series nSizes size..]. */
+    fun tips(p: ByteArray): Tips? {
         if (p.size < 6 || u(p[3]) < 1) return null
         val series = u(p[4])
         val n = u(p[5])
@@ -118,5 +122,34 @@ object EarbudReset {
         s.send(byteArrayOf(0xf8.toByte(), 0x09, 0x00))
         val reply = s.waitFor(5_000) { f -> f.payload.size >= 3 && (f.payload[0].toInt() and 0xff) == 0xf9 && f.payload[1].toInt() == 0x09 }
         return reply == null || (reply.payload[2].toInt() and 0xff) == 0x00
+    }
+}
+
+/**
+ * Safe listening (table 2, inquired type 0x03 for true wireless earbuds): the earbuds measure how
+ * loud and how long you listen. Volume protection (type 0x04) limits loudness to the WHO guideline
+ * for adults or for sensitive listeners. The earbuds don't report either setting back, so the last
+ * choice is kept here, as Sound Connect does.
+ *   switch      58 03 [on/off, on/off]   0 on, 1 off
+ *   protection  54 04 [0 standard / 1 sensitive]
+ */
+object SafeListening {
+    private const val PREFS = "safe_listening"
+    private const val T2 = SonyProtocol.DATA_MDR_NO2
+
+    fun on(context: android.content.Context) = context.getSharedPreferences(PREFS, 0).getBoolean("on", true)
+    fun sensitive(context: android.content.Context) = context.getSharedPreferences(PREFS, 0).getBoolean("sensitive", false)
+
+    internal fun setOn(context: android.content.Context, s: SonyBatteryClient.SonySession, on: Boolean): Boolean {
+        val v = (if (on) 0x00 else 0x01).toByte()
+        val ok = s.command(byteArrayOf(0x58, 0x03, v, v), type = T2)
+        if (ok) context.getSharedPreferences(PREFS, 0).edit().putBoolean("on", on).apply()
+        return ok
+    }
+
+    internal fun setSensitive(context: android.content.Context, s: SonyBatteryClient.SonySession, sensitive: Boolean): Boolean {
+        val ok = s.command(byteArrayOf(0x54, 0x04, if (sensitive) 0x01 else 0x00), type = T2)
+        if (ok) context.getSharedPreferences(PREFS, 0).edit().putBoolean("sensitive", sensitive).apply()
+        return ok
     }
 }
