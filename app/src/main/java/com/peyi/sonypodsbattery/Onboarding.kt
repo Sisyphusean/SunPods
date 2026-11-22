@@ -1,5 +1,9 @@
 package com.peyi.sonypodsbattery
 
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.clickable
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
@@ -213,16 +217,42 @@ internal fun Onboarding(vm: SunpodsViewModel, onDone: () -> Unit) {
     val leAudio = remember { LeAudio.support(context) != LeAudio.Support.NOT_SUPPORTED }
     val order = Step.entries.filter { it != Step.LEAUDIO || leAudio }
     fun next() { step = order[(order.indexOf(step) + 1).coerceAtMost(order.lastIndex)] }
-    BackHandler(enabled = step != Step.WELCOME) { step = order[(order.indexOf(step) - 1).coerceAtLeast(0)] }
+    // Material predictive back: the step shrinks toward the finger, and letting go returns to it.
+    var backProgress by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var backCommitted by remember { mutableStateOf(false) }
+    androidx.activity.compose.PredictiveBackHandler(enabled = step != Step.WELCOME) { events ->
+        try {
+            events.collect { backProgress = it.progress }
+            backCommitted = true
+            step = order[(order.indexOf(step) - 1).coerceAtLeast(0)]
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            androidx.compose.animation.core.animate(backProgress, 0f, animationSpec = androidx.compose.animation.core.spring(stiffness = 500f)) { v, _ -> backProgress = v }
+        }
+    }
     val tick = resumeTick()
     LaunchedEffect(step, tick) {
         if (step.ordinal > Step.NEARBY.ordinal && !OnboardingStore.hasNearby(context)) step = Step.NEARBY
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+      Column(Modifier.fillMaxSize().systemBarsPadding()) {
+        // One bar for the whole setup, so it fills smoothly from step to step.
+        val fraction by androidx.compose.animation.core.animateFloatAsState(
+            order.indexOf(step).coerceAtLeast(0) / (order.size - 1).toFloat(),
+            androidx.compose.animation.core.spring(stiffness = androidx.compose.animation.core.Spring.StiffnessLow),
+            label = "progress"
+        )
+        androidx.compose.animation.AnimatedVisibility(step != Step.WELCOME, enter = fadeIn(), exit = fadeOut()) {
+            LinearProgressIndicator(
+                progress = { fraction },
+                modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 16.dp).clip(CircleShape)
+            )
+        }
         AnimatedContent(
             targetState = step,
+            modifier = Modifier.weight(1f),
             transitionSpec = {
+                if (backCommitted) return@AnimatedContent fadeIn(tween(120)).togetherWith(fadeOut(tween(80)))
                 val forward = targetState.ordinal > initialState.ordinal
                 // Material shared axis X, the same motion as pages in the app.
                 (slideInHorizontally(tween(320, easing = Motion.Arrive)) { if (forward) it / 4 else -it / 4 } + fadeIn(tween(200, delayMillis = 60)))
@@ -230,6 +260,17 @@ internal fun Onboarding(vm: SunpodsViewModel, onDone: () -> Unit) {
             },
             label = "onboarding"
         ) { s ->
+          LaunchedEffect(s) { backCommitted = false; backProgress = 0f }
+          Box(
+            if (s == step) Modifier.graphicsLayer {
+                val p = backProgress
+                scaleX = 1f - 0.1f * p; scaleY = 1f - 0.1f * p
+                translationX = p * 24.dp.toPx()
+                alpha = 1f - 0.25f * p
+                shape = RoundedCornerShape((28 * p).dp)
+                clip = p > 0f
+            } else Modifier
+          ) {
             when (s) {
                 Step.WELCOME -> WelcomeStep(onStart = ::next)
                 Step.NEARBY -> NearbyStep(tick, onNext = ::next)
@@ -239,7 +280,9 @@ internal fun Onboarding(vm: SunpodsViewModel, onDone: () -> Unit) {
                 Step.EXTRAS -> ExtrasStep(tick, onNext = ::next)
                 Step.DONE -> DoneStep(vm, onDone = onDone)
             }
+          }
         }
+      }
     }
 }
 
@@ -260,20 +303,21 @@ private fun Page(
     content: @Composable ColumnScope.() -> Unit = {}
 ) {
     val colors = MaterialTheme.colorScheme
-    Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 24.dp, vertical = 16.dp)) {
-        if (progress != null) {
-            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().clip(CircleShape))
-        }
+    @Suppress("UNUSED_VARIABLE") val unusedProgress = progress // the bar lives in the setup shell now
+    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
         Column(
             Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(top = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (art != null) art()
             else if (icon != null) {
+                // The app's icon language, larger: a tonal cookie in the theme's colours. Problems
+                // use the error container instead.
+                val warn = tone != null
                 Box(
-                    Modifier.size(88.dp).clip(CircleShape).background((tone ?: colors.primary).copy(alpha = 0.14f)),
+                    Modifier.size(96.dp).clip(CookieShape()).background(if (warn) colors.errorContainer else colors.secondaryContainer),
                     contentAlignment = Alignment.Center
-                ) { Icon(icon, contentDescription = null, tint = tone ?: colors.primary, modifier = Modifier.size(40.dp)) }
+                ) { Icon(icon, contentDescription = null, tint = if (warn) colors.onErrorContainer else colors.onSecondaryContainer, modifier = Modifier.size(44.dp)) }
             }
             Spacer(Modifier.height(28.dp))
             Text(
@@ -335,7 +379,7 @@ private fun WelcomeStep(onStart: () -> Unit) {
     ) {
         Feature(Icons.Rounded.BatteryChargingFull, "Battery at a Glance", "Widgets, low battery alerts and battery health")
         Feature(Icons.Rounded.GraphicEq, "Your Sound, One Tap Away", "Noise control, EQ, touch controls and more")
-        Feature(Icons.Rounded.Lock, "Private by Design", "No account and no internet. Everything stays on this phone.")
+        Feature(Icons.Rounded.Lock, "Private by Design", "No account and no tracking. Your data stays on this phone.")
     }
     pending?.let { (text, s) ->
         AlertDialog(
@@ -358,9 +402,9 @@ private fun WelcomeStep(onStart: () -> Unit) {
 
 @Composable
 private fun Feature(icon: ImageVector, title: String, body: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-        Spacer(Modifier.width(16.dp))
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        IconTile(icon)
+        Spacer(Modifier.width(14.dp))
         Column {
             Text(title, style = MaterialTheme.typography.titleSmall)
             Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -380,7 +424,7 @@ private fun NearbyStep(tick: Int, onNext: () -> Unit) {
         Perm.ASK, Perm.GRANTED -> Page(
             progress = progressOf(Step.NEARBY), icon = Icons.Rounded.Bluetooth,
             title = "Connect to Your Earbuds",
-            body = "SunPods needs Bluetooth to connect to your earbuds. Android calls this permission Nearby devices.",
+            body = "SunPods uses Bluetooth to talk to your earbuds. Android calls this Nearby devices.",
             primary = "Allow", onPrimary = gate.request
         )
         Perm.DENIED -> Page(
@@ -526,7 +570,13 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
 
     val progress = progressOf(Step.EARBUDS)
     val battery by vm.battery.collectAsState()
-    when (val s = state) {
+    androidx.compose.animation.AnimatedContent(
+        targetState = state,
+        contentKey = { it::class },
+        transitionSpec = { fadeThrough() },
+        label = "earbuds"
+    ) { s ->
+    when (s) {
         Buds.Checking -> Page(progress, icon = Icons.Rounded.Headphones, title = "Looking for Your Earbuds", body = "One moment.", primary = null) {
             CircularProgressIndicator()
         }
@@ -546,13 +596,21 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
                 )
             },
             title = "Pair Your Earbuds",
-            body = "Put both earbuds in the case and keep the lid open. Press and hold the button on the back of the case for 5 seconds, until the light flashes blue.",
+            body = "Get them ready, then tap Find My Earbuds.",
             primary = "Find My Earbuds", onPrimary = ::search,
             secondary = "Not Now", onSecondary = onNext
         ) {
-            note?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center) }
+            SunCard {
+                HowToRow(1, "Put both earbuds in the case and keep the lid open.")
+                RowDivider()
+                HowToRow(2, "Hold the button on the back for 5 seconds, until the light flashes blue.")
+            }
+            note?.let {
+                Spacer(Modifier.height(16.dp))
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+            }
         }
-        Buds.Searching -> Page(progress, icon = Icons.Rounded.BluetoothSearching, title = "Searching for Earbuds", body = "Choose WF-1000XM5 when it appears. Keep the case open and near your phone. If Google offers to connect them, that works too.", primary = null) {
+        Buds.Searching -> Page(progress, icon = Icons.Rounded.BluetoothSearching, title = "Searching for Earbuds", body = "Choose WF-1000XM5 when it appears. Keep the case open, near your phone.", primary = null) {
             CircularProgressIndicator()
         }
         Buds.Pairing -> Page(progress, icon = Icons.Rounded.BluetoothSearching, title = "Pairing Your Earbuds", body = "If Android asks you to confirm, tap Pair.", primary = null) {
@@ -606,6 +664,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
             secondary = "Open Bluetooth Settings", onSecondary = { openBluetoothSettings(context) }
         )
     }
+    }
 }
 
 private fun openBluetoothSettings(context: Context) = runCatching { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
@@ -628,13 +687,15 @@ private fun pickedDevice(context: Context, data: Intent?): BluetoothDevice? {
 /** Live levels as proof it works. */
 @Composable
 private fun Levels(battery: BatteryState) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+    SunCard {
+    Row(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
         listOf("Left" to battery.left, "Right" to battery.right, "Case" to battery.case).forEach { (label, level) ->
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(level?.takeIf { it in 1..100 }?.let { "$it%" } ?: (if (label == "Case") "Unknown" else "In Case"), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+    }
     }
 }
 
@@ -690,8 +751,8 @@ private fun LeAudioStep(vm: SunpodsViewModel, onNext: () -> Unit) {
     Page(
         progress = progressOf(Step.LEAUDIO), icon = androidx.compose.material.icons.Icons.Rounded.Call,
         title = if (on) "You're on LE Audio" else "Clearer Calls with LE Audio",
-        body = if (on) "Your earbuds are connected with LE Audio. You can switch back to Classic anytime in Controls."
-        else "LE Audio makes your voice sound clearer on calls. Connect to Two Devices and LDAC are off while it's on. You can switch back anytime in Controls.",
+        body = if (on) "Your earbuds are connected with LE Audio. You can switch back to Classic anytime in Controls > Calls."
+        else "Your voice sounds clearer on calls. Connect to Two Devices and LDAC turn off while it's on. Switch back anytime in Controls > Calls.",
         primary = if (on) "Continue" else "Use LE Audio",
         onPrimary = { if (on) onNext() else switching = true },
         secondary = if (on) null else "Not Now",
@@ -714,42 +775,47 @@ private fun UpdatesStep(tick: Int, onNext: () -> Unit) {
     Page(
         progress = progressOf(Step.UPDATES), icon = Icons.Rounded.Notifications,
         title = "Stay Up to Date",
-        body = "Keep the widget, alerts and automations working when SunPods is closed. SunPods only checks your earbuds every few minutes while they're connected.",
+        body = "Keep the widget, alerts and automations working when SunPods is closed.",
         primary = if (allSet) "Continue" else "Continue Without These",
         onPrimary = onNext
     ) {
-        if (!allSet) {
-            Text(
-                "Without these, the widget can fall behind and alerts may not arrive. You can turn them on later.",
-                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center
+        Column(Modifier.fillMaxWidth()) {
+            SunCard {
+                if (notify != null) {
+                    SetupRow(
+                        Icons.Rounded.Notifications, "Notifications", "Low battery alerts",
+                        done = notify.state == Perm.GRANTED,
+                        action = if (notify.state == Perm.BLOCKED) "Settings" else "Allow"
+                    ) { if (notify.state == Perm.BLOCKED) openNotificationSettings(context) else notify.request() }
+                    RowDivider()
+                }
+                SetupRow(
+                    Icons.Rounded.BatteryChargingFull, "Run in Background", "So your phone doesn't close SunPods",
+                    done = unrestricted, action = "Allow"
+                ) { BackgroundAccess.request(context) }
+            }
+            Footer(
+                if (allSet) "SunPods checks your earbuds every few minutes, only while they're connected."
+                else "Without these, the widget can fall behind and alerts may not arrive."
             )
-            Spacer(Modifier.height(12.dp))
         }
-        if (notify != null) SetupRow(
-            Icons.Rounded.Notifications, "Notifications", "Alerts when your earbuds or case are running low",
-            done = notify.state == Perm.GRANTED,
-            action = if (notify.state == Perm.BLOCKED) "Settings" else "Allow"
-        ) { if (notify.state == Perm.BLOCKED) openNotificationSettings(context) else notify.request() }
-        SetupRow(
-            Icons.Rounded.BatteryChargingFull, "Run in Background", "Stops your phone from closing SunPods",
-            done = unrestricted, action = "Allow"
-        ) { BackgroundAccess.request(context) }
     }
 }
 
+/** A row in a setup card: icon tile, title and a short note, then a button that turns into a tick once it's done. */
 @Composable
 private fun SetupRow(icon: ImageVector, title: String, body: String, done: Boolean, action: String, onAction: () -> Unit) {
     val colors = MaterialTheme.colorScheme
-    Surface(shape = RoundedCornerShape(20.dp), color = colors.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = colors.primary)
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                Text(body, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
-            }
-            Spacer(Modifier.width(12.dp))
-            if (done) Icon(Icons.Rounded.CheckCircle, contentDescription = "On", tint = colors.primary)
+    SettingRow(icon, title, note = body) {
+        androidx.compose.animation.AnimatedContent(
+            done,
+            transitionSpec = {
+                (fadeIn(tween(200, delayMillis = 60)) + androidx.compose.animation.scaleIn(tween(260, easing = Motion.Arrive), initialScale = 0.6f))
+                    .togetherWith(fadeOut(tween(90)))
+            },
+            label = "setup"
+        ) { d ->
+            if (d) Icon(Icons.Rounded.CheckCircle, contentDescription = "On", tint = colors.primary, modifier = Modifier.size(28.dp))
             else FilledTonalButton(onClick = onAction) { Text(action) }
         }
     }
@@ -775,59 +841,61 @@ private fun ExtrasStep(tick: Int, onNext: () -> Unit) {
         body = "Turn these on now or later.",
         primary = "Continue", onPrimary = onNext
     ) {
-        Surface(shape = RoundedCornerShape(20.dp), color = colors.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-            Column(Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.LocationOn, contentDescription = null, tint = colors.primary)
-                    Spacer(Modifier.width(16.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Last Seen", style = MaterialTheme.typography.titleSmall)
-                        Text("Saves where your earbuds disconnect in case you lose them. Locations stay on this phone.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Switch(checked = lastSeen, onCheckedChange = { on ->
+        Column(Modifier.fillMaxWidth()) {
+            SunCard {
+                SettingRow(
+                    Icons.Rounded.LocationOn, "Last Seen",
+                    note = "Where your earbuds last disconnected",
+                    modifier = Modifier.toggleable(value = lastSeen, role = androidx.compose.ui.semantics.Role.Switch) { on ->
                         if (!on) { LastSeenStore.setEnabled(context, false); lastSeen = false }
                         else if (location.state == Perm.GRANTED) { LastSeenStore.setEnabled(context, true); lastSeen = true }
                         else if (location.state == Perm.BLOCKED) openAppSettings(context)
                         else { wantLastSeen = true; location.request() }
-                    })
-                }
-                if (refused) {
-                    Spacer(Modifier.height(12.dp))
+                    }
+                ) { Switch(checked = lastSeen, onCheckedChange = null) }
+                androidx.compose.animation.AnimatedVisibility(refused, enter = revealIn(), exit = revealOut()) {
                     Text(
                         if (location.state == Perm.BLOCKED) "Location is off for SunPods. Turn it on in Settings to use Last Seen."
                         else "Location wasn't allowed, so Last Seen is off.",
-                        style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant
+                        style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(start = RowTextStart, end = 16.dp, bottom = 12.dp)
                     )
                 }
-                if (lastSeen && background.state != Perm.GRANTED) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        "To save locations when SunPods is closed, choose Allow all the time.",
-                        style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant
-                    )
-                    TextButton(onClick = { if (background.state == Perm.BLOCKED) openAppSettings(context) else background.request() }) {
-                        Text("Allow All the Time")
+                androidx.compose.animation.AnimatedVisibility(lastSeen && background.state != Perm.GRANTED, enter = revealIn(), exit = revealOut()) {
+                    Column {
+                        RowDivider()
+                        SettingRow(
+                            null, "Allow All the Time",
+                            note = "Saves the spot even when SunPods is closed",
+                            modifier = Modifier.clickable { if (background.state == Perm.BLOCKED) openAppSettings(context) else background.request() }
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = colors.outline)
+                        }
                     }
                 }
+                RowDivider()
+                SettingRow(Icons.Rounded.GraphicEq, "Automations", note = "Set them up later in Controls")
             }
+            Footer("Locations stay on this phone. Automations change noise control on calls, while you walk or run, in Do Not Disturb, or by Wi-Fi.")
         }
-        SetupInfo(Icons.Rounded.GraphicEq, "Automations", "Change noise control by place, while walking, on calls or in Focus. Set them up in Controls.")
     }
 }
 
 @Composable
 private fun SetupInfo(icon: ImageVector, title: String, body: String) {
+    SunCard { SettingRow(icon, title, note = body) }
+}
+
+/** A numbered instruction, for steps you do with your hands. */
+@Composable
+private fun HowToRow(n: Int, text: String) {
     val colors = MaterialTheme.colorScheme
-    Surface(shape = RoundedCornerShape(20.dp), color = colors.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = colors.primary)
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                Text(body, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
-            }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(TileSize).clip(CookieShape()).background(colors.secondaryContainer), contentAlignment = Alignment.Center) {
+            Text("$n", style = MaterialTheme.typography.titleMedium, color = colors.onSecondaryContainer)
         }
+        Spacer(Modifier.width(14.dp))
+        Text(text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
     }
 }
 
@@ -848,11 +916,13 @@ private fun DoneStep(vm: SunpodsViewModel, onDone: () -> Unit) {
         onPrimary = { OnboardingStore.setDone(context, true); onDone() }
     ) {
         if (connected) { Levels(battery); Spacer(Modifier.height(24.dp)) }
-        SetupRow(
-            Icons.Rounded.Widgets, "Add a Widget",
-            if (pinned) "Added. Check your home screen, or add another size." else "See your battery on the home screen. Small, medium or large.",
-            done = false, action = "Choose"
-        ) { picking = true }
+        SunCard {
+            SetupRow(
+                Icons.Rounded.Widgets, "Add a Widget",
+                if (pinned) "Added. Check your home screen" else "Your battery on the home screen",
+                done = false, action = if (pinned) "Another" else "Choose"
+            ) { picking = true }
+        }
         if (picking) WidgetPickerSheet(onDismiss = { picking = false }, onRequested = { pinned = true })
     }
 }

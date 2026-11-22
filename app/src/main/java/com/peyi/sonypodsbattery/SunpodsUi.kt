@@ -402,6 +402,21 @@ fun SunpodsApp(
     var backProgress by remember { mutableFloatStateOf(0f) }
     var backFromLeft by remember { mutableStateOf(true) }
     var backCommitted by remember { mutableStateOf(false) }
+    val snackbar = remember { SnackbarHostState() }
+    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    // Each tab keeps its place, title bar included, so coming back from a page or another tab
+    // lands exactly where you left. A page opens at its top, every time.
+    val navScope = rememberCoroutineScope()
+    val tabScroll = remember { mutableMapOf<Tab, androidx.compose.foundation.ScrollState>() }
+    val tabBar = remember { mutableMapOf<Tab, Float>() }
+    val pageScroll = remember(page) { androidx.compose.foundation.ScrollState(0) }
+    val listScroll = if (page == null) tabScroll.getOrPut(tab) { androidx.compose.foundation.ScrollState(0) } else pageScroll
+    fun go(toTab: Tab, toPage: Page?) {
+        if (page == null) tabBar[tab] = scroll.state.heightOffset
+        scroll.state.heightOffset = if (toPage == null) tabBar[toTab] ?: 0f else 0f
+        tab = toTab
+        page = toPage
+    }
     androidx.activity.compose.PredictiveBackHandler(enabled = page != null) { events ->
         try {
             events.collect { e ->
@@ -409,7 +424,7 @@ fun SunpodsApp(
                 backProgress = e.progress
             }
             backCommitted = true
-            page = null
+            go(tab, null)
         } catch (e: kotlin.coroutines.cancellation.CancellationException) {
             // Gesture let go: spring back into place.
             androidx.compose.animation.core.animate(backProgress, 0f, animationSpec = spring(stiffness = 500f)) { v, _ -> backProgress = v }
@@ -417,8 +432,6 @@ fun SunpodsApp(
             if (page == null) backProgress = 0f
         }
     }
-    val snackbar = remember { SnackbarHostState() }
-    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val buzz = rememberBuzz()
     val refresh = { if (hasPermission) vm.refreshAll() else onRequestPermission() }
     // The refresh arrow turns while SunPods talks to the earbuds, then eases into place.
@@ -454,7 +467,7 @@ fun SunpodsApp(
             LargeTopAppBar(
                 title = { Text(page?.title ?: if (tab == Tab.HOME) "SunPods" else tab.label) },
                 navigationIcon = {
-                    if (page != null) IconButton(onClick = { page = null }) {
+                    if (page != null) IconButton(onClick = { go(tab, null) }) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back to ${tab.label}")
                     }
                 },
@@ -474,7 +487,14 @@ fun SunpodsApp(
                 scrollBehavior = scroll
             )
         },
-        bottomBar = { SunTabBar(tab) { tab = it; page = null } },
+        bottomBar = {
+            SunTabBar(tab) { t ->
+                if (t == tab && page == null) navScope.launch {
+                    listScroll.animateScrollTo(0, tween(420, easing = Motion.Arrive))
+                    scroll.state.heightOffset = 0f
+                } else go(t, null)
+            }
+        },
         snackbarHost = { SnackbarHost(snackbar) }
     ) { padding ->
         PullToRefreshBox(
@@ -485,7 +505,7 @@ fun SunpodsApp(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(remember(tab, page) { androidx.compose.foundation.ScrollState(0) })
+                    .verticalScroll(listScroll)
                     .padding(horizontal = Gutter)
                     .padding(top = 8.dp, bottom = 48.dp),
                 verticalArrangement = Arrangement.spacedBy(GroupGap)
@@ -493,7 +513,7 @@ fun SunpodsApp(
                 if (!hasPermission) PermissionBanner(onRequestPermission)
                 // Pages fade and rise slightly into place, so a tab change feels like one motion.
                 // A tab change fades and rises; a page slides in from the side, like a push.
-                androidx.compose.runtime.CompositionLocalProvider(LocalOpenPage provides { page = it }) {
+                androidx.compose.runtime.CompositionLocalProvider(LocalOpenPage provides { go(tab, it) }) {
                     androidx.compose.animation.AnimatedContent(
                         targetState = tab to page,
                         transitionSpec = {
