@@ -89,7 +89,7 @@ internal fun DevicesCard(connected: Boolean, leOn: Boolean = false) {
                     colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
                 )
             }
-            Footer("On LE Audio your earbuds connect to one device at a time. Switch to Classic in Controls to see your devices or use two at once.")
+            Footer("On LE Audio, your earbuds connect to one device at a time. Switch to Classic in Controls > Calls to use two at once.")
         }
         return
     }
@@ -134,14 +134,14 @@ internal fun DevicesCard(connected: Boolean, leOn: Boolean = false) {
                 }
             }
         }
-        Footer(note ?: "To use two devices at the same time, turn on Connect to Two Devices. A forgotten device needs to pair again to reconnect.")
+        Footer(note ?: "Tap ⋮ to connect, disconnect or forget a device.")
     }
 
     forgetting?.let { d ->
         AlertDialog(
             onDismissRequest = { forgetting = null },
             title = { Text("Forget ${d.name}?") },
-            text = { Text("Your earbuds will no longer connect to this device. To use it again, pair it from its Bluetooth settings.") },
+            text = { Text("Your earbuds won't connect to it anymore. To use it again, pair it from its Bluetooth settings.") },
             confirmButton = {
                 TextButton(onClick = {
                     forgetting = null
@@ -245,7 +245,7 @@ private fun PairRow(pairing: Boolean, enabled: Boolean, onChange: (Boolean) -> U
             Spacer(Modifier.width(16.dp))
             Text(if (pairing) "Stop Pairing" else "Pair a New Device", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         }
-        AnimatedVisibility(pairing) {
+        AnimatedVisibility(pairing, enter = revealIn(), exit = revealOut()) {
             Text(
                 "Your earbuds are ready to pair. On the other device, open Bluetooth settings and choose WF-1000XM5.",
                 style = MaterialTheme.typography.bodyMedium,

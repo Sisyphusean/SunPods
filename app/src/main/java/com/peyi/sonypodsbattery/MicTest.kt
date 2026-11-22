@@ -1,5 +1,6 @@
 package com.peyi.sonypodsbattery
 
+import androidx.compose.animation.animateContentSize
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
@@ -147,7 +148,7 @@ internal object MicTest {
 
     /** Plain-language verdicts, most important first. */
     fun verdicts(a: Analysis): List<String> = buildList {
-        if (a.voiceDb < -42) add("Your voice is very quiet. Make sure both earbuds fit snugly, as they also pick up your voice through your ear.")
+        if (a.voiceDb < -42) add("Your voice is very quiet. Make sure both earbuds fit snugly, since they also hear you through your ears.")
         else if (a.voiceDb < -32) add("Your voice is a little quiet. A snugger fit or speaking slightly louder can help.")
         if (a.voiceDb - a.noiseDb < 15) add("Background noise is loud compared with your voice. Callers may find it hard to hear you here.")
         if (a.clipped > 0.01) add("Some parts were too loud and sounded distorted.")
@@ -179,7 +180,7 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
             val device = MicTest.routeToEarbuds(context)
             if (device == null) {
                 MicTest.release(context)
-                state = MicState.Failed("Can't use your earbuds' mic. Make sure they're connected and try again.")
+                state = MicState.Failed("Couldn't use your earbuds' mic. Make sure they're connected and try again.")
                 return@launch
             }
             try {
@@ -209,7 +210,7 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
     }
 
     ModalBottomSheet(onDismissRequest = { MicTest.release(context); onDismiss() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp).navigationBarsPadding()) {
+        Column(Modifier.fillMaxWidth().animateContentSize(androidx.compose.animation.core.spring(stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow)).padding(horizontal = 24.dp).padding(bottom = 24.dp).navigationBarsPadding()) {
             Text("Test Your Call Mic", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
             val colors = MaterialTheme.colorScheme
@@ -231,18 +232,18 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
                     Button(onClick = ::start, modifier = Modifier.fillMaxWidth()) { Text("Start Recording") }
                 }
                 MicState.Starting -> {
-                    Text("Switching your earbuds to call mode.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                    Text("Getting your mic ready…", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
                     Spacer(Modifier.height(20.dp)); CircularProgressIndicator()
                 }
                 is MicState.Recording -> {
-                    Text("Recording. Talk the way you would on a call.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Recording. Talk like you would on a call.", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(16.dp))
                     LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth().height(10.dp).clip(CircleShape))
                     Spacer(Modifier.height(8.dp))
                     Text("${s.left} sec left", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
                 }
                 MicState.Playing -> {
-                    Text("Playing it back through your earbuds.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Playing it back…", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(20.dp)); CircularProgressIndicator()
                 }
                 is MicState.Done -> {

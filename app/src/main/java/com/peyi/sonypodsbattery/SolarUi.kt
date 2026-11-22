@@ -216,7 +216,9 @@ internal fun SolarHero(
     val bob by motion.animateFloat(-1f, 1f, infiniteRepeatable(tween(2800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "bob")
     val tilt by motion.animateFloat(-1f, 1f, infiniteRepeatable(tween(4300, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "tilt")
     val bump = remember { Animatable(1f) }
+    val firstMode = remember { booleanArrayOf(true) }
     LaunchedEffect(mode) {
+        if (firstMode[0]) { firstMode[0] = false; return@LaunchedEffect }
         bump.snapTo(0.96f)
         bump.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 300f))
     }

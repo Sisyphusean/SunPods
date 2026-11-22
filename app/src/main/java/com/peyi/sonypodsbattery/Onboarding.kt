@@ -224,8 +224,9 @@ internal fun Onboarding(vm: SunpodsViewModel, onDone: () -> Unit) {
             targetState = step,
             transitionSpec = {
                 val forward = targetState.ordinal > initialState.ordinal
-                (slideInHorizontally { if (forward) it / 4 else -it / 4 } + fadeIn(tween(250)))
-                    .togetherWith(slideOutHorizontally { if (forward) -it / 4 else it / 4 } + fadeOut(tween(200)))
+                // Material shared axis X, the same motion as pages in the app.
+                (slideInHorizontally(tween(320, easing = Motion.Arrive)) { if (forward) it / 4 else -it / 4 } + fadeIn(tween(200, delayMillis = 60)))
+                    .togetherWith(slideOutHorizontally(tween(320, easing = Motion.Arrive)) { if (forward) -it / 4 else it / 4 } + fadeOut(tween(90)))
             },
             label = "onboarding"
         ) { s ->
@@ -307,7 +308,7 @@ private fun WelcomeStep(onStart: () -> Unit) {
         scope.launch {
             withContext(Dispatchers.IO) { runCatching { Backup.read(context, uri).let { it to Backup.inspect(it) } } }
                 .onSuccess { pending = it }
-                .onFailure { android.widget.Toast.makeText(context, it.message ?: "Can't open this file. Choose a SunPods backup.", android.widget.Toast.LENGTH_LONG).show() }
+                .onFailure { android.widget.Toast.makeText(context, it.message ?: "Couldn't open this file. Choose a SunPods backup.", android.widget.Toast.LENGTH_LONG).show() }
         }
     }
     val colors = MaterialTheme.colorScheme
@@ -470,7 +471,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         note = null
         pairNew = false
         val device = pickedDevice(context, result.data)
-        if (device == null) { state = Buds.Failed("Couldn't identify the earbuds you chose. Try again."); return@rememberLauncherForActivityResult }
+        if (device == null) { state = Buds.Failed("Couldn't recognise those earbuds. Try again."); return@rememberLauncherForActivityResult }
         state = if (device.bondState == BluetoothDevice.BOND_BONDED) Buds.Waiting
         else if (device.createBond()) Buds.Pairing else Buds.Failed("Pairing didn't start. Make sure the case light is flashing blue, then try again.")
     }
@@ -502,7 +503,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
     fun search() {
         note = null
         val cdm = context.getSystemService(CompanionDeviceManager::class.java)
-        if (cdm == null) { state = Buds.Failed("This phone can't search for earbuds in SunPods. Pair them in Bluetooth settings instead."); return }
+        if (cdm == null) { state = Buds.Failed("SunPods can't search for earbuds on this phone. Pair them in Bluetooth settings instead."); return }
         state = Buds.Searching
         val filter = BluetoothDeviceFilter.Builder()
             .setNamePattern(Pattern.compile(".*WF[- ]?1000XM5.*", Pattern.CASE_INSENSITIVE))

@@ -1,5 +1,6 @@
 package com.peyi.sonypodsbattery
 
+import androidx.compose.animation.animateContentSize
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
@@ -84,7 +85,7 @@ internal object EarbudAddresses {
 internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess: Boolean = false, onDone: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var state by remember { mutableStateOf<Switch>(Switch.Working("Updating your earbuds.")) }
+    var state by remember { mutableStateOf<Switch>(Switch.Working("Updating your earbuds…")) }
     var flow by remember { mutableStateOf<Job?>(null) }
     var pairing by remember { mutableStateOf(false) }
     var shizuku by remember { mutableStateOf(ShizukuBluetooth.state()) }
@@ -146,7 +147,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
             }
             // Levels only exist while connected; without a link "wear both earbuds" would be wrong.
             val connected = classicConnected(context) || LeAudio.anyConnected(context)
-            if (!connected) { state = Switch.Failed("Your earbuds aren't connected. Tap Reconnect Your Earbuds in Controls first."); return@launch }
+            if (!connected) { state = Switch.Failed("Your earbuds aren't connected. Reconnect them in Controls > Calls first."); return@launch }
             if (!bothEarbudsIn()) { state = Switch.Failed("Wear both earbuds, then try again."); return@launch }
             // Switching needs the phone's pairings changed, which only Shizuku lets SunPods do.
             // Without it nothing is sent to the earbuds, so they can't be left half switched.
@@ -156,13 +157,13 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 state = Switch.PrepareShizuku
                 return@launch
             }
-            state = Switch.Working("Updating your earbuds.")
+            state = Switch.Working("Updating your earbuds…")
             ShizukuWatch.start(context)
             // Checked again right before the earbuds change: the phone may have closed Shizuku.
             if (ShizukuBluetooth.state() != ShizukuBluetooth.State.READY) { pendingLe = true; state = Switch.PrepareShizuku; return@launch }
             SonyControlSessionManager.setClassicOnly(context, false)
             if (!switchEarbuds(true)) {
-                state = Switch.Failed("Your earbuds didn't switch. Close Sony Sound Connect, then try again.")
+                state = Switch.Failed("Couldn't switch. If Sony Sound Connect is open, close it and try again.")
                 return@launch
             }
             // A switch to Classic with Shizuku turns LE Audio off for the earbuds; allow it again.
@@ -173,7 +174,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
             // A phone that has never paired the earbuds' LE side can't reconnect by itself, so go
             // straight to pairing instead of waiting.
             val firstTime = !lePairingExists()
-            state = Switch.Working(if (firstTime) "Updating your earbuds." else "Your earbuds are reconnecting. This can take up to a minute.")
+            state = Switch.Working(if (firstTime) "Updating your earbuds…" else "Your earbuds are reconnecting. This can take up to a minute.")
             if (waitUntil(if (firstTime) 4_000 else 60_000) { LeAudio.anyConnected(context) }) {
                 log("on LE Audio without pairing again")
                 state = Switch.Done("Your earbuds are now on LE Audio.")
@@ -186,7 +187,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 state = Switch.Done(if (closeOnSuccess) "Your earbuds are now on LE Audio." else "Your earbuds are now on LE Audio. Test your call mic to hear the difference.")
             } else {
                 // Some phones say they support LE Audio but only accept certain earbuds over it.
-                state = Switch.Failed("Your phone didn't connect over LE Audio. It may not support LE Audio with these earbuds. Go back to Classic to keep using them.", canRevert = true)
+                state = Switch.Failed("Your phone couldn't connect using LE Audio. It may not support LE Audio with these earbuds. Switch back to Classic to keep using them.", canRevert = true)
             }
         }
     }
@@ -204,7 +205,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 state = Switch.PrepareShizuku
                 return@launch
             }
-            state = Switch.Working("Updating your earbuds.")
+            state = Switch.Working("Updating your earbuds…")
             ShizukuWatch.start(context)
             if (ShizukuBluetooth.state() != ShizukuBluetooth.State.READY) { pendingLe = false; state = Switch.PrepareShizuku; return@launch }
             if (!switchEarbuds(false)) {
@@ -214,7 +215,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 if (ShizukuBluetooth.state() == ShizukuBluetooth.State.READY) {
                     log("earbuds not reachable, pairing Classic again")
                     SonyControlSessionManager.releaseLe(context)
-                    state = Switch.Working("Reconnecting your earbuds. If this takes long, put them in your ears and hold both touch sensors for 5 seconds.")
+                    state = Switch.Working("Reconnecting… If this takes a while, put your earbuds in and hold both touch sensors for 5 seconds.")
                     if (finishClassicWithShizuku(justSwitched = false)) {
                         // The phone is on Classic now, but the earbuds may still be set to LE: they
                         // sometimes ignore the switch over LE while settling in. Over Classic they
@@ -223,10 +224,10 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                         state = Switch.Done("Your earbuds are connected on Classic.")
                         return@launch
                     }
-                    state = Switch.Failed("Couldn't reach your earbuds. Take them out of the case, put them in your ears, then try again.")
+                    state = Switch.Failed("Couldn't reach your earbuds. Put them in your ears and try again.")
                     return@launch
                 }
-                state = Switch.Failed("Your earbuds didn't switch to Classic. Keep both earbuds in your ears, then try again.")
+                state = Switch.Failed("Couldn't switch to Classic. Keep both earbuds in your ears and try again.")
                 return@launch
             }
             // Let go of the earbuds' LE side, or they stay on LE Audio waiting for the phone.
@@ -360,7 +361,12 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
     LaunchedEffect(Unit) { if (on) toLe() else toClassic() }
 
     // In onboarding the page behind says it worked, so don't make the user tap Done as well.
-    LaunchedEffect(state) { if (closeOnSuccess && state is Switch.Done) onDone() }
+    // Let the success land for a moment, then slide the sheet away rather than cutting it.
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val close: () -> Unit = { scope.launch { sheet.hide(); onDone() } }
+    LaunchedEffect(state) {
+        if (closeOnSuccess && state is Switch.Done) { kotlinx.coroutines.delay(700); sheet.hide(); onDone() }
+    }
 
     // Shizuku can be started or allowed while the sheet is open.
     LaunchedEffect(state) {
@@ -384,13 +390,22 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
     val openBluetooth = { runCatching { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }; Unit }
     val target = if (on) "LE Audio" else "Classic"
 
-    ModalBottomSheet(onDismissRequest = onDone, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(onDismissRequest = onDone, sheetState = sheet) {
+        // Each step fades through to the next and the sheet resizes smoothly. Progress text within
+        // a step just updates, without replaying the transition.
+        androidx.compose.animation.AnimatedContent(
+            targetState = state,
+            contentKey = { it::class },
+            transitionSpec = { fadeThrough() },
+            label = "switch"
+        ) { s ->
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+            Modifier.fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp).padding(bottom = 24.dp).navigationBarsPadding()
         ) {
             Text(
-                when (state) {
+                when (s) {
                     Switch.PrepareShizuku -> "Turn On Shizuku"
                     Switch.PairLe -> "Pair Your Earbuds for LE Audio"
                     Switch.PairClassic -> "Pair Your Earbuds for Classic"
@@ -399,12 +414,12 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 style = MaterialTheme.typography.titleLarge
             )
             Spacer(Modifier.height(12.dp))
-            when (val s = state) {
+            when (s) {
                 is Switch.Working -> Busy(s.text)
                 Switch.PrepareShizuku -> {
                     val running = shizuku != ShizukuBluetooth.State.NOT_RUNNING
                     Text(
-                        "To switch between Classic and LE Audio, your phone has to pair with your earbuds again. Shizuku, a free helper app, lets SunPods do that for you. Nothing changes on your earbuds until Shizuku is running.",
+                        "Switching between Classic and LE Audio means pairing your earbuds again. Shizuku, a free helper app, lets SunPods do it for you. Nothing changes until Shizuku is running.",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(Modifier.height(16.dp))
@@ -425,7 +440,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                         Modifier.fillMaxWidth().height(200.dp)
                     )
                     Spacer(Modifier.height(8.dp))
-                    Text("Your earbuds are on LE Audio. Your phone needs to pair with them again to use it.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Your earbuds are on LE Audio. Pair them with your phone again to use it.", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(16.dp))
                     if (shizuku == ShizukuBluetooth.State.READY && !manual) {
                         Step(1, "Put both earbuds in the case and keep the lid open.")
@@ -460,7 +475,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                         Modifier.fillMaxWidth().height(200.dp)
                     )
                     Spacer(Modifier.height(8.dp))
-                    Text("Your earbuds are on Classic. Your phone needs to pair with them again to use it.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Your earbuds are on Classic. Pair them with your phone again to use it.", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(16.dp))
                     if (shizuku == ShizukuBluetooth.State.READY) {
                         Step(1, "Put both earbuds in the case and keep the lid open. Hold the button on the back of the case until the light flashes blue.")
@@ -481,7 +496,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 is Switch.Done -> {
                     Text(s.message, style = MaterialTheme.typography.bodyLarge)
                     Spacer(Modifier.height(20.dp))
-                    Button(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text("Done") }
+                    Button(onClick = close, modifier = Modifier.fillMaxWidth()) { Text("Done") }
                 }
                 is Switch.Failed -> {
                     Text(s.message, style = MaterialTheme.typography.bodyLarge)
@@ -494,9 +509,10 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                         Button(onClick = openBluetooth, modifier = Modifier.fillMaxWidth()) { Text("Open Bluetooth Settings") }
                     }
                     Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text("Close") }
+                    TextButton(onClick = close, modifier = Modifier.fillMaxWidth()) { Text("Close") }
                 }
             }
+        }
         }
     }
 }

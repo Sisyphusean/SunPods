@@ -573,7 +573,7 @@ private object SonyCommandCoordinator {
         val target = client.findEarbuds()
             ?: return Result.failure(EarbudsUnavailableException("Pair your WF-1000XM5 in Bluetooth settings, then try again."))
         if (A2dpConnectionHelper.isConnected(app, target) == false) {
-            return Result.failure(EarbudsUnavailableException("Your earbuds aren't connected. Connect them and try again."))
+            return Result.failure(EarbudsUnavailableException("Your earbuds aren't connected. Open the case near your phone and try again."))
         }
         val wasConnected = SonyControlSessionManager.currentState() == SonySessionState.CONNECTED
         return try {
@@ -706,7 +706,7 @@ private object SonyCommandCoordinator {
                 null -> {
                     DiagnosticsStore.add(app, "A2DP state unavailable; refresh skipped")
                     command.onComplete?.invoke()
-                    return persistCheckedState(previous.copy(status = "Can't check the connection to your earbuds. Try again."))
+                    return persistCheckedState(previous.copy(status = "Couldn't check your earbuds' connection. Try again."))
                 }
             }
         }
@@ -748,13 +748,13 @@ private object SonyCommandCoordinator {
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
             DiagnosticsStore.add(app, "Refresh failed: ${error.javaClass.simpleName}: ${error.message}")
-            persistCheckedState(previous.copy(status = "Can't reach your earbuds. Close Sony Sound Connect and try again."))
+            persistCheckedState(previous.copy(status = "Couldn't reach your earbuds. If Sony Sound Connect is open, close it and try again."))
         } catch (error: SecurityException) {
             DiagnosticsStore.add(app, "Refresh blocked: ${error.message ?: error.javaClass.simpleName}")
-            persistCheckedState(previous.copy(status = "Android blocked Bluetooth access. Share diagnostics from the Device tab."))
+            persistCheckedState(previous.copy(status = "Android blocked Bluetooth access. Send diagnostics from Device > Help and About."))
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Refresh failed: ${error.javaClass.simpleName}: ${error.message}")
-            persistCheckedState(previous.copy(status = "Can't reach your earbuds. Close Sony Sound Connect and try again."))
+            persistCheckedState(previous.copy(status = "Couldn't reach your earbuds. If Sony Sound Connect is open, close it and try again."))
         }
 
         if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED &&
@@ -805,7 +805,7 @@ private object SonyCommandCoordinator {
                     DiagnosticsStore.add(app, "A2DP state unavailable; control command skipped")
                     return finishControlCommand(
                         app,
-                        previous.copy(status = "Can't check the connection to your earbuds. Try again."),
+                        previous.copy(status = "Couldn't check your earbuds' connection. Try again."),
                         command.requestedAtMillis
                     )
                 }
@@ -832,10 +832,10 @@ private object SonyCommandCoordinator {
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
             DiagnosticsStore.add(app, "Listening mode terminal failure: ${error.javaClass.simpleName}: ${error.message}")
-            previous.copy(status = "Can't change noise control. Close Sony Sound Connect and try again.")
+            previous.copy(status = "Couldn't change noise control. If Sony Sound Connect is open, close it and try again.")
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Listening mode failed: ${error.javaClass.simpleName}: ${error.message}")
-            previous.copy(status = "Can't change noise control. Close Sony Sound Connect and try again.")
+            previous.copy(status = "Couldn't change noise control. If Sony Sound Connect is open, close it and try again.")
         }
 
         return finishControlCommand(app, state, command.requestedAtMillis)
@@ -864,7 +864,7 @@ private object SonyCommandCoordinator {
                     DiagnosticsStore.add(app, "A2DP state unavailable; control command skipped")
                     return finishControlCommand(
                         app,
-                        previous.copy(status = "Can't check the connection to your earbuds. Try again."),
+                        previous.copy(status = "Couldn't check your earbuds' connection. Try again."),
                         command.requestedAtMillis
                     )
                 }
@@ -891,10 +891,10 @@ private object SonyCommandCoordinator {
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
             DiagnosticsStore.add(app, "Ambient level terminal failure: ${error.javaClass.simpleName}: ${error.message}")
-            previous.copy(status = "Can't change the Ambient Sound level. Close Sony Sound Connect and try again.")
+            previous.copy(status = "Couldn't change Ambient Sound. If Sony Sound Connect is open, close it and try again.")
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Ambient level failed: ${error.javaClass.simpleName}: ${error.message}")
-            previous.copy(status = "Can't change the Ambient Sound level. Close Sony Sound Connect and try again.")
+            previous.copy(status = "Couldn't change Ambient Sound. If Sony Sound Connect is open, close it and try again.")
         }
 
         return finishControlCommand(app, state, command.requestedAtMillis)

@@ -91,11 +91,11 @@ object FitTest {
                     error != 0 || u(p[2]) == 0x02 || u(p[2]) == 0x03
                 } else false
             }
-            if (done == null) return Result(null, null, "The test didn't finish. Keep both earbuds in and try again.")
+            if (done == null) return Result(null, null, "The test stopped early. Keep both earbuds in your ears and try again.")
             if (error != 0) return Result(null, null, errorText(error))
             val r = s.request(bytes(0xfa, TYPE), timeoutMs = 2_000)
-                ?: return Result(null, null, "Your earbuds didn't send a result. Try again.")
-            if (r.size < 4) return Result(null, null, "Your earbuds didn't send a result. Try again.")
+                ?: return Result(null, null, "Couldn't get a result. Try the test again.")
+            if (r.size < 4) return Result(null, null, "Couldn't get a result. Try the test again.")
             return Result(u(r[2]) == 0x00, u(r[3]) == 0x00, null)
         } finally {
             runCatching { s.command(bytes(0xf4, TYPE, 0x00, 0x00)) }
@@ -103,13 +103,13 @@ object FitTest {
     }
 
     private fun errorText(code: Int) = when (code) {
-        0x01 -> "The left earbud isn't connected. Put both earbuds in and try again."
-        0x02 -> "The right earbud isn't connected. Put both earbuds in and try again."
-        0x03 -> "The fit test isn't available right now. It needs both earbuds in your ears and a Classic connection."
-        0x04 -> "The left earbud couldn't be measured. Push it in gently and try again."
-        0x05 -> "The right earbud couldn't be measured. Push it in gently and try again."
-        0x06 -> "Neither earbud could be measured. Push them in gently and try again."
-        else -> "The measurement didn't work. Find a quiet spot and try again."
+        0x01 -> "Your left earbud isn't connected. Put both in and try again."
+        0x02 -> "Your right earbud isn't connected. Put both in and try again."
+        0x03 -> "The fit test needs both earbuds in your ears and a Classic connection."
+        0x04 -> "Couldn't measure your left earbud. Gently press it in and try again."
+        0x05 -> "Couldn't measure your right earbud. Gently press it in and try again."
+        0x06 -> "Couldn't measure either earbud. Gently press them in and try again."
+        else -> "It was too noisy to measure. Find a quieter spot and try again."
     }
 
     private fun bytes(vararg v: Int) = ByteArray(v.size) { v[it].toByte() }

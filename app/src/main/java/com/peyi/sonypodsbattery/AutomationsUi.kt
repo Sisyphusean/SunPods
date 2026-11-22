@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.material.icons.rounded.DirectionsRun
 import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
@@ -54,13 +55,12 @@ internal fun AutomationsCard() {
     }
     val placeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { tick++ }
 
-    Column {
-        SectionHeader("Automations")
-        SunCard {
-            key(tick) {
-                RuleRow(Icons.Rounded.Call, Trigger.CALL, "During Calls", "Hear yourself and the room while you talk") { tick++ }
+    key(tick) {
+        Column {
+            SunCard {
+                RuleRow(Icons.Rounded.Call, Trigger.CALL, "During Calls", "") { tick++ }
                 RowDivider()
-                RuleRow(Icons.Rounded.DirectionsRun, Trigger.RUNNING, "While Running", "Stay aware of what's around you on a run") { on ->
+                RuleRow(Icons.Rounded.DirectionsRun, Trigger.RUNNING, "While Running", "") { on ->
                     if (on && context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
                         stepsFor = Trigger.RUNNING
                         walkLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
@@ -68,7 +68,7 @@ internal fun AutomationsCard() {
                     } else { tick++; true }
                 }
                 RowDivider()
-                RuleRow(Icons.Rounded.DirectionsWalk, Trigger.WALKING, "While Walking", "Hear traffic and people around you while you walk") { on ->
+                RuleRow(Icons.Rounded.DirectionsWalk, Trigger.WALKING, "While Walking", "") { on ->
                     if (on && context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
                         stepsFor = Trigger.WALKING
                         walkLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
@@ -76,20 +76,29 @@ internal fun AutomationsCard() {
                     } else { tick++; true }
                 }
                 RowDivider()
-                RuleRow(Icons.Rounded.DoNotDisturbOn, Trigger.FOCUS, "In Focus or Do Not Disturb", "Cut out noise while you focus") { tick++ }
-                RowDivider()
-                var autoPlay by remember { mutableStateOf(AutoPlay.enabled(context)) }
-                ToggleRow(Icons.Rounded.PlayCircle, "Auto Play", "Your music starts when you take your earbuds out", autoPlay) {
-                    autoPlay = it
-                    AutoPlay.setEnabled(context, it)
-                }
-                RowDivider()
+                RuleRow(Icons.Rounded.DoNotDisturbOn, Trigger.FOCUS, "In Do Not Disturb", "") { tick++ }
+            }
+            Footer("Noise control changes for you, and goes back when it ends.")
+        }
+        Column {
+            SectionHeader("Places")
+            SunCard {
                 PlacesSection(onNeedLocation = {
                     placeLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
                 }) { tick++ }
             }
+            Footer("A mode for the Wi-Fi you're on, like home or work.")
         }
-        Footer("Works while your earbuds are connected. When an automation ends, your previous mode returns unless you changed it.")
+        Column {
+            SunCard {
+                var autoPlay by remember { mutableStateOf(AutoPlay.enabled(context)) }
+                ToggleRow(Icons.Rounded.PlayCircle, "Auto Play", "", autoPlay) {
+                    autoPlay = it
+                    AutoPlay.setEnabled(context, it)
+                }
+            }
+            Footer("Your music starts when you take your earbuds out.")
+        }
     }
 }
 
@@ -114,7 +123,7 @@ private fun RuleRow(
             AutomationStore.setRule(context, trigger, rule)
         }
     }
-    AnimatedVisibility(rule.enabled, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+    AnimatedVisibility(rule.enabled, enter = revealIn(), exit = revealOut()) {
         ActionPill(rule.action) { pick = true }
     }
     if (pick) {
@@ -128,17 +137,12 @@ private fun RuleRow(
 @Composable
 private fun ActionPill(action: AutoAction, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 72.dp, end = 20.dp, bottom = 12.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = RowTextStart, end = 16.dp, top = 2.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("Mode", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
-        Spacer(Modifier.width(16.dp))
-        TextButton(onClick = onClick, modifier = Modifier.weight(1f)) {
-            Text(
-                action.label, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.fillMaxWidth(),
-                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-            )
-        }
+        Text("Switch to", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        Text(action.short, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -151,45 +155,31 @@ private fun PlacesSection(onNeedLocation: () -> Unit, onChange: () -> Unit) {
     val hasLocation = context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     val hasBackground = LastSeenStore.hasBackgroundPermission(context)
 
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            RowIcon(Icons.Rounded.Wifi, active = places.isNotEmpty())
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text("At a Place", style = MaterialTheme.typography.bodyLarge)
-                Text("Set a mode for a Wi-Fi network, like home or work", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        places.forEach { place ->
-            Row(Modifier.fillMaxWidth().padding(start = 56.dp, top = 8.dp).clickable { editing = place }, verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(place.ssid, style = MaterialTheme.typography.bodyLarge)
-                    Text(place.action.label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                }
+    Column(Modifier.fillMaxWidth()) {
+        places.forEachIndexed { i, place ->
+            if (i > 0) RowDivider()
+            SettingRow(Icons.Rounded.Wifi, place.ssid, modifier = Modifier.clickable { editing = place }) {
+                Text(place.action.short, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 IconButton(onClick = {
                     places = places - place
                     AutomationStore.setPlaces(context, places)
                     onChange()
-                }) { Icon(Icons.Rounded.Close, contentDescription = "Remove ${place.ssid}") }
+                }) { Icon(Icons.Rounded.Close, contentDescription = "Remove ${place.ssid}", tint = MaterialTheme.colorScheme.outline) }
             }
         }
-        Row(Modifier.padding(start = 44.dp, top = 4.dp)) {
-            when {
-                !hasLocation -> TextButton(onClick = onNeedLocation) { Text("Allow Location to See Wi-Fi Names") }
-                here == null -> Text("Connect to a Wi-Fi network to add it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(12.dp))
-                places.none { it.ssid == here } -> TextButton(onClick = { editing = Place(here, AutoAction.NC) }) {
-                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Add $here")
-                }
-            }
+        if (places.isNotEmpty()) RowDivider()
+        when {
+            !hasLocation -> SettingRow(Icons.Rounded.Wifi, "Allow Location to See Wi-Fi Names", modifier = Modifier.clickable(onClick = onNeedLocation))
+            here == null -> SettingRow(Icons.Rounded.Wifi, "Connect to Wi-Fi to Add It", enabled = false)
+            places.none { it.ssid == here } -> SettingRow(Icons.Rounded.Add, "Add $here", modifier = Modifier.clickable { editing = Place(here, AutoAction.NC) })
+            else -> {}
         }
         if (places.isNotEmpty() && !hasBackground) {
             Text(
-                "To use places in the background, allow location all the time.",
+                "Allow location all the time to use places in the background.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 56.dp, top = 4.dp)
+                modifier = Modifier.padding(start = RowTextStart, end = 16.dp, bottom = 12.dp)
             )
         }
     }

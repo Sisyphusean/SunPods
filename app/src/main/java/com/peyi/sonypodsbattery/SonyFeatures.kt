@@ -103,6 +103,27 @@ object TouchCapability {
         else -> null
     }
 
+    private fun glyph(action: Int) = when (action) {
+        0x00 -> "1×"; 0x01 -> "2×"; 0x02 -> "3×"; 0x03 -> "Taps"
+        0x10 -> "1× hold"; 0x11 -> "2× hold"; 0x21, 0x22 -> "Hold"
+        else -> null
+    }
+
+    private fun short(function: Int) = when (function) {
+        in 0x01..0x04, in 0x50..0x56, 0x59 -> "Noise mode"
+        0x10 -> "Attention"; 0x11 -> "Optimise"
+        0x20 -> "Play/Pause"; 0x21 -> "Next"; 0x22 -> "Previous"
+        0x23 -> "Volume up"; 0x24 -> "Volume down"
+        in 0x30..0x3b -> "Assistant"
+        0x43, 0x44 -> "Quick Access"
+        0x70 -> "Mute"
+        else -> null
+    }
+
+    /** The gestures as a short key: ("1×", "Play/Pause"), ("2×", "Next"), ... */
+    fun legend(option: TouchOption): List<Pair<String, String>> =
+        option.actions.sortedBy { it.first }.mapNotNull { (a, f) -> val g = glyph(a); val r = short(f); if (g != null && r != null) g to r else null }
+
     /** "Tap: play or pause. Double-tap: next track. Tap repeatedly: volume down." */
     fun describe(option: TouchOption): String {
         val parts = option.actions.sortedBy { it.first }.mapNotNull { (a, f) -> val g = gesture(a); val r = result(f); if (g != null && r != null) "$g: $r" else null }
@@ -129,20 +150,20 @@ enum class SpeakToChatTimeout(val code: Int, val label: String) {
     }
 }
 
-enum class ConnectionPriority(val code: Int, val label: String, val detail: String) {
-    SOUND_QUALITY(0x00, "Prioritise Sound Quality", "Uses LDAC when your phone supports it"),
-    STABLE_CONNECTION(0x01, "Prioritise Stable Connection", "Uses SBC or AAC for a steadier connection in crowded places");
+enum class ConnectionPriority(val code: Int, val label: String, val detail: String, val short: String) {
+    SOUND_QUALITY(0x00, "Prioritise Sound Quality", "Uses LDAC when your phone supports it", "Sound Quality"),
+    STABLE_CONNECTION(0x01, "Prioritise Stable Connection", "Uses SBC or AAC for a steadier connection in crowded places", "Stability");
 
     companion object {
         fun from(code: Int?): ConnectionPriority? = entries.firstOrNull { it.code == code }
     }
 }
 
-enum class NoiseCycle(val code: Int, val label: String) {
-    NC_AMBIENT_OFF(0x01, "Noise Cancelling, Ambient Sound, Off"),
-    NC_AMBIENT(0x02, "Noise Cancelling, Ambient Sound"),
-    NC_OFF(0x03, "Noise Cancelling, Off"),
-    AMBIENT_OFF(0x04, "Ambient Sound, Off");
+enum class NoiseCycle(val code: Int, val label: String, val short: String) {
+    NC_AMBIENT_OFF(0x01, "Noise Cancelling, Ambient Sound, Off", "All Three"),
+    NC_AMBIENT(0x02, "Noise Cancelling, Ambient Sound", "Cancelling, Ambient"),
+    NC_OFF(0x03, "Noise Cancelling, Off", "Cancelling, Off"),
+    AMBIENT_OFF(0x04, "Ambient Sound, Off", "Ambient, Off");
 
     companion object {
         fun from(code: Int?): NoiseCycle? = entries.firstOrNull { it.code == code }
@@ -618,7 +639,7 @@ internal object SonyFeatures {
         fun code(f: TouchFunction) = if (f == TouchFunction.AMBIENT_SOUND_CONTROL) ambientCode else f.code
         val l = left?.let(::code) ?: now?.let { u(it[3]) } ?: r.touchLeft?.let(::code)
         val rt = right?.let(::code) ?: now?.let { u(it[4]) } ?: r.touchRight?.let(::code)
-        if (l == null || rt == null) throw EarbudsUnavailableException("Can't load your touch controls. Make sure your earbuds are connected, then try again.")
+        if (l == null || rt == null) throw EarbudsUnavailableException("Couldn't load your touch controls. Make sure your earbuds are connected and try again.")
         // Moving Playback Control (it carries the voice assistant) makes the earbuds ask for a
         // confirmation first (alert 99 00 0f); without an answer they keep the old setting.
         s.withConfirmation(timeoutMs = 1_200) { s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_ASSIGNABLE, 0x02, l, rt)) }
@@ -627,8 +648,8 @@ internal object SonyFeatures {
         if ((left != null && after.touchLeft != left) || (right != null && after.touchRight != right)) {
             // The earbuds turn a function they don't accept into "not assigned"; put the old one back.
             if (now != null) runCatching { s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_ASSIGNABLE, 0x02, u(now[3]), u(now[4]))) }
-            val name = (left ?: right)?.label ?: "That function"
-            throw EarbudsUnavailableException("Your earbuds didn't accept $name on the $side. Your touch controls are unchanged.")
+            val name = (left ?: right)?.label ?: "That control"
+            throw EarbudsUnavailableException("$name isn't available on the $side earbud. Nothing was changed.")
         }
         return after
     }

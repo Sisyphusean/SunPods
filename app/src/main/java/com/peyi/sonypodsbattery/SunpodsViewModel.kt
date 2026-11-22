@@ -26,6 +26,14 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
 
+    /** Settings changes still on their way to the earbuds. */
+    private val _applying = MutableStateFlow(0)
+    val applying: StateFlow<Int> = _applying.asStateFlow()
+
+    /** Counts changes the earbuds turned down, so the UI can answer with a reject haptic. */
+    private val _rejected = MutableStateFlow(0)
+    val rejected: StateFlow<Int> = _rejected.asStateFlow()
+
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
@@ -121,7 +129,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
                 }
                 _battery.value = state
                 if (!state.status.startsWith("Updated") && audioLinkUp(app)) {
-                    _message.value = "Can't reach your earbuds. Close Sony Sound Connect if it's open, then pull down to try again."
+                    _message.value = "Couldn't reach your earbuds. If Sony Sound Connect is open, close it, then pull down to try again."
                 }
                 if (_battery.value.left != null || _battery.value.right != null) {
                     launch { LastSeenStore.captureWhileConnected(app) }
@@ -223,7 +231,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         _safe.value = before.copy(first = on)
         viewModelScope.launch {
             val ok = RefreshCoordinator.awaitSession(app, "Safe Listening", bothEarbuds = true) { SafeListening.setOn(app, it, on) }.getOrDefault(false)
-            if (!ok) { _safe.value = before; _message.value = "Couldn't change Safe Listening. Make sure your earbuds are connected, then try again." }
+            if (!ok) { _safe.value = before; _message.value = "Couldn't change Safe Listening. Make sure your earbuds are connected and try again." }
         }
     }
 
@@ -232,7 +240,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         _safe.value = before.copy(second = sensitive)
         viewModelScope.launch {
             val ok = RefreshCoordinator.awaitSession(app, "Volume Protection", bothEarbuds = true) { SafeListening.setSensitive(app, it, sensitive) }.getOrDefault(false)
-            if (!ok) { _safe.value = before; _message.value = "Couldn't change volume protection. Make sure your earbuds are connected, then try again." }
+            if (!ok) { _safe.value = before; _message.value = "Couldn't change Volume Protection. Make sure your earbuds are connected and try again." }
         }
     }
 
@@ -289,7 +297,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
                 VoiceAssistantSetting.set(s, value)
                 VoiceAssistantSetting.read(s)
             }.onSuccess { _assistant.value = it ?: before }
-                .onFailure { _assistant.value = before; _message.value = "Couldn't change the voice assistant. Make sure your earbuds are connected, then try again." }
+                .onFailure { _assistant.value = before; _message.value = "Couldn't change your voice assistant. Make sure your earbuds are connected and try again." }
         }
     }
 
@@ -301,7 +309,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             done(
                 RefreshCoordinator.awaitSession(app, "Fit Test") { FitTest.run(it, tips, size) }
-                    .getOrElse { FitTest.Result(null, null, "Couldn't reach your earbuds. Make sure they're connected, then try again.") }
+                    .getOrElse { FitTest.Result(null, null, "Couldn't reach your earbuds. Make sure they're connected and try again.") }
             )
         }
     }
@@ -332,17 +340,23 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     ) {
         val before = _settings.value
         _settings.value = optimistic(before)
+        _applying.value++
         viewModelScope.launch {
-            settingsLock.withLock {
-                RefreshCoordinator.awaitSession(app, label, bothEarbuds = true) { session -> action(session, before) }
-                    .onSuccess(::storeSettings)
-                    .onFailure { error ->
-                        _settings.value = before
-                        _message.value = when (error) {
-                            is EarbudsUnavailableException -> error.message
-                            else -> "Couldn't change $label. Make sure your earbuds are connected and Sony Sound Connect is closed."
+            try {
+                settingsLock.withLock {
+                    RefreshCoordinator.awaitSession(app, label, bothEarbuds = true) { session -> action(session, before) }
+                        .onSuccess(::storeSettings)
+                        .onFailure { error ->
+                            _settings.value = before
+                            _rejected.value++
+                            _message.value = when (error) {
+                                is EarbudsUnavailableException -> error.message
+                                else -> "Couldn't change $label. Make sure your earbuds are connected and Sony Sound Connect is closed."
+                            }
                         }
-                    }
+                }
+            } finally {
+                _applying.value--
             }
         }
     }

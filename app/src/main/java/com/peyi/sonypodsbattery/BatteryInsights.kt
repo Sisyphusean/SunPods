@@ -272,7 +272,7 @@ object BatteryNudges {
                 notify(
                     context, 3001 + side.length,
                     "$side Earbud at $level%",
-                    "About ${BatteryInsights.formatMinutes(left)} of listening time remaining. Put it in the case to charge."
+                    "About ${BatteryInsights.formatMinutes(left)} of listening left. Put it in the case to charge."
                 )
                 prefs.edit().putBoolean(key, true).apply()
             }

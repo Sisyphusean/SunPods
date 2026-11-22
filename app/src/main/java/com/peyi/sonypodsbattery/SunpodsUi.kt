@@ -14,6 +14,10 @@ import kotlinx.coroutines.delay
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Campaign
+import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.AutoMode
 import androidx.compose.material.icons.rounded.HealthAndSafety
 import androidx.compose.material.icons.rounded.Gesture
 import androidx.compose.material.icons.rounded.PowerOff
@@ -165,6 +169,19 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.animation.core.tween
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.BatteryStd
+import androidx.compose.material.icons.outlined.TouchApp
+import androidx.compose.material.icons.outlined.Equalizer
+import androidx.compose.material.icons.rounded.BatteryFull
+import androidx.compose.material.icons.rounded.Equalizer
+import androidx.compose.material.icons.outlined.Headphones
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -214,10 +231,13 @@ fun SunpodsTheme(dynamicColor: Boolean = false, content: @Composable () -> Unit)
     MaterialTheme(colorScheme = scheme, shapes = SunpodsShapes, typography = SolarTypography, content = content)
 }
 
-// Spacing on the 4/8dp grid. Generous on purpose: one idea per card, air between cards.
-private val Gutter = 20.dp
-private val GroupGap = 32.dp
-private val CardShape = RoundedCornerShape(28.dp)
+// Spacing on the 4/8dp grid, after HIG inset grouped lists: 16dp margins, cards with a modest
+// corner, and room between groups so each reads as one idea.
+private val Gutter = 16.dp
+private val GroupGap = 28.dp
+private val CardShape = RoundedCornerShape(16.dp)
+/** Where a row's text starts: margin, icon tile, gap. Dividers start here, as in iOS lists. */
+internal val RowTextStart = 16.dp + TileSize + 14.dp
 
 // Page and card surfaces: a quiet tinted page with clean cards on top (light), or deep page
 // with raised cards (dark). Works with the Solar palette and with Material You colours.
@@ -232,21 +252,34 @@ private val dividerColor: Color @Composable get() = MaterialTheme.colorScheme.ou
 @Composable
 internal fun SectionHeader(title: String, modifier: Modifier = Modifier) {
     Text(
-        title,
-        style = MaterialTheme.typography.titleSmall,
+        title.uppercase(),
+        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = androidx.compose.ui.unit.TextUnit(0.8f, androidx.compose.ui.unit.TextUnitType.Sp)),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp).semantics { heading() }
+        modifier = modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp).semantics { heading() }
     )
 }
 
 /** Small explanatory text under a card. */
+@Composable
+internal fun RollingFooter(text: String) {
+    androidx.compose.animation.AnimatedContent(
+        targetState = text,
+        transitionSpec = {
+            (fadeIn(tween(220, delayMillis = 60)) + androidx.compose.animation.slideInVertically(tween(260, easing = Motion.Arrive)) { it / 2 })
+                .togetherWith(fadeOut(tween(120)) + androidx.compose.animation.slideOutVertically(tween(180, easing = Motion.Leave)) { -it / 2 })
+                .using(androidx.compose.animation.SizeTransform(clip = false))
+        },
+        label = "footer"
+    ) { Footer(it) }
+}
+
 @Composable
 internal fun Footer(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp)
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp)
     )
 }
 
@@ -258,16 +291,92 @@ internal fun SunCard(modifier: Modifier = Modifier, content: @Composable ColumnS
 }
 
 @Composable
-internal fun RowDivider(inset: Dp = 72.dp) {
-    HorizontalDivider(Modifier.padding(start = inset, end = 20.dp), thickness = 1.dp, color = dividerColor)
+internal fun RowDivider(inset: Dp = RowTextStart) {
+    HorizontalDivider(Modifier.padding(start = inset), thickness = 0.5.dp, color = dividerColor)
 }
 
-private enum class Tab(val label: String, val icon: ImageVector) {
-    HOME("Home", Icons.Rounded.Headphones),
-    SOUND("Sound", Icons.Rounded.GraphicEq),
-    CONTROLS("Controls", Icons.Rounded.TouchApp),
-    BATTERY("Battery", Icons.Rounded.BatteryStd),
-    DEVICE("Device", Icons.Rounded.Info)
+private enum class Tab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
+    HOME("Home", androidx.compose.material.icons.Icons.Outlined.Headphones, Icons.Rounded.Headphones),
+    SOUND("Sound", androidx.compose.material.icons.Icons.Outlined.Equalizer, Icons.Rounded.Equalizer),
+    CONTROLS("Controls", androidx.compose.material.icons.Icons.Outlined.TouchApp, Icons.Rounded.TouchApp),
+    BATTERY("Battery", androidx.compose.material.icons.Icons.Outlined.BatteryStd, Icons.Rounded.BatteryFull),
+    DEVICE("Device", androidx.compose.material.icons.Icons.Outlined.Info, Icons.Rounded.Info)
+}
+
+/**
+ * The tab bar, Material 3 with some life: the indicator pill springs across to the new tab, the
+ * chosen icon fills in with a small bounce, and the label tints. A light tick on each switch.
+ */
+@Composable
+private fun SunTabBar(selected: Tab, onSelect: (Tab) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    Column(Modifier.background(pageColor)) {
+        HorizontalDivider(thickness = 0.5.dp, color = dividerColor)
+        androidx.compose.foundation.layout.BoxWithConstraints(
+            Modifier.fillMaxWidth().navigationBarsPadding().height(68.dp).semantics { this.contentDescription = "Tabs" }
+        ) {
+            val itemW = maxWidth / Tab.entries.size
+            val pillW = 60.dp
+            val x by androidx.compose.animation.core.animateDpAsState(
+                itemW * selected.ordinal + (itemW - pillW) / 2,
+                spring(dampingRatio = 0.72f, stiffness = 380f),
+                label = "pill"
+            )
+            // Stretches a little while it travels, like Material 3 Expressive indicators.
+            val stretch by animateFloatAsState(1f, spring(dampingRatio = 0.5f, stiffness = 300f), label = "stretch")
+            Box(
+                Modifier
+                    .offset(x = x, y = 8.dp)
+                    .size(pillW, 32.dp)
+                    .graphicsLayer { scaleX = stretch }
+                    .clip(CircleShape)
+                    .background(colors.secondaryContainer)
+            )
+            Row(Modifier.fillMaxSize()) {
+                Tab.entries.forEach { t ->
+                    val on = t == selected
+                    val bounce by animateFloatAsState(if (on) 1.12f else 1f, spring(dampingRatio = 0.35f, stiffness = 600f), label = "bounce")
+                    val tint by animateColorAsState(if (on) colors.onSecondaryContainer else colors.onSurfaceVariant, label = "tint")
+                    val text by animateColorAsState(if (on) colors.onSurface else colors.onSurfaceVariant, label = "text")
+                    Column(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .selectable(
+                                selected = on,
+                                role = Role.Tab,
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                if (!on) haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                onSelect(t)
+                            },
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Spacer(Modifier.height(8.dp))
+                        Box(Modifier.size(pillW, 32.dp), contentAlignment = Alignment.Center) {
+                            androidx.compose.animation.Crossfade(on, animationSpec = tween(160), label = "icon") { filled ->
+                                Icon(
+                                    if (filled) t.selectedIcon else t.icon,
+                                    contentDescription = null,
+                                    tint = tint,
+                                    modifier = Modifier.size(24.dp).graphicsLayer { scaleX = bounce; scaleY = bounce }
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            t.label,
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (on) androidx.compose.ui.text.font.FontWeight.SemiBold else androidx.compose.ui.text.font.FontWeight.Medium),
+                            color = text,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -289,9 +398,47 @@ fun SunpodsApp(
     val busy by vm.busy.collectAsState()
     val message by vm.message.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
+    var page by rememberSaveable { mutableStateOf<Page?>(null) }
+    var backProgress by remember { mutableFloatStateOf(0f) }
+    var backFromLeft by remember { mutableStateOf(true) }
+    var backCommitted by remember { mutableStateOf(false) }
+    androidx.activity.compose.PredictiveBackHandler(enabled = page != null) { events ->
+        try {
+            events.collect { e ->
+                backFromLeft = e.swipeEdge == androidx.activity.BackEventCompat.EDGE_LEFT
+                backProgress = e.progress
+            }
+            backCommitted = true
+            page = null
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            // Gesture let go: spring back into place.
+            androidx.compose.animation.core.animate(backProgress, 0f, animationSpec = spring(stiffness = 500f)) { v, _ -> backProgress = v }
+        } finally {
+            if (page == null) backProgress = 0f
+        }
+    }
     val snackbar = remember { SnackbarHostState() }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val buzz = rememberBuzz()
     val refresh = { if (hasPermission) vm.refreshAll() else onRequestPermission() }
+    // The refresh arrow turns while SunPods talks to the earbuds, then eases into place.
+    val spin = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(busy) {
+        if (busy) {
+            while (true) spin.animateTo(spin.value + 360f, tween(850, easing = androidx.compose.animation.core.LinearEasing))
+        } else if (spin.value != 0f) {
+            spin.animateTo(kotlin.math.ceil(spin.value / 360f) * 360f, spring(dampingRatio = 0.7f, stiffness = 260f))
+            spin.snapTo(0f)
+        }
+    }
+    // A thin bar under the title while a change is on its way, only if it takes long enough to notice.
+    val applying by vm.applying.collectAsState()
+    var showApplying by remember { mutableStateOf(false) }
+    LaunchedEffect(applying > 0) {
+        if (applying > 0) { delay(250); showApplying = true } else showApplying = false
+    }
+    val rejected by vm.rejected.collectAsState()
+    LaunchedEffect(rejected) { if (rejected > 0) buzz(Buzz.REJECT) }
 
     LaunchedEffect(message) {
         message?.let {
@@ -305,10 +452,19 @@ fun SunpodsApp(
         containerColor = pageColor,
         topBar = {
             LargeTopAppBar(
-                title = { Text(if (tab == Tab.HOME) "SunPods" else tab.label) },
+                title = { Text(page?.title ?: if (tab == Tab.HOME) "SunPods" else tab.label) },
+                navigationIcon = {
+                    if (page != null) IconButton(onClick = { page = null }) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back to ${tab.label}")
+                    }
+                },
                 actions = {
-                    IconButton(onClick = refresh, enabled = !busy) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Refresh battery and settings")
+                    IconButton(onClick = { if (!busy) { buzz(Buzz.TICK); refresh() } }) {
+                        Icon(
+                            Icons.Rounded.Refresh,
+                            contentDescription = if (busy) "Refreshing" else "Refresh battery and settings",
+                            modifier = Modifier.graphicsLayer { rotationZ = spin.value }
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.largeTopAppBarColors(
@@ -318,18 +474,7 @@ fun SunpodsApp(
                 scrollBehavior = scroll
             )
         },
-        bottomBar = {
-            NavigationBar(containerColor = pageColor) {
-                Tab.entries.forEach { item ->
-                    NavigationBarItem(
-                        selected = tab == item,
-                        onClick = { tab = item },
-                        icon = { Icon(item.icon, contentDescription = null) },
-                        label = { Text(item.label, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }
-                    )
-                }
-            }
-        },
+        bottomBar = { SunTabBar(tab) { tab = it; page = null } },
         snackbarHost = { SnackbarHost(snackbar) }
     ) { padding ->
         PullToRefreshBox(
@@ -340,32 +485,75 @@ fun SunpodsApp(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(remember(tab) { androidx.compose.foundation.ScrollState(0) })
+                    .verticalScroll(remember(tab, page) { androidx.compose.foundation.ScrollState(0) })
                     .padding(horizontal = Gutter)
                     .padding(top = 8.dp, bottom = 48.dp),
                 verticalArrangement = Arrangement.spacedBy(GroupGap)
             ) {
                 if (!hasPermission) PermissionBanner(onRequestPermission)
                 // Pages fade and rise slightly into place, so a tab change feels like one motion.
-                androidx.compose.animation.AnimatedContent(
-                    targetState = tab,
-                    transitionSpec = {
-                        (fadeIn(androidx.compose.animation.core.tween(220, delayMillis = 60)) +
-                            androidx.compose.animation.slideInVertically(androidx.compose.animation.core.tween(280)) { it / 24 })
-                            .togetherWith(fadeOut(androidx.compose.animation.core.tween(120)))
-                    },
-                    label = "tab"
-                ) { page ->
-                    Column(verticalArrangement = Arrangement.spacedBy(GroupGap)) {
-                        when (page) {
-                            Tab.HOME -> HomeScreen(battery, settings, vm, busy)
-                            Tab.SOUND -> SoundScreen(settings, vm)
-                            Tab.CONTROLS -> ControlsScreen(settings, vm)
-                            Tab.BATTERY -> BatteryInsightsScreen(battery)
-                            Tab.DEVICE -> DeviceScreen(battery, settings, onShareDiagnostics, onOpenBluetoothSettings, dynamicColor, onDynamicColorChange, vm.liveAt.collectAsState().value)
+                // A tab change fades and rises; a page slides in from the side, like a push.
+                androidx.compose.runtime.CompositionLocalProvider(LocalOpenPage provides { page = it }) {
+                    androidx.compose.animation.AnimatedContent(
+                        targetState = tab to page,
+                        transitionSpec = {
+                            val pushing = initialState.first == targetState.first && targetState.second != null && initialState.second == null
+                            val popping = initialState.first == targetState.first && targetState.second == null && initialState.second != null
+                            // Material motion: shared axis X for pages, fade through for tabs.
+                            val emphasized = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+                            val shift = 40
+                            when {
+                                // The back gesture already showed the way out; land without a second animation.
+                                popping && backCommitted -> fadeIn(tween(120)).togetherWith(fadeOut(tween(80)))
+                                pushing -> (androidx.compose.animation.slideInHorizontally(tween(320, easing = emphasized)) { shift * 3 } + fadeIn(tween(200, delayMillis = 60)))
+                                    .togetherWith(androidx.compose.animation.slideOutHorizontally(tween(320, easing = emphasized)) { -shift * 3 } + fadeOut(tween(90)))
+                                popping -> (androidx.compose.animation.slideInHorizontally(tween(320, easing = emphasized)) { -shift * 3 } + fadeIn(tween(200, delayMillis = 60)))
+                                    .togetherWith(androidx.compose.animation.slideOutHorizontally(tween(320, easing = emphasized)) { shift * 3 } + fadeOut(tween(90)))
+                                else -> (fadeIn(tween(210, delayMillis = 90)) + androidx.compose.animation.scaleIn(tween(210, delayMillis = 90, easing = emphasized), initialScale = 0.94f))
+                                    .togetherWith(fadeOut(tween(90)))
+                            }
+                        },
+                        label = "tab"
+                    ) { (shownTab, shownPage) ->
+                        androidx.compose.runtime.LaunchedEffect(shownPage) { if (shownPage == null) backCommitted = false }
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(GroupGap),
+                            modifier = if (shownPage != null) Modifier.graphicsLayer {
+                                // Material predictive back: the page scales toward 90% and slides
+                                // a little toward the edge it's being swiped from.
+                                val p = backProgress
+                                val scale = 1f - 0.1f * p
+                                scaleX = scale; scaleY = scale
+                                translationX = (if (backFromLeft) 1f else -1f) * p * 24.dp.toPx()
+                                alpha = 1f - 0.25f * p
+                                shape = RoundedCornerShape((28 * p).dp)
+                                clip = p > 0f
+                                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(if (backFromLeft) 1f else 0f, 0.5f)
+                            } else Modifier
+                        ) {
+                            if (shownPage != null) {
+                                PageContent(shownPage, settings, vm, onShareDiagnostics, onOpenBluetoothSettings, dynamicColor, onDynamicColorChange)
+                            } else when (shownTab) {
+                                Tab.HOME -> HomeScreen(battery, settings, vm, busy)
+                                Tab.SOUND -> SoundScreen(settings, vm)
+                                Tab.CONTROLS -> ControlsScreen(settings, vm)
+                                Tab.BATTERY -> BatteryInsightsScreen(battery)
+                                Tab.DEVICE -> DeviceScreen(battery, settings, vm.liveAt.collectAsState().value)
+                            }
                         }
                     }
                 }
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                showApplying,
+                modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(),
+                enter = fadeIn(tween(150)),
+                exit = fadeOut(tween(300))
+            ) {
+                LinearProgressIndicator(
+                    Modifier.fillMaxWidth().height(3.dp).semantics { contentDescription = "Saving to your earbuds" },
+                    trackColor = Color.Transparent
+                )
             }
         }
     }
@@ -377,7 +565,7 @@ fun SunpodsApp(
 
 /** A titled group of rows in one card, separated by hairlines. */
 @Composable
-private fun Group(title: String?, footer: String? = null, inset: Dp = 72.dp, rows: List<@Composable () -> Unit>) {
+private fun Group(title: String?, footer: String? = null, inset: Dp = RowTextStart, rows: List<@Composable () -> Unit>) {
     Column {
         if (title != null) SectionHeader(title)
         SunCard {
@@ -391,52 +579,65 @@ private fun Group(title: String?, footer: String? = null, inset: Dp = 72.dp, row
 }
 
 @Composable
-internal fun RowIcon(icon: ImageVector, active: Boolean = true) {
+internal fun RowIcon(icon: ImageVector, active: Boolean = true) = IconTile(icon, enabled = active)
+
+/** The shape every settings row shares: icon tile, title (and a short note), then whatever trails. */
+@Composable
+internal fun SettingRow(
+    icon: ImageVector?,
+    title: String,
+    modifier: Modifier = Modifier,
+    note: String? = null,
+    enabled: Boolean = true,
+    trailing: @Composable () -> Unit = {}
+) {
     val colors = MaterialTheme.colorScheme
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(if (active) colors.secondaryContainer else colors.surfaceContainerHighest)
+    Row(
+        modifier.fillMaxWidth().heightIn(min = 52.dp).padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = if (active) colors.onSecondaryContainer else colors.onSurfaceVariant,
-            modifier = Modifier.size(20.dp)
-        )
+        if (icon != null) {
+            IconTile(icon, enabled = enabled)
+            Spacer(Modifier.width(14.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = if (enabled) colors.onSurface else colors.onSurface.copy(alpha = 0.38f))
+            if (note != null) Text(note, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(12.dp))
+        trailing()
     }
 }
-
-private val TransparentItem @Composable get() =
-    ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
 
 @Composable
 internal fun ToggleRow(icon: ImageVector?, title: String, subtitle: String, checked: Boolean?, onChange: (Boolean) -> Unit) =
     ToggleRow(icon, title, subtitle, checked, null, onChange)
 
-/** [offNote]: the setting can't be used right now; shown greyed out and off, with this reason. */
+/**
+ * A switch row. [subtitle] isn't shown (rows carry a title, not a paragraph); explanations live in
+ * the group's footer. [offNote]: the setting can't be used now; shown off and dimmed, with the reason.
+ */
 @Composable
-internal fun ToggleRow(icon: ImageVector?, title: String, subtitle: String, checked: Boolean?, offNote: String?, onChange: (Boolean) -> Unit) {
+internal fun ToggleRow(icon: ImageVector?, title: String, @Suppress("UNUSED_PARAMETER") subtitle: String, checked: Boolean?, offNote: String?, onChange: (Boolean) -> Unit) {
     val known = checked != null
     val off = offNote != null
     val on = checked == true && !off
-    val faded = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-    ListItem(
-        modifier = Modifier.toggleable(
-            value = on,
-            enabled = known && !off,
-            role = Role.Switch,
-            onValueChange = onChange
-        ),
-        headlineContent = { Text(title, color = if (off) faded else androidx.compose.ui.graphics.Color.Unspecified) },
-        supportingContent = { Text(offNote ?: if (known) subtitle else "Pull down to refresh") },
-        leadingContent = icon?.let { { RowIcon(it, active = on) } },
-        trailingContent = { Switch(checked = on, enabled = known && !off, onCheckedChange = null) },
-        colors = TransparentItem
-    )
+    val buzz = rememberBuzz()
+    SettingRow(
+        icon, title,
+        modifier = Modifier.toggleable(value = on, enabled = known && !off, role = Role.Switch) {
+            buzz(if (it) Buzz.ON else Buzz.OFF)
+            onChange(it)
+        },
+        note = offNote,
+        enabled = !off
+    ) {
+        Switch(checked = on, enabled = known && !off, onCheckedChange = null)
+    }
 }
+
+private val TransparentItem @Composable get() =
+    ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
 
 internal const val LE_OFF_NOTE = "Off while LE Audio is on"
 
@@ -451,29 +652,38 @@ internal fun rememberLeOn(settings: DeviceSettings): Boolean {
 @Composable
 internal fun leOffNote(settings: DeviceSettings): String? = if (rememberLeOn(settings)) LE_OFF_NOTE else null
 
+/** A row that opens something: its current value on the right, then a chevron. */
 @Composable
-private fun NavRow(icon: ImageVector, title: String, value: String?, onClick: () -> Unit) {
-    ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
-        headlineContent = { Text(title) },
-        supportingContent = value?.let { { Text(it) } },
-        leadingContent = { RowIcon(icon) },
-        trailingContent = {
-            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        },
-        colors = TransparentItem
-    )
+private fun NavRow(icon: ImageVector?, title: String, value: String?, note: String? = null, onClick: () -> Unit) {
+    SettingRow(icon, title, modifier = Modifier.clickable(onClick = onClick), note = note) {
+        if (value != null) {
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.End,
+                modifier = Modifier.widthIn(max = 160.dp)
+            )
+            Spacer(Modifier.width(4.dp))
+        }
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(20.dp))
+    }
+}
+
+/** A row that opens one of the app's own pages. */
+@Composable
+private fun PageRow(icon: ImageVector, page: Page, value: String? = null) {
+    val open = LocalOpenPage.current
+    NavRow(icon, page.title, value) { open(page) }
 }
 
 @Composable
 private fun InfoRow(title: String, value: String) {
-    ListItem(
-        headlineContent = { Text(title) },
-        trailingContent = {
-            Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        },
-        colors = TransparentItem
-    )
+    SettingRow(null, title) {
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 /** Bottom sheet that lists options as radio rows with an optional explanation each. */
@@ -487,7 +697,12 @@ internal fun <T> ChoiceSheet(
     onDismiss: () -> Unit,
     onPick: (T) -> Unit
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    val buzz = rememberBuzz()
+    var chosen by remember { mutableStateOf(selected) }
+    var closing by remember { mutableStateOf(false) }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
         Column(Modifier.navigationBarsPadding().padding(bottom = 16.dp)) {
             Text(
                 title,
@@ -497,13 +712,25 @@ internal fun <T> ChoiceSheet(
             options.forEach { option ->
                 ListItem(
                     modifier = Modifier.selectable(
-                        selected = option == selected,
+                        selected = option == chosen,
                         role = Role.RadioButton,
-                        onClick = { onPick(option); onDismiss() }
+                        enabled = !closing,
+                        onClick = {
+                            // Show the choice land, then slide the sheet away.
+                            closing = true
+                            chosen = option
+                            buzz(Buzz.TICK)
+                            onPick(option)
+                            scope.launch {
+                                delay(180)
+                                sheet.hide()
+                                onDismiss()
+                            }
+                        }
                     ),
                     headlineContent = { Text(label(option)) },
                     supportingContent = detail(option)?.let { { Text(it) } },
-                    leadingContent = { RadioButton(selected = option == selected, onClick = null) },
+                    leadingContent = { RadioButton(selected = option == chosen, onClick = null) },
                     colors = TransparentItem
                 )
             }
@@ -594,26 +821,18 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
         KeepRunningCard(resumes)
         AnimatedVisibility(
             visible = connected,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
+            enter = revealIn(),
+            exit = revealOut()
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(GroupGap)) {
                 NoiseControl(battery, vm)
                 NowPlayingCard(vm)
-                Group(
-                    "Quick Settings",
-                    rows = listOf(
-                        { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "Restores detail in compressed music", settings.dseeOn, leOffNote(settings), vm::setDsee) },
-                        { ToggleRow(Icons.Rounded.RecordVoiceOver, "Speak-to-Chat", "Pauses music when you start talking", settings.speakToChat, vm::setSpeakToChat) },
-                        { ToggleRow(Icons.Rounded.Sensors, "Pause When Removed", "Pauses music when you take an earbud out", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) }
-                    )
-                )
             }
         }
         AnimatedVisibility(
             visible = !connected,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
+            enter = revealIn(),
+            exit = revealOut()
         ) {
             LastSeenCard()
         }
@@ -693,7 +912,7 @@ private fun BatteryCard(battery: BatteryState, busy: Boolean, liveAt: Long = 0L)
                 BatteryRing("Case", battery.case?.takeIf { it in 1..100 }, battery.caseCharging, R.drawable.bud_case, Modifier.weight(1f))
             }
         }
-        Footer(
+        RollingFooter(
             when {
                 busy -> "Checking your earbuds…"
                 battery.updatedAt == 0L -> "Pull down to refresh."
@@ -708,16 +927,15 @@ private fun BatteryCard(battery: BatteryState, busy: Boolean, liveAt: Long = 0L)
 private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     val low = level != null && level <= 20 && !charging
-    // Rings fill from empty and the number counts up with them; later readings glide from the old value.
-    val fill = remember { androidx.compose.animation.core.Animatable(0f) }
+    // The reading is there the moment the screen is: no fill-up to wait through. A new reading
+    // glides from the old value and gives a small pop, so a change is easy to spot.
+    val fill = remember { androidx.compose.animation.core.Animatable((level ?: 0) / 100f) }
     val pop = remember { androidx.compose.animation.core.Animatable(1f) }
-    var seen by remember { mutableStateOf(false) }
     LaunchedEffect(level) {
-        if (seen && level != null) {
-            launch { pop.snapTo(1.12f); pop.animateTo(1f, spring(dampingRatio = 0.4f, stiffness = 300f)) }
-        }
-        seen = true
-        fill.animateTo((level ?: 0) / 100f, androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        val to = (level ?: 0) / 100f
+        if (fill.value == to) return@LaunchedEffect
+        if (level != null) launch { pop.snapTo(1.1f); pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 320f)) }
+        fill.animateTo(to, tween(500, easing = Motion.Arrive))
     }
     val sweep = fill.value
     // Charging gently breathes; a low bud doesn't, so the red reads as a calm warning.
@@ -1052,8 +1270,8 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
             }
             AnimatedVisibility(
                 visible = battery.listeningMode == ListeningMode.AMBIENT,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
+                enter = revealIn(),
+                exit = revealOut()
             ) {
                 Column {
                     RowDivider(inset = 20.dp)
@@ -1081,7 +1299,7 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
         }
         val context = LocalContext.current
         val automation = remember(battery.listeningMode, battery.updatedAt) { AutomationStore.active(context) }
-        Footer(automation?.let { "Set by an automation: $it. Choose a mode to override it." } ?: "You can also tap the earbuds to switch modes.")
+        Footer(automation?.let { "Set automatically: $it. Choose a mode to take over." } ?: "You can also tap the earbuds to switch modes.")
     }
 }
 
@@ -1134,42 +1352,15 @@ private val bandLabels = listOf("Bass", "400", "1k", "2.5k", "6.3k", "16k")
 private fun SoundScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
     EqPanel(settings, vm)
 
-    val presets = EqPreset.entries.filter { it != EqPreset.MANUAL || settings.eqPreset == EqPreset.MANUAL }
-    Column {
-        SectionHeader("Presets")
-        SunCard(Modifier.selectableGroup()) {
-            presets.forEachIndexed { i, preset ->
-                if (i > 0) RowDivider(inset = 20.dp)
-                val selected = settings.eqPreset == preset
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .selectable(selected = selected, role = Role.RadioButton) { vm.setEqPreset(preset) }
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(preset.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    if (preset.isCustomisable) {
-                        Text("Editable", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.width(12.dp))
-                    }
-                    Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-                        if (selected) Icon(Icons.Rounded.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            }
-        }
-        Footer("Custom 1 and 2 save your own settings. Tap Customise to edit.")
-    }
-
+    val safe by vm.safe.collectAsState()
     Group(
-        "Audio Quality",
-        footer = settings.codec?.let { "Now playing over $it. Changing Connection Priority briefly reconnects your earbuds." },
+        null,
+        footer = settings.codec?.let { "Playing over $it." },
         rows = listOf(
-            { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "Restores detail in compressed music. Uses a little more battery.", settings.dseeOn, leOffNote(settings), vm::setDsee) },
+            { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "", settings.dseeOn, leOffNote(settings), vm::setDsee) },
             {
                 var open by remember { mutableStateOf(false) }
-                NavRow(Icons.Rounded.BluetoothAudio, "Connection Priority", settings.priority?.label ?: "Connect to Check") { open = true }
+                NavRow(Icons.Rounded.BluetoothAudio, "Connection Priority", settings.priority?.short ?: "—") { open = true }
                 if (open) {
                     ChoiceSheet(
                         "Connection Priority",
@@ -1181,11 +1372,10 @@ private fun SoundScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
                         onPick = vm::setPriority
                     )
                 }
-            }
+            },
+            { PageRow(Icons.Rounded.HealthAndSafety, Page.SAFE_LISTENING, if (safe.first) "On" else "Off") }
         )
     )
-
-    SafeListeningGroup(vm)
 }
 
 /** Safe listening and volume protection, on the earbuds themselves. */
@@ -1194,8 +1384,8 @@ private fun SafeListeningGroup(vm: SunpodsViewModel) {
     val safe by vm.safe.collectAsState()
     var choosing by remember { mutableStateOf(false) }
     Group(
-        "Safe Listening",
-        footer = "Based on the World Health Organization's guidelines for safe listening.",
+        null,
+        footer = "Your earbuds keep track of how loud and how long you listen, following the World Health Organization's guidelines.",
         rows = listOf(
             { ToggleRow(Icons.Rounded.HealthAndSafety, "Safe Listening", "Your earbuds keep track of how loud and how long you listen", safe.first, vm::setSafeListening) },
             {
@@ -1224,16 +1414,10 @@ private fun EqPanel(settings: DeviceSettings, vm: SunpodsViewModel) {
     val commit = { vm.setEqBands(values[0], values.drop(1)) }
 
     Column {
-        SectionHeader("Equaliser")
         SunCard {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
-                Text(settings.eqPreset?.label ?: "Connect to Check", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    if (editable) "Drag the sliders to shape your sound." else "A Sony preset. Tap Customise to edit.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.onSurfaceVariant
-                )
-                Spacer(Modifier.height(20.dp))
+                Text(settings.eqPreset?.label ?: "—", style = MaterialTheme.typography.headlineSmall)
+                Spacer(Modifier.height(16.dp))
                 EqCurve(values, Modifier.fillMaxWidth().height(140.dp))
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth()) {
@@ -1247,7 +1431,7 @@ private fun EqPanel(settings: DeviceSettings, vm: SunpodsViewModel) {
                         )
                     }
                 }
-                AnimatedVisibility(editable, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                AnimatedVisibility(editable, enter = revealIn(), exit = revealOut()) {
                     Column(Modifier.padding(top = 16.dp)) {
                         values.forEachIndexed { i, v ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1275,7 +1459,22 @@ private fun EqPanel(settings: DeviceSettings, vm: SunpodsViewModel) {
                         }
                     }
                 }
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(16.dp))
+                val presets = EqPreset.entries.filter { it != EqPreset.MANUAL || settings.eqPreset == EqPreset.MANUAL }
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    presets.forEach { preset ->
+                        FilterChip(
+                            selected = settings.eqPreset == preset,
+                            onClick = { vm.setEqPreset(preset) },
+                            label = { Text(preset.label) },
+                            shape = CircleShape
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     if (editable) {
                         TextButton(onClick = {
@@ -1343,77 +1542,101 @@ private fun EqCurve(values: List<Int>, modifier: Modifier) {
 
 @Composable
 private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
-    val sensitivity = settings.speakToChatSensitivity ?: SpeakToChatSensitivity.AUTO
-    val timeout = settings.speakToChatTimeout ?: SpeakToChatTimeout.STANDARD
+    val context = LocalContext.current
     val left = settings.touchLeft
     val right = settings.touchRight
 
     Column {
-        SectionHeader("Touch Controls")
         SunCard {
-            Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 val options = settings.touchOptions
                 TouchSide("Left", R.drawable.bud_left, left, options?.get(0), Modifier.weight(1f)) { picked -> vm.setTouch(picked, null) }
                 TouchSide("Right", R.drawable.bud_right, right, options?.get(1), Modifier.weight(1f)) { picked -> vm.setTouch(null, picked) }
             }
             if (left == TouchFunction.AMBIENT_SOUND_CONTROL || right == TouchFunction.AMBIENT_SOUND_CONTROL) {
-                RowDivider(inset = 20.dp)
+                RowDivider(inset = 16.dp)
                 var open by remember { mutableStateOf(false) }
-                NavRow(Icons.Rounded.NoiseAware, "Tap Cycles Through", settings.noiseCycle?.label ?: "Connect to Check") { open = true }
+                NavRow(Icons.Rounded.NoiseAware, "Tap Cycles Through", settings.noiseCycle?.short ?: "—") { open = true }
                 if (open) {
                     ChoiceSheet("Tap Cycles Through", NoiseCycle.entries.toList(), settings.noiseCycle,
                         label = { it.label }, onDismiss = { open = false }, onPick = vm::setNoiseCycle)
                 }
             }
         }
-        Footer("Tap an earbud to choose what its touch control does.")
+        Footer("Tap an earbud to change what it does.")
     }
 
-    AutomationsCard()
+    val automations = remember(settings.readAt) {
+        Trigger.entries.count { it != Trigger.PLACE && AutomationStore.rule(context, it).enabled } + AutomationStore.places(context).size +
+            (if (AutoPlay.enabled(context)) 1 else 0)
+    }
+    val le = rememberLeOn(settings)
+    val multipoint = settings.general?.firstOrNull { it.key == "MULTIPOINT_SETTING" }?.on
+    Group(
+        null,
+        rows = buildList {
+            add { PageRow(Icons.Rounded.AutoMode, Page.AUTOMATIONS, if (automations == 0) "Off" else "$automations on") }
+            add { PageRow(Icons.Rounded.RecordVoiceOver, Page.SPEAK_TO_CHAT, onOff(settings.speakToChat)) }
+            add { PageRow(Icons.Rounded.Sensors, Page.WEARING) }
+            if (settings.promptsOn != null || settings.promptVolume != null) add { PageRow(Icons.Rounded.Campaign, Page.VOICE_PROMPTS, onOff(settings.promptsOn)) }
+        }
+    )
+    Group(
+        null,
+        rows = listOf(
+            { PageRow(Icons.Rounded.Call, Page.CALLS, if (settings.leModeSupported == true) (if (le) "LE Audio" else "Classic") else null) },
+            { PageRow(Icons.Rounded.Bluetooth, Page.CONNECTION, when { le -> "One device"; multipoint == true -> "Two devices"; multipoint == false -> "One device"; else -> null }) }
+        )
+    )
+}
 
-    val chatRows = buildList<@Composable () -> Unit> {
-        add { ToggleRow(Icons.Rounded.RecordVoiceOver, "Speak-to-Chat", "Pauses music and lets sound in when you talk", settings.speakToChat, vm::setSpeakToChat) }
-        if (settings.speakToChat == true) {
-            add {
-                Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
-                    Text("Voice Detection", style = MaterialTheme.typography.bodyLarge)
-                    Spacer(Modifier.height(12.dp))
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        val options = SpeakToChatSensitivity.entries
-                        options.forEachIndexed { i, option ->
-                            SegmentedButton(
-                                selected = settings.speakToChatSensitivity == option,
-                                onClick = { vm.setSpeakToChatConfig(option, timeout) },
-                                shape = SegmentedButtonDefaults.itemShape(i, options.size)
-                            ) { Text(option.label) }
-                        }
+private fun onOff(v: Boolean?) = when (v) { true -> "On"; false -> "Off"; null -> null }
+
+@Composable
+private fun SpeakToChatPage(settings: DeviceSettings, vm: SunpodsViewModel) {
+    val sensitivity = settings.speakToChatSensitivity ?: SpeakToChatSensitivity.AUTO
+    val timeout = settings.speakToChatTimeout ?: SpeakToChatTimeout.STANDARD
+    Group(
+        null,
+        footer = "Music pauses and outside sound comes in when you start talking.",
+        rows = buildList {
+            add { ToggleRow(Icons.Rounded.RecordVoiceOver, "Speak-to-Chat", "", settings.speakToChat, vm::setSpeakToChat) }
+            if (settings.speakToChat == true) {
+                add {
+                    var open by remember { mutableStateOf(false) }
+                    NavRow(Icons.Rounded.Hearing, "Voice Detection", settings.speakToChatSensitivity?.label ?: "—") { open = true }
+                    if (open) {
+                        ChoiceSheet("Voice Detection", SpeakToChatSensitivity.entries.toList(), settings.speakToChatSensitivity,
+                            label = { it.label }, onDismiss = { open = false }) { vm.setSpeakToChatConfig(it, timeout) }
+                    }
+                }
+                add {
+                    var open by remember { mutableStateOf(false) }
+                    NavRow(Icons.Rounded.Timer, "End Chat Mode", settings.speakToChatTimeout?.label ?: "—") { open = true }
+                    if (open) {
+                        ChoiceSheet("End Chat Mode After", SpeakToChatTimeout.entries.toList(), settings.speakToChatTimeout,
+                            label = { it.label }, onDismiss = { open = false }) { vm.setSpeakToChatConfig(sensitivity, it) }
                     }
                 }
             }
-            add {
-                var open by remember { mutableStateOf(false) }
-                NavRow(Icons.Rounded.Timer, "End Chat Mode", settings.speakToChatTimeout?.label ?: "Connect to Check") { open = true }
-                if (open) {
-                    ChoiceSheet("End Chat Mode After", SpeakToChatTimeout.entries.toList(), settings.speakToChatTimeout,
-                        label = { it.label }, onDismiss = { open = false }) { vm.setSpeakToChatConfig(sensitivity, it) }
-                }
-            }
         }
-    }
-    Group("Speak-to-Chat", rows = chatRows)
+    )
+}
 
+@Composable
+private fun WearingPage(settings: DeviceSettings, vm: SunpodsViewModel) {
     Group(
-        "Wearing Detection",
+        null,
+        footer = "Your earbuds sense when you take them out.",
         rows = listOf(
-            { ToggleRow(Icons.Rounded.Sensors, "Pause When Removed", "Music pauses when you take an earbud out", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) },
-            { ToggleRow(Icons.Rounded.PowerSettingsNew, "Power Off When Removed", "Turns off when both earbuds are out, to save battery", settings.autoOffWhenRemoved, vm::setAutoOff) }
+            { ToggleRow(Icons.Rounded.Sensors, "Pause When Removed", "", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) },
+            { ToggleRow(Icons.Rounded.PowerSettingsNew, "Power Off When Removed", "", settings.autoOffWhenRemoved, vm::setAutoOff) }
         )
     )
+}
 
-    if (settings.promptsOn != null || settings.promptVolume != null) VoicePromptsGroup(settings, vm)
-
-    CallsGroup(settings, vm)
-
+@Composable
+private fun ConnectionPage(settings: DeviceSettings, vm: SunpodsViewModel) {
     // Only what these earbuds say they support, named the way they name it.
     val general = settings.general.orEmpty()
     if (general.isNotEmpty() || settings.autoSwitch != null) {
@@ -1422,22 +1645,46 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
             rows += {
                 // Two devices at once needs Classic; the earbuds turn it off on LE Audio.
                 val offNote = if (g.key == "MULTIPOINT_SETTING") leOffNote(settings) else null
-                ToggleRow(generalIcon(g.key), g.title, g.subtitle, g.on, offNote) { on -> vm.setGeneral(g.slot, on) }
+                ToggleRow(generalIcon(g.key), g.title, "", g.on, offNote) { on -> vm.setGeneral(g.slot, on) }
             }
         }
         settings.autoSwitch?.let { on ->
-            rows += {
-                ToggleRow(Icons.Rounded.SwapHoriz, "Switch Devices Automatically", "Your earbuds move between your connected devices by themselves", on, leOffNote(settings), vm::setAutoSwitch)
-            }
+            rows += { ToggleRow(Icons.Rounded.SwapHoriz, "Switch Devices Automatically", "", on, leOffNote(settings), vm::setAutoSwitch) }
         }
-        Group(
-            "Connection and Calls",
-            rows = rows
-        )
+        Group(null, rows = rows)
     }
-
     val live = vm.battery.collectAsState().value
     DevicesCard(connected = live.left != null || live.right != null, leOn = rememberLeOn(settings))
+}
+
+/** One level below a tab: the page for [page]. */
+@Composable
+private fun PageContent(
+    page: Page,
+    settings: DeviceSettings,
+    vm: SunpodsViewModel,
+    onShareDiagnostics: () -> Unit,
+    onOpenBluetoothSettings: () -> Unit,
+    dynamicColor: Boolean,
+    onDynamicColorChange: (Boolean) -> Unit
+) {
+    when (page) {
+        Page.AUTOMATIONS -> AutomationsCard()
+        Page.SPEAK_TO_CHAT -> SpeakToChatPage(settings, vm)
+        Page.WEARING -> WearingPage(settings, vm)
+        Page.VOICE_PROMPTS -> VoicePromptsGroup(settings, vm)
+        Page.CALLS -> CallsGroup(settings, vm)
+        Page.CONNECTION -> ConnectionPage(settings, vm)
+        Page.SAFE_LISTENING -> SafeListeningGroup(vm)
+        Page.FIND -> LastSeenSettings()
+        Page.APPEARANCE -> AppearancePage(dynamicColor, onDynamicColorChange)
+        Page.DATA -> YourDataGroup()
+        Page.UPDATES -> UpdatesGroup()
+        Page.HELP -> HelpPage(onShareDiagnostics, onOpenBluetoothSettings)
+        Page.BATTERY_HEALTH -> BatteryHealthCard(vm.battery.collectAsState().value.updatedAt)
+        Page.BATTERY_WEEK -> BatteryWeekPage(vm.battery.collectAsState().value)
+        Page.BATTERY_ALERTS -> BatteryAlertsPage()
+    }
 }
 
 private fun generalIcon(key: String) = when {
@@ -1450,8 +1697,9 @@ private fun generalIcon(key: String) = when {
 /** One earbud: its render, its side and what a touch does. Tap to change. */
 @Composable
 private fun TouchSide(side: String, art: Int, current: TouchFunction?, options: List<TouchOption>?, modifier: Modifier = Modifier, onPick: (TouchFunction) -> Unit) {
-    // What the earbuds list for this side, in their words; the full list only if they haven't said.
+    // What the earbuds list for this side; a typical key only if they haven't said.
     fun hint(f: TouchFunction) = options?.firstOrNull { it.function == f }?.let(TouchCapability::describe) ?: touchHint(f)
+    fun legend(f: TouchFunction) = options?.firstOrNull { it.function == f }?.let(TouchCapability::legend)?.takeIf { it.isNotEmpty() } ?: touchLegend(f)
     val colors = MaterialTheme.colorScheme
     var open by remember { mutableStateOf(false) }
     Column(
@@ -1461,20 +1709,20 @@ private fun TouchSide(side: String, art: Int, current: TouchFunction?, options: 
             .padding(vertical = 16.dp, horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Image(painterResource(art), contentDescription = null, modifier = Modifier.size(width = 120.dp, height = 100.dp))
-        Spacer(Modifier.height(12.dp))
-        Text(side, style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
+        Image(painterResource(art), contentDescription = null, modifier = Modifier.size(width = 96.dp, height = 80.dp))
         Spacer(Modifier.height(8.dp))
+        Text(side.uppercase(), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+        Spacer(Modifier.height(6.dp))
         Surface(color = colors.secondaryContainer, shape = CircleShape) {
             Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(current?.label ?: "Connect to Check", style = MaterialTheme.typography.labelLarge, color = colors.onSecondaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Text(current?.label ?: "—", style = MaterialTheme.typography.labelLarge, color = colors.onSecondaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 Spacer(Modifier.width(4.dp))
                 Icon(Icons.Rounded.ExpandMore, contentDescription = null, tint = colors.onSecondaryContainer, modifier = Modifier.size(18.dp))
             }
         }
         if (current != null) {
-            Spacer(Modifier.height(8.dp))
-            Text(hint(current), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, textAlign = TextAlign.Center, minLines = 2)
+            Spacer(Modifier.height(12.dp))
+            GestureKey(legend(current))
         }
     }
     if (open) {
@@ -1484,6 +1732,37 @@ private fun TouchSide(side: String, art: Int, current: TouchFunction?, options: 
             ?: TouchFunction.entries.filter { it != TouchFunction.VOLUME_CONTROL || it == current }, current,
             label = { it.label }, detail = { hint(it) }, onDismiss = { open = false }, onPick = onPick)
     }
+}
+
+/** Gestures and what they do, as a compact two-column key instead of a sentence. */
+@Composable
+private fun GestureKey(rows: List<Pair<String, String>>) {
+    val colors = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(horizontal = 4.dp)) {
+        rows.forEach { (gesture, does) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(color = colors.surfaceContainerHighest, shape = RoundedCornerShape(6.dp), modifier = Modifier.widthIn(min = 44.dp)) {
+                    Text(
+                        gesture,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(does, style = MaterialTheme.typography.bodySmall, color = colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+private fun touchLegend(function: TouchFunction): List<Pair<String, String>> = when (function) {
+    TouchFunction.AMBIENT_SOUND_CONTROL -> listOf("1×" to "Noise mode", "Hold" to "Attention")
+    TouchFunction.PLAYBACK_CONTROL -> listOf("1×" to "Play/Pause", "2×" to "Next", "3×" to "Previous")
+    TouchFunction.VOLUME_CONTROL -> listOf("1×" to "Volume up", "Hold" to "Volume down")
+    TouchFunction.NONE -> listOf("—" to "Nothing")
 }
 
 private fun touchHint(function: TouchFunction): String = when (function) {
@@ -1501,10 +1780,6 @@ private fun touchHint(function: TouchFunction): String = when (function) {
 private fun DeviceScreen(
     battery: BatteryState,
     settings: DeviceSettings,
-    onShareDiagnostics: () -> Unit,
-    onOpenBluetoothSettings: () -> Unit,
-    dynamicColor: Boolean,
-    onDynamicColorChange: (Boolean) -> Unit,
     liveAt: Long = 0L
 ) {
     val colors = MaterialTheme.colorScheme
@@ -1513,8 +1788,8 @@ private fun DeviceScreen(
             painter = painterResource(R.drawable.buds_pair),
             contentDescription = null,
             modifier = Modifier
-                .fillMaxWidth(0.8f)
-                .height(200.dp)
+                .fillMaxWidth(0.62f)
+                .height(150.dp)
                 .drawBehind {
                     val r = size.height / 2
                     scale(scaleX = size.width / size.height * 0.9f, scaleY = 1f, pivot = center) {
@@ -1525,62 +1800,72 @@ private fun DeviceScreen(
                     }
                 }
         )
-        Spacer(Modifier.height(8.dp))
-        Text(settings.modelName ?: "WF-1000XM5", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(4.dp))
-        Text("Sony wireless noise cancelling earbuds", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
-    }
-
-    Group(
-        "About",
-        inset = 20.dp,
-        rows = listOf(
-            { InfoRow("Firmware Version", settings.firmware ?: "Connect to Check") },
-            { InfoRow("Audio Codec", settings.codec ?: "Connect to Check") },
-            { InfoRow("Battery Last Updated", if (battery.updatedAt == 0L) "Never" else relativeValue(maxOf(battery.updatedAt, liveAt))) },
-            { InfoRow("Settings Last Synced", if (settings.readAt == 0L) "Never" else relativeValue(settings.readAt)) }
+        Text(settings.modelName ?: "WF-1000XM5", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            listOfNotNull(settings.firmware?.let { "Firmware $it" }, settings.codec).joinToString("  ·  ").ifEmpty { "Sony wireless earbuds" },
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.onSurfaceVariant
         )
-    )
+    }
 
     EarbudsGroup(settings)
 
-    LastSeenSettings()
-
+    val context = LocalContext.current
+    val lastSeen = remember { LastSeenStore.enabled(context) && LastSeenStore.hasLocationPermission(context) }
     Group(
-        "Appearance",
+        null,
+        rows = listOf(
+            { PageRow(Icons.Rounded.LocationOn, Page.FIND, if (lastSeen) "On" else "Off") },
+            { PageRow(Icons.Rounded.Palette, Page.APPEARANCE) },
+            { PageRow(Icons.Rounded.SaveAlt, Page.DATA) },
+            { PageRow(Icons.Rounded.SystemUpdate, Page.UPDATES) },
+            { PageRow(Icons.Rounded.Info, Page.HELP, SunpodsInfo.VERSION) }
+        )
+    )
+}
+
+@Composable
+private fun AppearancePage(dynamicColor: Boolean, onDynamicColorChange: (Boolean) -> Unit) {
+    Group(
+        null,
         rows = listOf(
             {
                 var picking by remember { mutableStateOf(false) }
-                NavRow(Icons.Rounded.Widgets, "Add a Widget", "Choose from small, medium and large sizes") { picking = true }
+                NavRow(Icons.Rounded.Widgets, "Add a Widget", null) { picking = true }
                 if (picking) WidgetPickerSheet(onDismiss = { picking = false })
             },
-            {
-                ToggleRow(
-                    Icons.Rounded.Palette, "Use Wallpaper Colours",
-                    "Matches the app's colours to your wallpaper", dynamicColor, onDynamicColorChange
-                )
-            }
+            { ToggleRow(Icons.Rounded.Palette, "Use Wallpaper Colours", "", dynamicColor, onDynamicColorChange) }
         )
     )
+}
 
-    YourDataGroup()
-
-    UpdatesGroup()
-
+@Composable
+private fun HelpPage(onShareDiagnostics: () -> Unit, onOpenBluetoothSettings: () -> Unit) {
+    val context = LocalContext.current
     Group(
-        "Help",
+        null,
         rows = listOf(
-            { NavRow(Icons.Rounded.Bluetooth, "Bluetooth Settings", "Pair, reconnect or forget your earbuds", onOpenBluetoothSettings) },
-            { NavRow(Icons.Rounded.BugReport, "Send Diagnostics", "Share a technical log to help solve problems", onShareDiagnostics) },
+            { NavRow(Icons.Rounded.Bluetooth, "Bluetooth Settings", null, onClick = onOpenBluetoothSettings) },
+            { NavRow(Icons.Rounded.BugReport, "Send Diagnostics", null, onClick = onShareDiagnostics) },
             {
-                val context = LocalContext.current
-                NavRow(Icons.Rounded.RestartAlt, "Run Setup Again", "Review permissions, pairing and optional features") {
+                NavRow(Icons.Rounded.RestartAlt, "Run Setup Again", null) {
                     OnboardingStore.setDone(context, false)
                     Backup.restart(context)
                 }
             }
         ),
-        footer = "SunPods works without an account. Its only use of the internet is the update check, which you can turn off. Your earbuds connect to one control app at a time, so close Sony Sound Connect while you use SunPods.\n\nVersion ${SunpodsInfo.VERSION}. Free and open source under the GPL-3.0."
+        footer = "Your earbuds talk to one app at a time, so close Sony Sound Connect while you use SunPods."
+    )
+    Group(
+        null,
+        rows = listOf(
+            { InfoRow("Version", SunpodsInfo.VERSION) },
+            { NavRow(null, "Source Code", "GitHub") { Updates.open(context, "https://github.com/${Updates.REPO}") } }
+        ),
+        inset = 16.dp,
+        footer = "Free and open source under the GPL-3.0. No account, and nothing leaves your phone except the update check."
     )
 }
 
@@ -1599,7 +1884,7 @@ private fun EarbudsGroup(settings: DeviceSettings) {
     val rows = mutableListOf<@Composable () -> Unit>()
     val a = assistant
     if (a != null) rows += {
-        NavRow(Icons.Rounded.RecordVoiceOver, "Voice Assistant", if (le) LE_OFF_NOTE else a.first?.let(VoiceAssistantSetting::label) ?: "Connect to Check") {
+        NavRow(Icons.Rounded.RecordVoiceOver, "Voice Assistant", if (le) LE_OFF_NOTE else a.first?.let(VoiceAssistantSetting::label) ?: "—") {
             if (!le) choosing = true
         }
         if (choosing) {
@@ -1608,9 +1893,9 @@ private fun EarbudsGroup(settings: DeviceSettings) {
                 onDismiss = { choosing = false }, onPick = { choosing = false; vm.setAssistant(it) })
         }
     }
-    rows += { NavRow(Icons.Rounded.Hearing, "Earbud Fit Test", "Check that your ear tips seal well") { fitting = true } }
-    rows += { NavRow(Icons.Rounded.PowerSettingsNew, "Turn Off Your Earbuds", "Turns both earbuds off until you put them in the case") { confirmOff = true } }
-    rows += { NavRow(Icons.Rounded.RestartAlt, "Reset Earbud Settings", "Puts your earbuds' settings back to how they came") { confirmReset = true } }
+    rows += { NavRow(Icons.Rounded.Hearing, "Ear Tip Fit Test", null) { fitting = true } }
+    rows += { NavRow(Icons.Rounded.PowerSettingsNew, "Turn Off Earbuds", null) { confirmOff = true } }
+    rows += { NavRow(Icons.Rounded.RestartAlt, "Reset Earbud Settings", null) { confirmReset = true } }
     Group("Your Earbuds", rows = rows, footer = note)
 
     if (fitting) FitTestSheet(vm) { fitting = false }
@@ -1619,7 +1904,7 @@ private fun EarbudsGroup(settings: DeviceSettings) {
             onDismissRequest = { confirmOff = false },
             title = { Text("Turn off your earbuds?") },
             text = { Text("They stay off until you put them in the case and take them out again.") },
-            confirmButton = { TextButton(onClick = { confirmOff = false; vm.powerOff { ok -> note = if (ok) null else "Couldn't reach your earbuds to turn them off." } }) { Text("Turn Off") } },
+            confirmButton = { TextButton(onClick = { confirmOff = false; vm.powerOff { ok -> note = if (ok) null else "Couldn't turn off your earbuds. Make sure they're connected." } }) { Text("Turn Off") } },
             dismissButton = { TextButton(onClick = { confirmOff = false }) { Text("Cancel") } }
         )
     }
@@ -1627,8 +1912,8 @@ private fun EarbudsGroup(settings: DeviceSettings) {
         AlertDialog(
             onDismissRequest = { confirmReset = false },
             title = { Text("Reset your earbuds' settings?") },
-            text = { Text("Equaliser, noise control, touch controls and the other settings go back to how they came. Your pairings stay.") },
-            confirmButton = { TextButton(onClick = { confirmReset = false; vm.resetSettings { ok -> note = if (ok) "Your earbuds' settings are reset." else "Couldn't reset your earbuds. Make sure both are connected, then try again." } }) { Text("Reset") } },
+            text = { Text("Equaliser, noise control, touch controls and other settings go back to their defaults. Your paired devices stay.") },
+            confirmButton = { TextButton(onClick = { confirmReset = false; vm.resetSettings { ok -> note = if (ok) "Your earbuds are back to their original settings." else "Couldn't reset your earbuds. Make sure both are connected and try again." } }) { Text("Reset") } },
             dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } }
         )
     }
@@ -1646,27 +1931,36 @@ private fun FitTestSheet(vm: SunpodsViewModel, onDone: () -> Unit) {
     LaunchedEffect(Unit) { vm.fitTips { tips = it; size = it?.sizes?.getOrNull(it.sizes.size / 2); loaded = true } }
     ModalBottomSheet(onDismissRequest = { if (!running) onDone() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp).navigationBarsPadding()) {
-            Text("Earbud Fit Test", style = MaterialTheme.typography.titleLarge)
+            Text("Ear Tip Fit Test", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(12.dp))
+            val step = when {
+                !loaded -> 0
+                tips == null -> 1
+                running -> 2
+                result != null -> 3
+                else -> 4
+            }
+            androidx.compose.animation.AnimatedContent(step to result, transitionSpec = { fadeThrough() }, label = "fit") { (shown, res) ->
+            Column(Modifier.fillMaxWidth()) {
             val t = tips
-            when {
-                !loaded -> Text("Checking your earbuds", style = MaterialTheme.typography.bodyMedium)
-                t == null -> Text("Your earbuds didn't offer the fit test. Make sure they're connected, then try again.", style = MaterialTheme.typography.bodyMedium)
-                running -> {
-                    Text("Keep still and stay quiet while each earbud plays a short tone.", style = MaterialTheme.typography.bodyMedium)
+            when (shown) {
+                0 -> Text("Getting your earbuds ready…", style = MaterialTheme.typography.bodyMedium)
+                1 -> Text("Couldn't start the fit test. Make sure your earbuds are connected and in your ears.", style = MaterialTheme.typography.bodyMedium)
+                2 -> {
+                    Text("Stay still and quiet while your earbuds play a short tone.", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(16.dp))
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
-                result != null -> {
-                    val r = result!!
+                3 -> {
+                    val r = res ?: return@Column
                     if (r.error != null) Text(r.error, style = MaterialTheme.typography.bodyMedium)
                     else {
                         Text("Left: ${if (r.left == true) "Good seal" else "Poor seal"}", style = MaterialTheme.typography.titleMedium)
                         Text("Right: ${if (r.right == true) "Good seal" else "Poor seal"}", style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            if (r.left == true && r.right == true) "Both tips fit well, so noise cancelling works at its best."
-                            else "Try twisting the earbud in a little further, or a different tip size, then test again.",
+                            if (r.left == true && r.right == true) "A great fit. Noise cancelling is working at its best."
+                            else "Twist the earbud in a little further or try another tip size, then test again.",
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
@@ -1674,7 +1968,8 @@ private fun FitTestSheet(vm: SunpodsViewModel, onDone: () -> Unit) {
                     Button(onClick = { result = null }, modifier = Modifier.fillMaxWidth()) { Text("Test Again") }
                 }
                 else -> {
-                    Text("Put both earbuds in, then choose the tip size you're using.", style = MaterialTheme.typography.bodyMedium)
+                    if (t == null) return@Column
+                    Text("Put both earbuds in and choose the tip size you're using.", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         t.sizes.forEach { s ->
@@ -1685,8 +1980,10 @@ private fun FitTestSheet(vm: SunpodsViewModel, onDone: () -> Unit) {
                     Button(
                         onClick = { running = true; vm.runFitTest(t, size ?: t.sizes.first()) { result = it; running = false } },
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("Start the Test") }
+                    ) { Text("Start Test") }
                 }
+            }
+            }
             }
         }
     }
@@ -1701,10 +1998,10 @@ private fun UpdatesGroup() {
     var result by remember { mutableStateOf<String?>(null) }
     var found by remember { mutableStateOf<Updates.Release?>(null) }
     Group(
-        "Updates",
+        null,
         rows = listOf(
             {
-                ToggleRow(Icons.Rounded.SystemUpdate, "Check for Updates", "Once a day, SunPods asks GitHub for a new version and lets you know", on) {
+                ToggleRow(Icons.Rounded.SystemUpdate, "Check for Updates", "", on) {
                     on = it
                     Updates.setEnabled(context, it)
                 }
@@ -1714,7 +2011,7 @@ private fun UpdatesGroup() {
                 NavRow(
                     Icons.Rounded.Refresh,
                     if (release != null) "Get SunPods ${release.version}" else "Check Now",
-                    if (checking) "Checking" else result ?: "You have version ${SunpodsInfo.VERSION}"
+                    if (checking) "Checking" else result ?: SunpodsInfo.VERSION
                 ) {
                     if (release != null) {
                         Updates.open(context, release.url)
@@ -1724,17 +2021,17 @@ private fun UpdatesGroup() {
                             val latest = Updates.latest()
                             found = latest?.takeIf { Updates.isNewer(it.version, SunpodsInfo.VERSION) }
                             result = when {
-                                latest == null -> "Couldn't reach GitHub. Check your connection and try again."
-                                found != null -> "Version ${latest.version} is out. Tap to download it."
-                                else -> "You're up to date (version ${SunpodsInfo.VERSION})"
+                                latest == null -> "Couldn't reach GitHub"
+                                found != null -> "${latest.version} is out"
+                                else -> "Up to date"
                             }
                             checking = false
                         }
                     }
                 }
             },
-            { NavRow(Icons.Rounded.Code, "Source Code", "See the code, report a bug or suggest a feature on GitHub") { Updates.open(context, "https://github.com/${Updates.REPO}") } }
-        )
+        ),
+        footer = "Once a day SunPods asks GitHub for a new version. Nothing else is sent."
     )
 }
 
@@ -1750,7 +2047,8 @@ private fun LastSeenSettings() {
         }
     }
     Group(
-        "Find My Earbuds",
+        null,
+        footer = "Saves where your earbuds disconnect, only on this phone.",
         rows = buildList {
             add {
                 ToggleRow(
@@ -1811,17 +2109,17 @@ private fun VoicePromptsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
     var end by remember { mutableStateOf(QuietHours.endHour(context)) }
     val rows = mutableListOf<@Composable () -> Unit>()
     rows += {
-        ToggleRow(Icons.Rounded.RecordVoiceOver, "Voice Prompts", "Spoken alerts such as \"Battery about 20%\"", settings.promptsOn) { vm.setPrompts(it) }
+        ToggleRow(Icons.Rounded.Campaign, "Voice Prompts", "", settings.promptsOn) { vm.setPrompts(it) }
     }
     if (settings.promptVolume != null) rows += {
         var open by remember { mutableStateOf(false) }
-        NavRow(Icons.Rounded.VolumeUp, "Prompt Volume", promptVolumeLabel(settings.promptVolume)) { open = true }
+        NavRow(Icons.Rounded.VolumeUp, "Volume", promptVolumeLabel(settings.promptVolume)) { open = true }
         if (open) ChoiceSheet("Prompt Volume", PROMPT_VOLUMES, settings.promptVolume, label = ::promptVolumeLabel, onDismiss = { open = false }) {
             vm.setPromptVolume(it)
         }
     }
     rows += {
-        ToggleRow(Icons.Rounded.Bedtime, "Quiet Hours", "Turns prompts off from ${hourLabel(start)} to ${hourLabel(end)}", quiet) {
+        ToggleRow(Icons.Rounded.Bedtime, "Quiet Hours", "", quiet) {
             quiet = it; vm.setQuietHours(it, start, end)
         }
     }
@@ -1842,8 +2140,8 @@ private fun VoicePromptsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
         }
     }
     Group(
-        "Voice Prompts",
-        footer = if (quiet) "Quiet Hours are set on your earbuds, so they work even when SunPods is closed. The connection prompt may still play once if your earbuds connect during Quiet Hours." else null,
+        null,
+        footer = if (quiet) "Prompts stay off from ${hourLabel(start)} to ${hourLabel(end)}, even when SunPods is closed." else "Spoken alerts like \"Battery about 20%\".",
         rows = rows
     )
 }
@@ -1876,22 +2174,22 @@ private fun YourDataGroup() {
             val result = withContext(Dispatchers.IO) {
                 runCatching { Backup.read(context, uri).let { it to Backup.inspect(it) } }
             }
-            result.onSuccess { pending = it }.onFailure { toast(it.message ?: "This file isn't a SunPods backup. Choose another file.") }
+            result.onSuccess { pending = it }.onFailure { toast(it.message ?: "This isn't a SunPods backup. Choose another file.") }
         }
     }
 
     Group(
-        "Your Data",
+        null,
         rows = listOf(
-            { NavRow(Icons.Rounded.SaveAlt, "Back Up", "Save your settings, automations, Last Seen location and battery history to a file") { save.launch(Backup.suggestedName()) } },
-            { NavRow(Icons.Rounded.SettingsBackupRestore, "Restore from Backup", "Load your data from a SunPods backup file") { open.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) } },
+            { NavRow(Icons.Rounded.SaveAlt, "Back Up", null) { save.launch(Backup.suggestedName()) } },
+            { NavRow(Icons.Rounded.SettingsBackupRestore, "Restore from Backup", null) { open.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) } },
             {
-                NavRow(Icons.Rounded.TableChart, "Export Battery History", "Save as a CSV file") {
+                NavRow(Icons.Rounded.TableChart, "Export Battery History", "CSV") {
                     csv.launch("SunPods-battery-history-" + java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date()) + ".csv")
                 }
             }
         ),
-        footer = "Files are saved only where you choose. Backups include your Last Seen location, so store them securely."
+        footer = "Backups hold your settings, automations, battery history and Last Seen location. Keep them somewhere safe."
     )
 
     pending?.let { (text, s) ->
@@ -1930,9 +2228,9 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
     var tick by remember { mutableStateOf(0) }
     val le = remember(settings.readAt, tick) { LeAudio.anyConnected(context) }
     val rows = mutableListOf<@Composable () -> Unit>()
-    rows += { NavRow(Icons.Rounded.Mic, "Test Your Call Mic", "Hear yourself the way callers do") { testing = true } }
+    rows += { NavRow(Icons.Rounded.Mic, "Test Your Call Mic", null) { testing = true } }
     if (settings.headGestures != null) rows += {
-        ToggleRow(Icons.Rounded.Gesture, "Head Gestures", "Nod to answer a call, shake your head to decline", settings.headGestures, vm::setHeadGestures)
+        ToggleRow(Icons.Rounded.Gesture, "Head Gestures", "", settings.headGestures, vm::setHeadGestures)
     }
     val phoneLe = remember { LeAudio.phoneSupports(context) }
     if (settings.leModeSupported == true && phoneLe) rows += {
@@ -1950,20 +2248,21 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
     // Set to Classic but not connected at all, as after a switch the phone didn't finish.
     val classicUp = remember(settings.readAt, tick) { runCatching { context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.getProfileConnectionState(android.bluetooth.BluetoothProfile.A2DP) == android.bluetooth.BluetoothProfile.STATE_CONNECTED }.getOrDefault(false) }
     if (!settling && !le && !classicUp) rows += {
-        NavRow(Icons.Rounded.RestartAlt, "Reconnect Your Earbuds", "Your earbuds aren't connected. Tap to pair them again.") { switching = false }
+        NavRow(Icons.Rounded.RestartAlt, "Reconnect Your Earbuds", null, note = "Not connected") { switching = false }
     }
     // The reverse: the earbuds are set to Classic but one is still holding on to LE Audio.
     if (!settling && le && (settings.leOn == false || SonyControlSessionManager.classicOnly(context))) rows += {
-        NavRow(Icons.Rounded.RestartAlt, "Finishing the Switch to Classic", "Put both earbuds in the case, close the lid for 10 seconds, then take them out.") { tick++ }
+        NavRow(Icons.Rounded.RestartAlt, "Finishing the Switch to Classic", null, note = "Case them for 10 seconds, then take them out") { tick++ }
     }
     if (!settling && settings.leOn == true && !le) rows += {
-        NavRow(Icons.Rounded.RestartAlt, "Finish Switching Back to Classic", "Your earbuds still have LE Audio on. Tap to turn it off.") { switching = false }
+        NavRow(Icons.Rounded.RestartAlt, "Finish Switching to Classic", null, note = "LE Audio is still on") { switching = false }
     }
     Group(
-        "Calls",
+        null,
         footer = when {
+            settings.headGestures != null && settings.leModeSupported != true -> "With head gestures, nod to answer a call or shake your head to decline."
             settings.leModeSupported != true -> null
-            phoneLe -> "LE Audio often makes your voice clearer on calls. It needs a phone that supports it."
+            phoneLe -> "Nod to answer a call or shake your head to decline. LE Audio makes your voice clearer on calls."
             android.os.Build.VERSION.SDK_INT < 33 -> "Your earbuds support LE Audio, but it needs Android 13 or later. They use Classic on this phone."
             else -> "Your earbuds support LE Audio, but this phone doesn't, or it's turned off in Developer options. They use Classic on this phone."
         },

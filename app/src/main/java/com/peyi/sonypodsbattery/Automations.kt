@@ -31,11 +31,11 @@ import org.json.JSONObject
  * trigger ends, the mode you had before comes back, unless you changed it yourself meanwhile.
  */
 
-enum class AutoAction(val label: String) {
-    NC("Noise Cancelling"),
-    AMBIENT("Ambient Sound"),
-    AMBIENT_VOICE("Ambient Sound with Focus on Voice"),
-    OFF("Off");
+enum class AutoAction(val label: String, val short: String) {
+    NC("Noise Cancelling", "Cancelling"),
+    AMBIENT("Ambient Sound", "Ambient"),
+    AMBIENT_VOICE("Ambient Sound with Focus on Voice", "Ambient + Voice"),
+    OFF("Off", "Off");
 
     val mode: ListeningMode
         get() = when (this) {

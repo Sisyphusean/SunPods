@@ -66,6 +66,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.HealthAndSafety
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
@@ -91,11 +96,47 @@ internal fun BatteryInsightsScreen(battery: BatteryState) {
 
     ListeningLeftCard(battery, outlook)
     HistoryCard(samples, now)
-    WeekCard(samples, now)
     StatsGrid(battery, samples, outlook, now)
-    BatteryHealthCard(battery.updatedAt)
-    AlertsCard()
+    BatteryMoreGroup()
 }
+
+/** The deeper battery views, each a tap away so the tab stays short. */
+@Composable
+private fun BatteryMoreGroup() {
+    val context = LocalContext.current
+    val open = LocalOpenPage.current
+    val alerts = remember { BatteryNudges.budAlerts(context) || BatteryNudges.caseAlerts(context) }
+    SunCard {
+        BatteryPageRow(Icons.Rounded.HealthAndSafety, Page.BATTERY_HEALTH, null) { open(Page.BATTERY_HEALTH) }
+        RowDivider()
+        BatteryPageRow(Icons.Rounded.CalendarMonth, Page.BATTERY_WEEK, null) { open(Page.BATTERY_WEEK) }
+        RowDivider()
+        BatteryPageRow(Icons.Rounded.BatteryAlert, Page.BATTERY_ALERTS, if (alerts) "On" else "Off") { open(Page.BATTERY_ALERTS) }
+    }
+}
+
+@Composable
+private fun BatteryPageRow(icon: androidx.compose.ui.graphics.vector.ImageVector, page: Page, value: String?, onClick: () -> Unit) {
+    SettingRow(icon, page.title, modifier = Modifier.clickable(onClick = onClick)) {
+        if (value != null) {
+            Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(4.dp))
+        }
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(20.dp))
+    }
+}
+
+/** The week page: listening per day. */
+@Composable
+internal fun BatteryWeekPage(battery: BatteryState) {
+    val context = LocalContext.current
+    val now = remember(battery.updatedAt) { System.currentTimeMillis() }
+    val samples = remember(battery.updatedAt) { BatteryHistory.load(context, now - 7 * DAY) }
+    WeekCard(samples, now)
+}
+
+@Composable
+internal fun BatteryAlertsPage() = AlertsCard()
 
 // ---------------------------------------------------------------------- estimate
 
@@ -122,47 +163,34 @@ private fun ListeningLeftCard(battery: BatteryState, outlook: BatteryOutlook) {
         battery.right?.takeIf { it in 1..100 && !battery.rightCharging }
     )
     val minutes = buds.minOrNull()?.let { (it / rate * 60).roundToInt() }
-    val count = remember { androidx.compose.animation.core.Animatable(0f) }
-    androidx.compose.runtime.LaunchedEffect(minutes) { count.animateTo((minutes ?: 0).toFloat(), tween(if (count.value == 0f) 900 else 450)) }
+    // Shown straight away; it only rolls when the estimate changes (a new reading, another mode).
+    val count = remember { androidx.compose.animation.core.Animatable((minutes ?: 0).toFloat()) }
+    androidx.compose.runtime.LaunchedEffect(minutes) { count.animateTo((minutes ?: 0).toFloat(), tween(420, easing = Motion.Arrive)) }
     val shown = count.value
 
-    Surface(color = colors.primaryContainer, shape = MaterialTheme.shapes.extraLarge) {
-        Column(Modifier.fillMaxWidth().padding(24.dp)) {
-            Text("Listening Time Remaining", style = MaterialTheme.typography.labelLarge, color = colors.onPrimaryContainer)
+    SunCard {
+        Column(Modifier.fillMaxWidth().padding(20.dp)) {
+            Text("LISTENING TIME LEFT", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+            Spacer(Modifier.height(4.dp))
             Text(
-                if (minutes == null) { if (battery.leftCharging || battery.rightCharging) "Charging" else "Unavailable" } else BatteryInsights.formatMinutes(shown.roundToInt()),
-                style = MaterialTheme.typography.displayMedium,
-                color = colors.onPrimaryContainer
+                if (minutes == null) { if (battery.leftCharging || battery.rightCharging) "Charging" else "—" } else BatteryInsights.formatMinutes(shown.roundToInt()),
+                style = MaterialTheme.typography.displaySmall,
+                color = colors.primary
             )
             Text(
                 when {
-                    minutes == null && buds.isEmpty() && (battery.leftCharging || battery.rightCharging) -> "Both earbuds are charging in the case."
-                    minutes == null -> "Take your earbuds out to see how long they'll last."
-                    outlook.measured -> "Based on this week's listening. The ${outlook.lowestBud?.lowercase()} earbud runs out first."
-                    else -> "Based on Sony's rating until SunPods learns how you listen."
+                    minutes == null && buds.isEmpty() && (battery.leftCharging || battery.rightCharging) -> "Both earbuds are in the case"
+                    minutes == null -> "Take your earbuds out to see"
+                    outlook.measured -> "${outlook.lowestBud ?: "One"} earbud runs out first"
+                    else -> "Estimated from Sony's rating for now"
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = colors.onPrimaryContainer
+                color = colors.onSurfaceVariant
             )
-            Spacer(Modifier.height(20.dp))
-            Text("Estimate for", style = MaterialTheme.typography.labelLarge, color = colors.onPrimaryContainer)
-            Spacer(Modifier.height(8.dp))
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                EstimateMode.entries.forEachIndexed { i, m ->
-                    SegmentedButton(
-                        selected = mode == m,
-                        onClick = { mode = m },
-                        shape = SegmentedButtonDefaults.itemShape(i, EstimateMode.entries.size),
-                        colors = SegmentedButtonDefaults.colors(
-                            activeContainerColor = colors.primary,
-                            activeContentColor = colors.onPrimary,
-                            inactiveContainerColor = Color.Transparent,
-                            inactiveContentColor = colors.onPrimaryContainer,
-                            activeBorderColor = colors.onPrimaryContainer.copy(alpha = 0.3f),
-                            inactiveBorderColor = colors.onPrimaryContainer.copy(alpha = 0.3f)
-                        ),
-                        icon = {}
-                    ) { Text(m.label, maxLines = 1) }
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                EstimateMode.entries.forEach { m ->
+                    FilterChip(selected = mode == m, onClick = { mode = m }, label = { Text(m.label) }, shape = CircleShape)
                 }
             }
         }
@@ -207,19 +235,12 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
     var picked by remember { mutableStateOf<Int?>(null) }
     val span = if (week) 7 * DAY else DAY
     val from = now - span
-    val count = if (week) 56 else 48
+    val count = if (week) 28 else 24
     val shown = remember(samples, week) { samples.filter { it.time >= from } }
     val slotList = remember(shown, from, count) { slots(shown, from, now, count) }
 
     Column {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            SectionHeader("Battery History", Modifier.weight(1f).padding(top = 12.dp))
-            SingleChoiceSegmentedButtonRow(Modifier.width(180.dp)) {
-                SegmentedButton(selected = !week, onClick = { week = false; picked = null }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("1 Day") }
-                SegmentedButton(selected = week, onClick = { week = true; picked = null }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("7 Days") }
-            }
-        }
-        Spacer(Modifier.height(4.dp))
+        SectionHeader("History")
         SunCard {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
                 if (shown.isEmpty()) {
@@ -245,24 +266,16 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                     color = colors.onSurfaceVariant
                 )
                 Spacer(Modifier.height(6.dp))
-                androidx.compose.foundation.layout.FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    val show = slot == null || slot.sample != null
-                    listOf("Left" to point.left, "Right" to point.right, "Case" to point.case).forEach { (name, v) ->
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Text(name, style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
-                            Spacer(Modifier.width(6.dp))
-                            Text(if (show) v?.takeIf { it in 1..100 }?.let { "$it%" } ?: (if (name == "Case") "Unknown" else "In Case") else "Unknown", style = MaterialTheme.typography.titleMedium)
-                        }
-                    }
-                    if (show && point.anyBudCharging()) {
-                        Text("Charging", style = MaterialTheme.typography.labelLarge, color = chargeColor(), maxLines = 1, softWrap = false)
-                    }
-                }
+                val show = slot == null || slot.sample != null
+                Text(
+                    if (!show) "No reading"
+                    else listOf("L" to point.left, "R" to point.right, "Case" to point.case)
+                        .joinToString("   ") { (n, v) -> "$n ${v?.takeIf { it in 1..100 }?.let { "$it%" } ?: "—"}" } +
+                        if (point.anyBudCharging()) "   Charging" else "",
+                    style = MaterialTheme.typography.titleMedium
+                )
                 Spacer(Modifier.height(16.dp))
-                Row(Modifier.fillMaxWidth()) {
+                Box(Modifier.fillMaxWidth()) {
                     BarChart(
                         slots = slotList,
                         series = series,
@@ -273,42 +286,28 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                                 if (i != null) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             }
                         },
-                        modifier = Modifier.weight(1f).height(180.dp)
+                        modifier = Modifier.fillMaxWidth().height(160.dp)
                             .semantics { contentDescription = "Battery history chart. Touch and drag to see each bar." }
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.height(180.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                        listOf("100%", "50%", "0%").forEach {
-                            Text(it, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
-                        }
-                    }
                 }
                 Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth().padding(end = 40.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(Modifier.fillMaxWidth().padding(start = 30.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     axisLabels(context, from, now, week).forEach {
                         Text(it, style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
                     }
                 }
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !week, onClick = { week = false; picked = null }, label = { Text("Day") }, shape = CircleShape)
+                    FilterChip(selected = week, onClick = { week = true; picked = null }, label = { Text("Week") }, shape = CircleShape)
+                    Spacer(Modifier.weight(1f))
                     Series.entries.forEach { s ->
-                        FilterChip(
-                            selected = s == series,
-                            onClick = { seriesName = s.name; picked = null },
-                            label = { Text(s.label) },
-                            leadingIcon = if (s == series) {
-                                { Icon(Icons.Rounded.Check, null, Modifier.size(FilterChipDefaults.IconSize)) }
-                            } else null
-                        )
+                        FilterChip(selected = s == series, onClick = { seriesName = s.name; picked = null }, label = { Text(s.label) }, shape = CircleShape)
                     }
                 }
             }
         }
-        Footer(
-            "Each bar is ${if (week) "3 hours" else "half an hour"}" +
-                (if (series == Series.BUDS) " and shows the lower earbud" else "") +
-                ". Green means charging. Gaps mean no data."
-        )
+        Footer("Touch and drag to see a reading. Green is charging.")
     }
 }
 
@@ -324,17 +323,29 @@ private fun BarChart(
     modifier: Modifier
 ) {
     val colors = MaterialTheme.colorScheme
-    val grid = colors.outlineVariant
+    val grid = colors.outlineVariant.copy(alpha = 0.5f)
+    val track = colors.onSurface.copy(alpha = 0.05f)
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(color = colors.onSurfaceVariant)
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
     val normal = colors.primary
     val charge = chargeColor()
     val low = colors.error
     val cursor = colors.onSurface.copy(alpha = 0.12f)
-    val grow = remember { androidx.compose.animation.core.Animatable(0f) }
+    // Drawn in full on arrival. Switching Day/Week or Earbuds/Case regrows the bars quickly, so
+    // it's clear the chart now shows something else.
+    val grow = remember { androidx.compose.animation.core.Animatable(1f) }
+    val firstDraw = remember { booleanArrayOf(true) }
     androidx.compose.runtime.LaunchedEffect(slots.size, series) {
+        if (firstDraw[0]) { firstDraw[0] = false; return@LaunchedEffect }
         grow.snapTo(0f)
-        grow.animateTo(1f, tween(700, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        grow.animateTo(1f, tween(320, easing = Motion.Arrive))
     }
-    fun index(x: Float, width: Float) = ((x / width) * slots.size).toInt().coerceIn(0, slots.lastIndex)
+    val gutterDp = 30.dp
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    fun index(x: Float, width: Float): Int {
+        val g = gutterDp.value * density
+        return (((x - g) / (width - g)) * slots.size).toInt().coerceIn(0, slots.lastIndex)
+    }
     Canvas(
         modifier
             .pointerInput(slots) {
@@ -353,19 +364,20 @@ private fun BarChart(
                 )
             }
     ) {
-        val w = size.width
+        val gutter = gutterDp.toPx()
+        val w = size.width - gutter
         val h = size.height
-        for (level in listOf(0, 50, 100)) {
+        for (level in listOf(50, 100)) {
             val y = h - level / 100f * h
-            drawLine(grid, Offset(0f, y), Offset(w, y), strokeWidth = 1.dp.toPx(),
-                pathEffect = if (level == 50) PathEffect.dashPathEffect(floatArrayOf(6f, 8f)) else null)
+            drawLine(grid, Offset(gutter, y), Offset(gutter + w, y), strokeWidth = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 8f)))
         }
         val slotW = w / slots.size
-        val barW = (slotW * 0.62f).coerceAtLeast(1.5.dp.toPx())
-        val radius = androidx.compose.ui.geometry.CornerRadius(barW / 2, barW / 2)
+        val barW = (slotW * 0.7f).coerceAtLeast(2.dp.toPx())
+        val radius = androidx.compose.ui.geometry.CornerRadius(barW / 2.5f, barW / 2.5f)
         slots.forEachIndexed { i, slot ->
-            val left = i * slotW + (slotW - barW) / 2
-            if (i == picked) drawRect(cursor, topLeft = Offset(i * slotW, 0f), size = Size(slotW, h))
+            val left = gutter + i * slotW + (slotW - barW) / 2
+            if (i == picked) drawRoundRect(cursor, topLeft = Offset(gutter + i * slotW, 0f), size = Size(slotW, h), cornerRadius = radius)
+            drawRoundRect(track, topLeft = Offset(left, 0f), size = Size(barW, h), cornerRadius = radius)
             val sample = slot.sample ?: return@forEachIndexed
             val level = sample.level(series) ?: return@forEachIndexed
             val color = when {
@@ -375,6 +387,12 @@ private fun BarChart(
             }.let { if (picked != null && i != picked) it.copy(alpha = 0.45f) else it }
             val barH = (level / 100f * h * grow.value).coerceAtLeast(barW)
             drawRoundRect(color, topLeft = Offset(left, h - barH), size = Size(barW, barH), cornerRadius = radius)
+        }
+        // Level marks on the left, over the grid, where the eye starts reading.
+        for (level in listOf(50, 100)) {
+            val text = measurer.measure("$level%", labelStyle)
+            val y = h - level / 100f * h
+            drawText(text, topLeft = Offset(0f, (y - text.size.height / 2f).coerceIn(0f, h - text.size.height)))
         }
     }
 }
@@ -417,7 +435,6 @@ private fun WeekCard(samples: List<BatterySample>, now: Long) {
     val shortName = java.text.SimpleDateFormat("EEEEE", java.util.Locale.getDefault())
 
     Column {
-        SectionHeader("Listening This Week")
         SunCard {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
                 val (dayStart, minutes) = days[picked.coerceIn(days.indices)]
@@ -444,9 +461,9 @@ private fun WeekCard(samples: List<BatterySample>, now: Long) {
                 ) {
                     days.forEachIndexed { i, (start, mins) ->
                         val on = i == picked
-                        val grow = remember { androidx.compose.animation.core.Animatable(0f) }
+                        val grow = remember { androidx.compose.animation.core.Animatable(mins.toFloat() / max) }
                         androidx.compose.runtime.LaunchedEffect(mins, max) {
-                            grow.animateTo(mins.toFloat() / max, tween(600, delayMillis = if (grow.value == 0f) i * 50 else 0, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                            grow.animateTo(mins.toFloat() / max, tween(350, easing = Motion.Arrive))
                         }
                         val fill = grow.value
                         val barColor by animateColorAsState(if (on) colors.primary else colors.primary.copy(alpha = 0.3f), label = "barColor")
@@ -481,10 +498,42 @@ private fun WeekCard(samples: List<BatterySample>, now: Long) {
                         }
                     }
                 }
+                val day = remember(samples, dayStart) { dayDetails(samples, dayStart) }
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider(thickness = 0.5.dp, color = colors.outlineVariant.copy(alpha = 0.7f))
+                val clock = DateFormat.getTimeFormat(LocalContext.current)
+                listOf(
+                    "Battery used" to (day.used?.let { "$it%" } ?: "—"),
+                    "Charged" to when (day.charges) { 0 -> "Not charged"; 1 -> "Once"; else -> "${day.charges} times" },
+                    "First out" to (day.first?.let { clock.format(java.util.Date(it)) } ?: "—"),
+                    "Last heard" to (day.last?.let { clock.format(java.util.Date(it)) } ?: "—")
+                ).forEach { (label, value) ->
+                    Row(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                        Text(label, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        Text(value, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
             }
         }
-        Footer("Tap a day for details.")
+        Footer("Tap a day to see it.")
     }
+}
+
+private data class DayDetails(val used: Int?, val charges: Int, val first: Long?, val last: Long?)
+
+/** One day from the readings: battery used by the lower earbud, charges, first and last reading out of the case. */
+private fun dayDetails(samples: List<BatterySample>, dayStart: Long): DayDetails {
+    val day = samples.filter { it.time >= dayStart && it.time < dayStart + DAY }
+    var used = 0
+    var charges = 0
+    day.zipWithNext().forEach { (a, b) ->
+        val la = a.budLevel(); val lb = b.budLevel()
+        if (la != null && lb != null && !b.anyBudCharging() && lb < la) used += la - lb
+        // Charging happens in the case, out of sight, so a clear jump in level counts as a charge too.
+        if ((!a.anyBudCharging() && b.anyBudCharging()) || (la != null && lb != null && lb >= la + 10)) charges++
+    }
+    val out = day.filter { it.budLevel() != null && !it.anyBudCharging() }
+    return DayDetails(if (day.size < 2) null else used, charges, out.firstOrNull()?.time, out.lastOrNull()?.time)
 }
 
 // ---------------------------------------------------------------------- stats
@@ -540,7 +589,7 @@ private fun StatsGrid(battery: BatteryState, samples: List<BatterySample>, outlo
                 }
             }
             val explained = stats.getOrNull(open)
-            AnimatedVisibility(explained != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+            AnimatedVisibility(explained != null, enter = revealIn(), exit = revealOut()) {
                 Text(
                     explained?.explain.orEmpty(),
                     style = MaterialTheme.typography.bodyMedium,
@@ -558,13 +607,12 @@ private fun StatTile(stat: Stat, selected: Boolean, modifier: Modifier, onClick:
     val container by animateColorAsState(if (selected) colors.secondaryContainer else cardColor, label = "tile")
     Surface(
         color = container,
-        shape = MaterialTheme.shapes.extraLarge,
-        modifier = modifier.clip(MaterialTheme.shapes.extraLarge).clickable(onClickLabel = "Explain ${stat.label}", onClick = onClick)
+        shape = RoundedCornerShape(16.dp),
+        modifier = modifier.clip(RoundedCornerShape(16.dp)).clickable(onClickLabel = "Explain ${stat.label}", onClick = onClick)
     ) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(stat.label, style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
-            Text(stat.value, style = MaterialTheme.typography.titleLarge, maxLines = 2)
-            Text(stat.detail, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 2)
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(stat.label.uppercase(), style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
+            Text(stat.value, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
     }
 }
@@ -587,13 +635,12 @@ private fun AlertsCard() {
     var case by remember { mutableStateOf(BatteryNudges.caseAlerts(context)) }
     var threshold by remember { mutableStateOf(BatteryNudges.budThreshold(context).toFloat()) }
     Column {
-        SectionHeader("Alerts")
         SunCard {
-            ToggleRow(Icons.Rounded.BatteryAlert, "Low Earbud Battery", "Notifies you when an earbud runs low", buds) {
+            ToggleRow(Icons.Rounded.BatteryAlert, "Earbuds", "", buds) {
                 buds = it; BatteryNudges.setBudAlerts(context, it)
             }
-            AnimatedVisibility(buds, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-                Column(Modifier.fillMaxWidth().padding(start = 72.dp, end = 20.dp, bottom = 8.dp)) {
+            AnimatedVisibility(buds, enter = revealIn(), exit = revealOut()) {
+                Column(Modifier.fillMaxWidth().padding(start = RowTextStart, end = 16.dp, bottom = 8.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Alert Level", style = MaterialTheme.typography.bodyMedium)
                         Text("${threshold.roundToInt()}%", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
@@ -609,10 +656,11 @@ private fun AlertsCard() {
                     )
                 }
             }
-            HorizontalDivider(Modifier.padding(start = 72.dp, end = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
-            ToggleRow(SunIcons.Case, "Low Case Battery", "Reminds you to charge the case at 20%", case) {
+            RowDivider()
+            ToggleRow(SunIcons.Case, "Case", "", case) {
                 case = it; BatteryNudges.setCaseAlerts(context, it)
             }
         }
+        Footer("A notification when an earbud reaches the level you set, or the case reaches 20%.")
     }
 }

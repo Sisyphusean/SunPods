@@ -76,7 +76,9 @@ internal fun WidgetPickerSheet(onDismiss: () -> Unit, onRequested: (WidgetSize) 
                     Column(Modifier.weight(1f)) {
                         Text(size.title, style = MaterialTheme.typography.titleSmall)
                         Text(size.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (asked == size) Text("Check your home screen", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        androidx.compose.animation.AnimatedVisibility(asked == size, enter = revealIn(), exit = revealOut()) {
+                            Text("Check your home screen", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        }
                     }
                     if (supported) {
                         Spacer(Modifier.width(12.dp))

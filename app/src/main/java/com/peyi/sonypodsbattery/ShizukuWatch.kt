@@ -124,8 +124,8 @@ internal object ShizukuWatch {
             NOTE_ID,
             android.app.Notification.Builder(app, CHANNEL)
                 .setSmallIcon(R.drawable.ic_sunpods_mark)
-                .setContentTitle("Your earbuds need a quick fix")
-                .setContentText("Start Shizuku, then tap here to finish.")
+                .setContentTitle("Finish reconnecting your earbuds")
+                .setContentText("Start Shizuku, then tap here.")
                 .setContentIntent(tap)
                 .apply { if (startShizuku != null) addAction(android.app.Notification.Action.Builder(null, "Open Shizuku", startShizuku).build()) }
                 .setAutoCancel(true)
