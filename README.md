@@ -6,9 +6,18 @@ A free, open source companion app for the Sony WF-1000XM5, in Material You. No a
 
 Get the latest APK from [Releases](https://github.com/Sisyphusean/SunPods/releases/latest).
 
-SunPods tells you when a new version is out (Settings > Updates). To have updates installed for you, add it to Obtainium:
+SunPods tells you when a new version is out (Settings > Updates).
+
+### Automatic updates with Obtainium
+
+[Obtainium](https://obtainium.imranr.dev/) installs new SunPods releases for you as they come out. Install Obtainium on your phone, then either:
+
+* open this page on your phone and tap the button below, or
+* in Obtainium, tap **Add App**, paste `https://github.com/Sisyphusean/SunPods` and tap **Add**.
 
 [<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="54">](https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/Sisyphusean/SunPods)
+
+The button only works on an Android phone with Obtainium installed.
 
 You can also follow releases on GitHub: **Watch > Custom > Releases**.
 
