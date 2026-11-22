@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "SonyPodsBattery"
+rootProject.name = "SunPods"
 include(":app")

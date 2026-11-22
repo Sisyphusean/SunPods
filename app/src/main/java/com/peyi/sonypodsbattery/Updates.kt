@@ -31,7 +31,7 @@ import java.util.concurrent.TimeUnit
  * earbuds, and it can be turned off in Settings.
  */
 internal object Updates {
-    const val REPO = "Sisyphusean/Sunpods"
+    const val REPO = "Sisyphusean/SunPods"
     const val RELEASES_PAGE = "https://github.com/$REPO/releases"
     private const val PREFS = "updates"
     private const val WORK = "update_check"
