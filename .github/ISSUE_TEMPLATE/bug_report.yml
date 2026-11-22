@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in SunPods doesn't work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Issues are public, so **remove anything personal before posting**: locations, addresses, names of your devices, and the Bluetooth addresses in diagnostics (they look like `AA:BB:CC:DD:EE:FF`; replace them with `XX:XX`).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: SunPods version
+      description: Settings > Updates shows it.
+      placeholder: "2.28.0"
+    validations:
+      required: true
+  - type: input
+    id: phone
+    attributes:
+      label: Phone and Android version
+      placeholder: "Galaxy S24 Ultra, Android 16"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Connection mode
+      options:
+        - Classic
+        - LE Audio
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Earbud firmware
+      description: Device > About in SunPods.
+      placeholder: "6.1.0"
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics (optional)
+      description: Settings > Help > Send Diagnostics. Remove Bluetooth addresses and anything personal first.
+      render: text

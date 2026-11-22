@@ -1,0 +1,16 @@
+name: Feature request
+description: Suggest something SunPods could do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like SunPods to do?
+      description: Describe the problem it solves for you, not just the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: sony
+    attributes:
+      label: Does Sony Sound Connect do this?
+      description: If so, how does it look there? It helps to know the earbuds support it.
