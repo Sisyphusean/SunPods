@@ -37,6 +37,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material.icons.rounded.DirectionsRun
+import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
@@ -45,8 +47,9 @@ import androidx.compose.ui.unit.dp
 internal fun AutomationsCard() {
     val context = LocalContext.current
     var tick by remember { mutableIntStateOf(0) }
+    var stepsFor by remember { mutableStateOf(Trigger.WALKING) }
     val walkLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) AutomationStore.setRule(context, Trigger.WALKING, AutomationStore.rule(context, Trigger.WALKING).copy(enabled = true))
+        if (granted) AutomationStore.setRule(context, stepsFor, AutomationStore.rule(context, stepsFor).copy(enabled = true))
         tick++
     }
     val placeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { tick++ }
@@ -57,14 +60,29 @@ internal fun AutomationsCard() {
             key(tick) {
                 RuleRow(Icons.Rounded.Call, Trigger.CALL, "During Calls", "Hear yourself and the room while you talk") { tick++ }
                 RowDivider()
+                RuleRow(Icons.Rounded.DirectionsRun, Trigger.RUNNING, "While Running", "Stay aware of what's around you on a run") { on ->
+                    if (on && context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
+                        stepsFor = Trigger.RUNNING
+                        walkLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                        false
+                    } else { tick++; true }
+                }
+                RowDivider()
                 RuleRow(Icons.Rounded.DirectionsWalk, Trigger.WALKING, "While Walking", "Hear traffic and people around you while you walk") { on ->
                     if (on && context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
+                        stepsFor = Trigger.WALKING
                         walkLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
                         false
                     } else { tick++; true }
                 }
                 RowDivider()
                 RuleRow(Icons.Rounded.DoNotDisturbOn, Trigger.FOCUS, "In Focus or Do Not Disturb", "Cut out noise while you focus") { tick++ }
+                RowDivider()
+                var autoPlay by remember { mutableStateOf(AutoPlay.enabled(context)) }
+                ToggleRow(Icons.Rounded.PlayCircle, "Auto Play", "Your music starts when you take your earbuds out", autoPlay) {
+                    autoPlay = it
+                    AutoPlay.setEnabled(context, it)
+                }
                 RowDivider()
                 PlacesSection(onNeedLocation = {
                     placeLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))

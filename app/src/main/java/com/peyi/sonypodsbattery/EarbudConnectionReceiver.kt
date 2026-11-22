@@ -127,7 +127,10 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
 
         if (action == LE_AUDIO_CONNECTION_STATE_CHANGED &&
             intent.getIntExtra(android.bluetooth.BluetoothProfile.EXTRA_STATE, -1) == android.bluetooth.BluetoothProfile.STATE_CONNECTED
-        ) ClassicRepair.check(app, "LE Audio connected while set to Classic")
+        ) {
+            ClassicRepair.check(app, "LE Audio connected while set to Classic")
+            AutoPlay.onConnected(app)
+        }
 
         if (action == BluetoothDevice.ACTION_ACL_DISCONNECTED) {
             val target = device ?: return
@@ -169,6 +172,7 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
         if (a2dpState == A2dpConnectionState.CONNECTED) {
             EarbudConnectionStateStore.markA2dp(app, a2dpState, target)
             RefreshCoordinator.handleA2dpConnected(app, target)
+            AutoPlay.onConnected(app)
         } else {
             val pendingResult = goAsync()
             CoroutineScope(Dispatchers.IO).launch {

@@ -49,7 +49,7 @@ enum class AutoAction(val label: String) {
     }
 }
 
-enum class Trigger(val label: String) { CALL("Call"), WALKING("Walking"), FOCUS("Focus"), PLACE("Place") }
+enum class Trigger(val label: String) { CALL("Call"), RUNNING("Running"), WALKING("Walking"), FOCUS("Focus"), PLACE("Place") }
 
 data class Rule(val enabled: Boolean, val action: AutoAction)
 data class Place(val ssid: String, val action: AutoAction)
@@ -60,6 +60,7 @@ object AutomationStore {
 
     private val defaults = mapOf(
         Trigger.CALL to AutoAction.AMBIENT_VOICE,
+        Trigger.RUNNING to AutoAction.AMBIENT,
         Trigger.WALKING to AutoAction.AMBIENT,
         Trigger.FOCUS to AutoAction.NC
     )
@@ -117,6 +118,7 @@ class AutomationEngine private constructor(private val context: Context) {
     private val main = Handler(Looper.getMainLooper())
     private var inCall = false
     private var walking = false
+    private var running = false
     private var focus = false
     private var ssid: String? = null
     private var lastStep = 0L
@@ -135,9 +137,12 @@ class AutomationEngine private constructor(private val context: Context) {
             lastStep = now
             recentSteps.addLast(now)
             while (recentSteps.isNotEmpty() && now - recentSteps.first() > 30_000) recentSteps.removeFirst()
-            // Walking: a steady 10 or more steps within 30 seconds.
-            if (!walking && recentSteps.size >= 10) {
+            // Walking: a steady 10 or more steps within 30 seconds. Running: a cadence of about
+            // 140 steps a minute or more, which walking rarely reaches.
+            val nowRunning = recentSteps.size >= RUNNING_STEPS_IN_30S
+            if (!walking && recentSteps.size >= 10 || nowRunning != running) {
                 walking = true
+                running = nowRunning
                 evaluate()
             }
             main.removeCallbacks(stopWalking)
@@ -148,6 +153,7 @@ class AutomationEngine private constructor(private val context: Context) {
     private val stopWalking = Runnable {
         if (walking && System.currentTimeMillis() - lastStep >= 59_000) {
             walking = false
+            running = false
             recentSteps.clear()
             evaluate()
         }
@@ -189,7 +195,7 @@ class AutomationEngine private constructor(private val context: Context) {
     /** Matches what's registered to the rules that are on. Called again whenever a rule changes. */
     fun listen() {
         val wantCall = AutomationStore.rule(context, Trigger.CALL).enabled && Build.VERSION.SDK_INT >= 31
-        val wantSteps = AutomationStore.rule(context, Trigger.WALKING).enabled &&
+        val wantSteps = (AutomationStore.rule(context, Trigger.WALKING).enabled || AutomationStore.rule(context, Trigger.RUNNING).enabled) &&
             context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
         val wantFocus = AutomationStore.rule(context, Trigger.FOCUS).enabled
         val wantWifi = AutomationStore.places(context).isNotEmpty()
@@ -210,6 +216,7 @@ class AutomationEngine private constructor(private val context: Context) {
             } else {
                 runCatching { sensors?.unregisterListener(stepListener) }
                 walking = false
+                running = false
                 recentSteps.clear()
             }
             listeningSteps = wantSteps
@@ -241,12 +248,13 @@ class AutomationEngine private constructor(private val context: Context) {
         AutomationStore.setActive(context, null)
     }
 
-    /** Picks the strongest active trigger: a call beats walking beats Focus beats a place. */
+    /** Picks the strongest active trigger: a call beats running beats walking beats Focus beats a place. */
     fun evaluate() {
         val rules = Trigger.entries.filter { it != Trigger.PLACE }.associateWith { AutomationStore.rule(context, it) }
         val place = ssid?.let { s -> AutomationStore.places(context).firstOrNull { it.ssid == s } }
         val winner: Pair<String, AutoAction>? = when {
             inCall && rules.getValue(Trigger.CALL).enabled -> "During a call" to rules.getValue(Trigger.CALL).action
+            running && rules.getValue(Trigger.RUNNING).enabled -> "Running" to rules.getValue(Trigger.RUNNING).action
             walking && rules.getValue(Trigger.WALKING).enabled -> "Walking" to rules.getValue(Trigger.WALKING).action
             focus && rules.getValue(Trigger.FOCUS).enabled -> "Focus or Do Not Disturb" to rules.getValue(Trigger.FOCUS).action
             place != null -> "At ${place.ssid}" to place.action
@@ -283,6 +291,9 @@ class AutomationEngine private constructor(private val context: Context) {
     }
 
     companion object {
+        /** About 140 steps a minute, sustained over 30 seconds. */
+        const val RUNNING_STEPS_IN_30S = 70
+
         @Volatile var current: AutomationEngine? = null
             private set
 
