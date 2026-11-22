@@ -210,6 +210,91 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         { it.copy(touchLeft = left ?: it.touchLeft, touchRight = right ?: it.touchRight) }
     ) { s, r -> SonyFeatures.setTouch(s, r, left, right) }
 
+    fun setHeadGestures(on: Boolean) = change("Head Gestures", { it.copy(headGestures = on) }) { s, r ->
+        SonyFeatures.setHeadGestures(s, r, on)
+    }
+
+    private val _nowPlaying = MutableStateFlow<NowPlaying?>(null)
+    val nowPlaying: StateFlow<NowPlaying?> = _nowPlaying.asStateFlow()
+
+    /** Reads what's playing, if the link is free; skips quietly otherwise. */
+    fun refreshNowPlaying() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val target = SonyBatteryClient(app).findEarbuds() ?: return@runCatching
+                SonyControlSessionManager.withSessionIfFree(app, target) { Playback.read(it) }?.let { _nowPlaying.value = it }
+            }
+        }
+    }
+
+    fun playback(action: Playback.Action) {
+        _nowPlaying.value = _nowPlaying.value?.let {
+            when (action) {
+                Playback.Action.PLAY -> it.copy(playing = true)
+                Playback.Action.PAUSE -> it.copy(playing = false)
+                else -> it
+            }
+        }
+        viewModelScope.launch {
+            RefreshCoordinator.awaitSession(app, "Playback") { s ->
+                Playback.control(s, action)
+                Thread.sleep(400)
+                Playback.read(s)
+            }.onSuccess { _nowPlaying.value = it }
+        }
+    }
+
+    private val _assistant = MutableStateFlow<Pair<Int?, List<Int>>?>(null)
+    /** The voice assistant the earbuds use, and the ones they offer; null if they have no choice. */
+    val assistant: StateFlow<Pair<Int?, List<Int>>?> = _assistant.asStateFlow()
+
+    fun loadAssistant() {
+        viewModelScope.launch {
+            RefreshCoordinator.awaitSession(app, "Voice Assistant") { VoiceAssistantSetting.read(it) }
+                .onSuccess { _assistant.value = it }
+        }
+    }
+
+    fun setAssistant(value: Int) {
+        val before = _assistant.value
+        _assistant.value = before?.copy(first = value)
+        viewModelScope.launch {
+            RefreshCoordinator.awaitSession(app, "Voice Assistant", bothEarbuds = true) { s ->
+                VoiceAssistantSetting.set(s, value)
+                VoiceAssistantSetting.read(s)
+            }.onSuccess { _assistant.value = it ?: before }
+                .onFailure { _assistant.value = before; _message.value = "Couldn't change the voice assistant. Make sure your earbuds are connected, then try again." }
+        }
+    }
+
+    fun fitTips(done: (FitTest.Tips?) -> Unit) {
+        viewModelScope.launch { done(RefreshCoordinator.awaitSession(app, "Fit Test") { FitTest.tips(it) }.getOrNull()) }
+    }
+
+    fun runFitTest(tips: FitTest.Tips, size: Int, done: (FitTest.Result) -> Unit) {
+        viewModelScope.launch {
+            done(
+                RefreshCoordinator.awaitSession(app, "Fit Test") { FitTest.run(it, tips, size) }
+                    .getOrElse { FitTest.Result(null, null, "Couldn't reach your earbuds. Make sure they're connected, then try again.") }
+            )
+        }
+    }
+
+    fun resetSettings(done: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val ok = RefreshCoordinator.awaitSession(app, "Reset Settings", bothEarbuds = true) { EarbudReset.resetSettings(it) }.getOrDefault(false)
+            done(ok)
+            if (ok) refreshAll()
+        }
+    }
+
+    fun powerOff(done: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val ok = RefreshCoordinator.awaitSession(app, "Power Off", bothEarbuds = true) { SonyFeatures.powerOff(it) }.isSuccess
+            done(ok)
+        }
+    }
+
     fun setNoiseCycle(cycle: NoiseCycle) = change("Noise Control Cycle", { it.copy(noiseCycle = cycle) }) { s, r ->
         SonyFeatures.setNoiseCycle(s, r, cycle)
     }

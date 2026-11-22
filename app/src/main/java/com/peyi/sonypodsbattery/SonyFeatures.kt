@@ -188,6 +188,8 @@ data class DeviceSettings(
     val touchRight: TouchFunction? = null,
     /** The earbuds' touch capability reply, as hex; see [TouchCapability]. */
     val touchCap: String? = null,
+    /** Nod to answer a call, shake your head to decline. null if the earbuds don't offer it. */
+    val headGestures: Boolean? = null,
     val noiseCycle: NoiseCycle? = null,
     /** null until the slots have been probed once; empty means the earbuds offer none. */
     val general: List<GeneralSetting>? = null,
@@ -239,6 +241,7 @@ internal object SonyFeatures {
     private const val SYSTEM_PLAYBACK_BY_WEARING = 0x01
     private const val SYSTEM_ASSIGNABLE = 0x03
     private const val SYSTEM_SPEAK_TO_CHAT = 0x0c
+    private const val SYSTEM_HEAD_GESTURE = 0x0f
 
     private const val AUTO_OFF_WHEN_REMOVED = 0x10
     private const val AUTO_OFF_DISABLED = 0x11
@@ -258,6 +261,7 @@ internal object SonyFeatures {
         r = readAutoOff(s, r)
         r = readTouch(s, r)
         r = readTouchCap(s, r)
+        r = readHeadGestures(s, r)
         r = readNoiseCycle(s, r)
         r = readGeneral(s, r)
         r = readPrompts(s, r)
@@ -485,6 +489,22 @@ internal object SonyFeatures {
         )
     }
 
+    // Head gestures for calls: [f7, 0f, 0 on / 1 off]
+    private fun readHeadGestures(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
+        val p = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_HEAD_GESTURE), timeoutMs = 700) ?: return r
+        return if (p.size >= 3) r.copy(headGestures = u(p[2]) == 0x00) else r
+    }
+
+    fun setHeadGestures(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
+        s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_HEAD_GESTURE, if (on) 0x00 else 0x01))
+        return readHeadGestures(s, r)
+    }
+
+    /** Turns the earbuds off, like holding both sensors: POWER_SET_STATUS [03 power off, 01 by the user]. */
+    fun powerOff(s: SonyBatteryClient.SonySession) {
+        s.send(bytes(0x24, 0x03, 0x01))
+    }
+
     private fun readTouchCap(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
         val p = s.request(bytes(SYSTEM_GET_CAPABILITY, SYSTEM_ASSIGNABLE), timeoutMs = 700) ?: return r
         if (TouchCapability.parse(p) == null) return r
@@ -623,7 +643,7 @@ object SettingsStore {
                 speakToChatSensitivity = SpeakToChatSensitivity.from(int("s2cSens")),
                 speakToChatTimeout = SpeakToChatTimeout.from(int("s2cTime")),
                 pauseWhenRemoved = bool("pause"), autoOffWhenRemoved = bool("autoOff"),
-                touchLeft = TouchFunction.from(int("tl")), touchRight = TouchFunction.from(int("tr")), touchCap = str("tcap"),
+                touchLeft = TouchFunction.from(int("tl")), touchRight = TouchFunction.from(int("tr")), touchCap = str("tcap"), headGestures = bool("hg"),
                 noiseCycle = NoiseCycle.from(int("cycle")),
                 general = if (o.has("gs")) o.getJSONArray("gs").let { a ->
                     (0 until a.length()).map { i ->
@@ -663,6 +683,7 @@ object SettingsStore {
         s.touchLeft?.let { o.put("tl", it.code) }
         s.touchRight?.let { o.put("tr", it.code) }
         s.touchCap?.let { o.put("tcap", it) }
+        s.headGestures?.let { o.put("hg", it) }
         s.noiseCycle?.let { o.put("cycle", it.code) }
         s.general?.let { list ->
             o.put("gs", org.json.JSONArray().also { a ->

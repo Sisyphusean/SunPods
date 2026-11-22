@@ -14,6 +14,12 @@ import kotlinx.coroutines.delay
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Gesture
+import androidx.compose.material.icons.rounded.PowerOff
+import androidx.compose.material.icons.rounded.VolumeDown
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.ui.draw.drawBehind
@@ -158,6 +164,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -590,6 +598,7 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(GroupGap)) {
                 NoiseControl(battery, vm)
+                NowPlayingCard(vm)
                 Group(
                     "Quick Settings",
                     rows = listOf(
@@ -606,6 +615,63 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
             exit = shrinkVertically() + fadeOut()
         ) {
             LastSeenCard()
+        }
+    }
+}
+
+/** What's playing, with playback controls through the earbuds and the media volume. */
+@Composable
+private fun NowPlayingCard(vm: SunpodsViewModel) {
+    val context = LocalContext.current
+    val now by vm.nowPlaying.collectAsState()
+    var volume by remember { mutableStateOf(Playback.volume(context)) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            vm.refreshNowPlaying()
+            volume = Playback.volume(context)
+            delay(3_000)
+        }
+    }
+    Column {
+        SectionHeader("Now Playing")
+        SunCard {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                Text(
+                    now?.title ?: "Nothing playing",
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { vm.playback(Playback.Action.PREVIOUS) }) {
+                        Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous track", modifier = Modifier.size(32.dp))
+                    }
+                    val playing = now?.playing == true
+                    FilledIconButton(
+                        onClick = { vm.playback(if (playing) Playback.Action.PAUSE else Playback.Action.PLAY) },
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        Icon(
+                            if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = if (playing) "Pause" else "Play",
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                    IconButton(onClick = { vm.playback(Playback.Action.NEXT) }) {
+                        Icon(Icons.Rounded.SkipNext, contentDescription = "Next track", modifier = Modifier.size(32.dp))
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.VolumeDown, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Slider(
+                        value = volume,
+                        onValueChange = { volume = it; Playback.setVolume(context, it) },
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp).semantics { contentDescription = "Volume" }
+                    )
+                    Icon(Icons.Rounded.VolumeUp, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
     }
 }
@@ -1440,6 +1506,8 @@ private fun DeviceScreen(
         )
     )
 
+    EarbudsGroup(settings)
+
     LastSeenSettings()
 
     Group(
@@ -1478,6 +1546,114 @@ private fun DeviceScreen(
         ),
         footer = "SunPods works without an account. Its only use of the internet is the update check, which you can turn off. Your earbuds connect to one control app at a time, so close Sony Sound Connect while you use SunPods.\n\nVersion ${SunpodsInfo.VERSION}. Free and open source under the GPL-3.0."
     )
+}
+
+/** Voice assistant, fit test, turning the earbuds off and resetting their settings. */
+@Composable
+private fun EarbudsGroup(settings: DeviceSettings) {
+    val vm: SunpodsViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val assistant by vm.assistant.collectAsState()
+    val le = rememberLeOn(settings)
+    LaunchedEffect(settings.readAt) { vm.loadAssistant() }
+    var choosing by remember { mutableStateOf(false) }
+    var fitting by remember { mutableStateOf(false) }
+    var confirmOff by remember { mutableStateOf(false) }
+    var confirmReset by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+    val rows = mutableListOf<@Composable () -> Unit>()
+    val a = assistant
+    if (a != null) rows += {
+        NavRow(Icons.Rounded.RecordVoiceOver, "Voice Assistant", if (le) LE_OFF_NOTE else a.first?.let(VoiceAssistantSetting::label) ?: "Connect to Check") {
+            if (!le) choosing = true
+        }
+        if (choosing) {
+            ChoiceSheet("Voice Assistant", a.second, a.first,
+                label = VoiceAssistantSetting::label, detail = { VoiceAssistantSetting.detail(it) },
+                onDismiss = { choosing = false }, onPick = { choosing = false; vm.setAssistant(it) })
+        }
+    }
+    rows += { NavRow(Icons.Rounded.Hearing, "Earbud Fit Test", "Check that your ear tips seal well") { fitting = true } }
+    rows += { NavRow(Icons.Rounded.PowerSettingsNew, "Turn Off Your Earbuds", "Turns both earbuds off until you put them in the case") { confirmOff = true } }
+    rows += { NavRow(Icons.Rounded.RestartAlt, "Reset Earbud Settings", "Puts your earbuds' settings back to how they came") { confirmReset = true } }
+    Group("Your Earbuds", rows = rows, footer = note)
+
+    if (fitting) FitTestSheet(vm) { fitting = false }
+    if (confirmOff) {
+        AlertDialog(
+            onDismissRequest = { confirmOff = false },
+            title = { Text("Turn off your earbuds?") },
+            text = { Text("They stay off until you put them in the case and take them out again.") },
+            confirmButton = { TextButton(onClick = { confirmOff = false; vm.powerOff { ok -> note = if (ok) null else "Couldn't reach your earbuds to turn them off." } }) { Text("Turn Off") } },
+            dismissButton = { TextButton(onClick = { confirmOff = false }) { Text("Cancel") } }
+        )
+    }
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("Reset your earbuds' settings?") },
+            text = { Text("Equaliser, noise control, touch controls and the other settings go back to how they came. Your pairings stay.") },
+            confirmButton = { TextButton(onClick = { confirmReset = false; vm.resetSettings { ok -> note = if (ok) "Your earbuds' settings are reset." else "Couldn't reset your earbuds. Make sure both are connected, then try again." } }) { Text("Reset") } },
+            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } }
+        )
+    }
+}
+
+/** Pick the tips you have on, then the earbuds measure the seal of each. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FitTestSheet(vm: SunpodsViewModel, onDone: () -> Unit) {
+    var tips by remember { mutableStateOf<FitTest.Tips?>(null) }
+    var loaded by remember { mutableStateOf(false) }
+    var size by remember { mutableStateOf<Int?>(null) }
+    var running by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<FitTest.Result?>(null) }
+    LaunchedEffect(Unit) { vm.fitTips { tips = it; size = it?.sizes?.getOrNull(it.sizes.size / 2); loaded = true } }
+    ModalBottomSheet(onDismissRequest = { if (!running) onDone() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp).navigationBarsPadding()) {
+            Text("Earbud Fit Test", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(12.dp))
+            val t = tips
+            when {
+                !loaded -> Text("Checking your earbuds", style = MaterialTheme.typography.bodyMedium)
+                t == null -> Text("Your earbuds didn't offer the fit test. Make sure they're connected, then try again.", style = MaterialTheme.typography.bodyMedium)
+                running -> {
+                    Text("Keep still and stay quiet while each earbud plays a short tone.", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(16.dp))
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                result != null -> {
+                    val r = result!!
+                    if (r.error != null) Text(r.error, style = MaterialTheme.typography.bodyMedium)
+                    else {
+                        Text("Left: ${if (r.left == true) "Good seal" else "Poor seal"}", style = MaterialTheme.typography.titleMedium)
+                        Text("Right: ${if (r.right == true) "Good seal" else "Poor seal"}", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            if (r.left == true && r.right == true) "Both tips fit well, so noise cancelling works at its best."
+                            else "Try twisting the earbud in a little further, or a different tip size, then test again.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Button(onClick = { result = null }, modifier = Modifier.fillMaxWidth()) { Text("Test Again") }
+                }
+                else -> {
+                    Text("Put both earbuds in, then choose the tip size you're using.", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        t.sizes.forEach { s ->
+                            FilterChip(selected = size == s, onClick = { size = s }, label = { Text(FitTest.sizeLabel(s)) })
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Button(
+                        onClick = { running = true; vm.runFitTest(t, size ?: t.sizes.first()) { result = it; running = false } },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Start the Test") }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -1719,6 +1895,9 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
     val le = remember(settings.readAt, tick) { LeAudio.anyConnected(context) }
     val rows = mutableListOf<@Composable () -> Unit>()
     rows += { NavRow(Icons.Rounded.Mic, "Test Your Call Mic", "Hear yourself the way callers do") { testing = true } }
+    if (settings.headGestures != null) rows += {
+        ToggleRow(Icons.Rounded.Gesture, "Head Gestures", "Nod to answer a call, shake your head to decline", settings.headGestures, vm::setHeadGestures)
+    }
     val phoneLe = remember { LeAudio.phoneSupports(context) }
     if (settings.leModeSupported == true && phoneLe) rows += {
         NavRow(Icons.Rounded.BluetoothAudio, "Connection Mode", if (le) "LE Audio" else "Classic") { choosing = true }
