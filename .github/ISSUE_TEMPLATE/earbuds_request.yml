@@ -1,0 +1,26 @@
+name: Support my earbuds
+description: Ask for another Sony model, and help test it
+labels: [new-earbuds]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      placeholder: "WF-1000XM4"
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      description: Sony Sound Connect shows it under Device information.
+  - type: dropdown
+    id: help
+    attributes:
+      label: Can you help test?
+      description: Testing means installing test builds and sending diagnostics, with anything personal removed.
+      options:
+        - Yes
+        - No, but I'd use it
+    validations:
+      required: true
