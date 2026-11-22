@@ -28,3 +28,11 @@
 /branding/render/ref360/
 /branding/render/loop2/_fit/
 /branding/render/app/turntable/
+/branding/render/ref_case/
+/branding/render/anim/
+/branding/render/case_loop/
+
+# Local build outputs and JVM crash logs
+/SunPods-*.zip
+/SunPods-*.apk
+hs_err_pid*.log

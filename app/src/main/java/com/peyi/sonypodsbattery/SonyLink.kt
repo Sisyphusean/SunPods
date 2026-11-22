@@ -27,6 +27,8 @@ internal interface SonyLink : Closeable {
     val output: OutputStream
     val isConnected: Boolean
     val label: String
+    /** The link answers the earbuds' data frames with an ACK itself, as soon as they arrive. */
+    val acksItself: Boolean get() = false
 }
 
 internal class RfcommLink(private val socket: BluetoothSocket) : SonyLink {
@@ -77,6 +79,7 @@ private class ByteQueueInputStream : InputStream() {
 @SuppressLint("MissingPermission")
 internal class GattLink private constructor(private val gatt: BluetoothGatt, private val cb: Callback) : SonyLink {
     override val label = "GATT"
+    override val acksItself = true
     override val input: InputStream get() = cb.incoming
     override val isConnected: Boolean get() = cb.connected
 
@@ -96,6 +99,7 @@ internal class GattLink private constructor(private val gatt: BluetoothGatt, pri
         cb.incoming.close()
         runCatching { gatt.disconnect() }
         runCatching { gatt.close() }
+        cb.acker.shutdownNow()
     }
 
     private class Callback : BluetoothGattCallback() {
@@ -107,6 +111,14 @@ internal class GattLink private constructor(private val gatt: BluetoothGatt, pri
         @Volatile var mtuSettled = CountDownLatch(1)
         private val writing = Semaphore(1)
         var toAcc: BluetoothGattCharacteristic? = null
+        /**
+         * Over LE the earbuds resend an unanswered frame every ~60 ms and, after about ten tries,
+         * stop answering the app until it reconnects. The session only reads while a command runs,
+         * so frames the earbuds send on their own (ear detection, touch, battery) went unanswered.
+         * The link now ACKs every data frame the moment it arrives, off the Bluetooth callback thread.
+         */
+        private val ackDecoder = SonyProtocol.Decoder()
+        val acker: java.util.concurrent.ExecutorService = java.util.concurrent.Executors.newSingleThreadExecutor()
 
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) { connected = true; g.requestMtu(517) }
@@ -120,17 +132,24 @@ internal class GattLink private constructor(private val gatt: BluetoothGatt, pri
         override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray, status: Int) { op.countDown() }
         override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) { writing.release() }
         @Deprecated("Android 12 and below")
-        override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic) { changed(c.uuid, c.value ?: return) }
-        override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray) { changed(c.uuid, value) }
+        override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic) { changed(g, c.uuid, c.value ?: return) }
+        override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray) { changed(g, c.uuid, value) }
 
-        private fun changed(uuid: UUID, value: ByteArray) {
+        private fun changed(g: BluetoothGatt, uuid: UUID, value: ByteArray) {
             when (uuid) {
-                FROM_ACC -> incoming.push(value)
+                FROM_ACC -> {
+                    incoming.push(value)
+                    for (frame in synchronized(ackDecoder) { ackDecoder.feed(value) }) {
+                        if (frame.type != SonyProtocol.DATA_MDR && frame.type != SonyProtocol.DATA_MDR_NO2) continue
+                        val ack = SonyProtocol.encode(SonyProtocol.ACK, 1 - frame.sequence, byteArrayOf())
+                        runCatching { acker.execute { runCatching { write(g, ack) } } }
+                    }
+                }
                 MTU -> mtuSettled.countDown()
             }
         }
 
-        fun write(g: BluetoothGatt, frame: ByteArray) {
+        @Synchronized fun write(g: BluetoothGatt, frame: ByteArray) {
             val c = toAcc ?: throw IOException("Not ready")
             if (!connected) throw IOException("LE link closed")
             if (!writing.tryAcquire(2, TimeUnit.SECONDS)) writing.drainPermits()
@@ -206,6 +225,46 @@ internal object LeAudio {
         adapter(context)?.getProfileConnectionState(PROFILE_LE_AUDIO) == BluetoothProfile.STATE_CONNECTED
     }.getOrDefault(false)
 
+    enum class Support { SUPPORTED, NOT_SUPPORTED, UNKNOWN }
+
+    /**
+     * Whether this phone can use LE Audio, on any Android:
+     *  - below Android 13 there's no LE Audio API at all: no;
+     *  - Android 13+ asks the Bluetooth stack (isLeAudioSupported). It answers no when the phone
+     *    lacks LE Audio or it's turned off in Developer options ("Disable LE Audio"), and can't
+     *    answer while Bluetooth is off, so the last real answer is kept and used then.
+     * Cheap and safe on the main thread. [verify] adds the stronger check.
+     */
+    fun support(context: Context): Support {
+        if (Build.VERSION.SDK_INT < 33) return Support.NOT_SUPPORTED
+        val prefs = context.getSharedPreferences("sunpods_connection", Context.MODE_PRIVATE)
+        val code = runCatching { adapter(context)?.isLeAudioSupported }.getOrNull()
+        val answer = when (code) {
+            android.bluetooth.BluetoothStatusCodes.FEATURE_SUPPORTED -> Support.SUPPORTED
+            android.bluetooth.BluetoothStatusCodes.FEATURE_NOT_SUPPORTED -> Support.NOT_SUPPORTED
+            else -> null
+        }
+        if (answer != null) {
+            prefs.edit().putBoolean("phone_le", answer == Support.SUPPORTED).apply()
+            return answer
+        }
+        if (!prefs.contains("phone_le")) return Support.UNKNOWN
+        return if (prefs.getBoolean("phone_le", false)) Support.SUPPORTED else Support.NOT_SUPPORTED
+    }
+
+    /** True when this phone can use LE Audio at all (see [support]). */
+    fun phoneSupports(context: Context): Boolean = support(context) == Support.SUPPORTED
+
+    /**
+     * Stronger check before a switch, off the main thread: the stack says yes AND its LE Audio
+     * service actually starts. Some phones report support but never bring the service up.
+     */
+    fun verify(context: Context): Support {
+        val basic = support(context)
+        if (basic != Support.SUPPORTED) return basic
+        return if ((proxy ?: bind(context)) != null) Support.SUPPORTED else Support.NOT_SUPPORTED
+    }
+
     /** The earbuds' LE Audio devices (one per earbud), when connected that way. */
     @SuppressLint("MissingPermission")
     fun connectedEarbuds(context: Context): List<BluetoothDevice> {
@@ -224,7 +283,7 @@ internal object LeAudio {
                 override fun onServiceDisconnected(profile: Int) { proxy = null }
             }, PROFILE_LE_AUDIO) == true
         }.getOrDefault(false)
-        if (ok) latch.await(800, TimeUnit.MILLISECONDS)
+        if (ok) latch.await(1_500, TimeUnit.MILLISECONDS)
         return proxy
     }
 }

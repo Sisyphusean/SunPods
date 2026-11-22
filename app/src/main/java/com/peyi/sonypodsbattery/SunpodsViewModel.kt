@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,8 +56,32 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     }
 
     init {
+        ShizukuWatch.start(application)
+        Updates.schedule(application)
+        // Opening the app also checks the connection, so a problem left from earlier gets fixed.
+        ClassicRepair.check(application, "SunPods opened")
         BatteryStore.prefs(application).registerOnSharedPreferenceChangeListener(batteryListener)
         EarbudConnectionStateStore.prefs(application).registerOnSharedPreferenceChangeListener(connectionListener)
+    }
+
+    private var liveJob: Job? = null
+    private val _liveAt = MutableStateFlow(0L)
+    /** When a live check last reached the earbuds. */
+    val liveAt: StateFlow<Long> = _liveAt.asStateFlow()
+
+    /** While the app is on screen, check the earbuds every few seconds so it follows them live. */
+    fun setLive(on: Boolean) {
+        liveJob?.cancel()
+        liveJob = null
+        if (!on) return
+        liveJob = viewModelScope.launch {
+            while (true) {
+                delay(3_000)
+                if (_busy.value) { android.util.Log.d("SunPods", "Live check skipped: busy"); continue }
+                // A live check must never take the app down; it just tries again next time.
+                if (withContext(Dispatchers.IO) { runCatching { liveTick(app) }.getOrDefault(false) }) _liveAt.value = System.currentTimeMillis()
+            }
+        }
     }
 
     override fun onCleared() {
@@ -96,7 +121,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
                 }
                 _battery.value = state
                 if (!state.status.startsWith("Updated") && audioLinkUp(app)) {
-                    _message.value = "Couldn't reach your earbuds. Close Sony Sound Connect if it's open, then pull down to try again."
+                    _message.value = "Can't reach your earbuds. Close Sony Sound Connect if it's open, then pull down to try again."
                 }
                 if (_battery.value.left != null || _battery.value.right != null) {
                     launch { LastSeenStore.captureWhileConnected(app) }
@@ -122,12 +147,12 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun setEqPreset(preset: EqPreset) = change("Equaliser preset", { it.copy(eqPresetCode = preset.code) }) { s, r ->
+    fun setEqPreset(preset: EqPreset) = change("Equaliser", { it.copy(eqPresetCode = preset.code) }) { s, r ->
         SonyFeatures.setEqPreset(s, r, preset)
     }
 
     fun setEqBands(clearBass: Int, bands: List<Int>) = change(
-        "Custom equaliser",
+        "Custom Equaliser",
         { it.copy(clearBass = clearBass, bands = bands) }
     ) { s, r -> SonyFeatures.setEqBands(s, r, clearBass, bands) }
 
@@ -135,7 +160,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         SonyFeatures.setDsee(s, r, on)
     }
 
-    fun setPriority(priority: ConnectionPriority) = change("Connection quality", { it.copy(priority = priority) }) { s, r ->
+    fun setPriority(priority: ConnectionPriority) = change("Connection Priority", { it.copy(priority = priority) }) { s, r ->
         SonyFeatures.setPriority(s, r, priority)
     }
 
@@ -144,47 +169,48 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setSpeakToChatConfig(sensitivity: SpeakToChatSensitivity, timeout: SpeakToChatTimeout) = change(
-        "Speak-to-Chat settings",
+        "Speak-to-Chat Settings",
         { it.copy(speakToChatSensitivity = sensitivity, speakToChatTimeout = timeout) }
     ) { s, r -> SonyFeatures.setSpeakToChatConfig(s, r, sensitivity, timeout) }
 
-    fun setPauseWhenRemoved(on: Boolean) = change("Pause when removed", { it.copy(pauseWhenRemoved = on) }) { s, r ->
+    fun setPauseWhenRemoved(on: Boolean) = change("Pause When Removed", { it.copy(pauseWhenRemoved = on) }) { s, r ->
         SonyFeatures.setPauseWhenRemoved(s, r, on)
     }
 
-    fun setAutoOff(whenRemoved: Boolean) = change("Automatic power off", { it.copy(autoOffWhenRemoved = whenRemoved) }) { s, r ->
+    fun setAutoOff(whenRemoved: Boolean) = change("Automatic Power Off", { it.copy(autoOffWhenRemoved = whenRemoved) }) { s, r ->
         SonyFeatures.setAutoOff(s, r, whenRemoved)
     }
 
     fun setGeneral(slot: Int, on: Boolean) = change(
-        "Device setting",
+        "this setting",
         { s -> s.copy(general = s.general?.map { if (it.slot == slot) it.copy(on = on) else it }) }
     ) { s, r -> SonyFeatures.setGeneral(s, r, slot, on) }
 
     fun setPrompts(on: Boolean) {
         QuietHours.overrideNow(app)
-        change("Voice prompts", { it.copy(promptsOn = on) }) { s, r -> SonyFeatures.setPrompts(s, r, on) }
+        change("Voice Prompts", { it.copy(promptsOn = on) }) { s, r -> SonyFeatures.setPrompts(s, r, on) }
     }
 
-    fun setPromptVolume(volume: Int) = change("Voice prompt volume", { it.copy(promptVolume = volume) }) { s, r ->
+    fun setPromptVolume(volume: Int) = change("Voice Prompt Volume", { it.copy(promptVolume = volume) }) { s, r ->
         SonyFeatures.setPromptVolume(s, r, volume)
     }
 
     /** Saves quiet hours and applies them at once if the window has already started or ended. */
     fun setQuietHours(on: Boolean, start: Int, end: Int) {
         QuietHours.set(app, on, start, end)
-        change("Quiet hours", { it }) { s, r ->
+        change("Quiet Hours", { it }) { s, r ->
             QuietHours.enforce(app, s)
             r.copy(promptsOn = VoicePrompts.read(s).on ?: r.promptsOn)
         }
     }
 
-    fun setTouch(left: TouchFunction, right: TouchFunction) = change(
-        "Touch controls",
-        { it.copy(touchLeft = left, touchRight = right) }
+    /** Changes one side's touch control; null leaves that side as it is on the earbuds. */
+    fun setTouch(left: TouchFunction?, right: TouchFunction?) = change(
+        "Touch Controls",
+        { it.copy(touchLeft = left ?: it.touchLeft, touchRight = right ?: it.touchRight) }
     ) { s, r -> SonyFeatures.setTouch(s, r, left, right) }
 
-    fun setNoiseCycle(cycle: NoiseCycle) = change("Noise control cycle", { it.copy(noiseCycle = cycle) }) { s, r ->
+    fun setNoiseCycle(cycle: NoiseCycle) = change("Noise Control Cycle", { it.copy(noiseCycle = cycle) }) { s, r ->
         SonyFeatures.setNoiseCycle(s, r, cycle)
     }
 
@@ -197,13 +223,13 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         _settings.value = optimistic(before)
         viewModelScope.launch {
             settingsLock.withLock {
-                RefreshCoordinator.awaitSession(app, label) { session -> action(session, before) }
+                RefreshCoordinator.awaitSession(app, label, bothEarbuds = true) { session -> action(session, before) }
                     .onSuccess(::storeSettings)
                     .onFailure { error ->
                         _settings.value = before
                         _message.value = when (error) {
                             is EarbudsUnavailableException -> error.message
-                            else -> "$label wasn't changed. Check your earbuds are connected and Sony Sound Connect is closed."
+                            else -> "Couldn't change $label. Make sure your earbuds are connected and Sony Sound Connect is closed."
                         }
                     }
             }

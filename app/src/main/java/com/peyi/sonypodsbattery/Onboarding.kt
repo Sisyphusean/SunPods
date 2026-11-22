@@ -62,6 +62,7 @@ import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Bluetooth
 import androidx.compose.material.icons.rounded.BluetoothDisabled
 import androidx.compose.material.icons.rounded.BluetoothSearching
+import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -140,7 +141,7 @@ internal object OnboardingStore {
         c.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 }
 
-private enum class Step { WELCOME, NEARBY, EARBUDS, UPDATES, EXTRAS, DONE }
+private enum class Step { WELCOME, NEARBY, EARBUDS, LEAUDIO, UPDATES, EXTRAS, DONE }
 
 private fun Context.findActivity(): Activity? {
     var c: Context? = this
@@ -206,11 +207,14 @@ private fun openNotificationSettings(context: Context) = runCatching {
 @Composable
 internal fun Onboarding(vm: SunpodsViewModel, onDone: () -> Unit) {
     var step by rememberSaveable { mutableStateOf(Step.WELCOME) }
-    val order = Step.entries
-    fun next() { step = order[(step.ordinal + 1).coerceAtMost(order.lastIndex)] }
-    BackHandler(enabled = step != Step.WELCOME) { step = order[step.ordinal - 1] }
-    val tick = resumeTick()
     val context = LocalContext.current
+    // The LE Audio page only shows on phones that can use it.
+    // Unknown (Bluetooth was off) still shows the step; the step checks properly and skips itself.
+    val leAudio = remember { LeAudio.support(context) != LeAudio.Support.NOT_SUPPORTED }
+    val order = Step.entries.filter { it != Step.LEAUDIO || leAudio }
+    fun next() { step = order[(order.indexOf(step) + 1).coerceAtMost(order.lastIndex)] }
+    BackHandler(enabled = step != Step.WELCOME) { step = order[(order.indexOf(step) - 1).coerceAtLeast(0)] }
+    val tick = resumeTick()
     LaunchedEffect(step, tick) {
         if (step.ordinal > Step.NEARBY.ordinal && !OnboardingStore.hasNearby(context)) step = Step.NEARBY
     }
@@ -229,6 +233,7 @@ internal fun Onboarding(vm: SunpodsViewModel, onDone: () -> Unit) {
                 Step.WELCOME -> WelcomeStep(onStart = ::next)
                 Step.NEARBY -> NearbyStep(tick, onNext = ::next)
                 Step.EARBUDS -> EarbudsStep(vm, tick, onNext = ::next)
+                Step.LEAUDIO -> LeAudioStep(vm, onNext = ::next)
                 Step.UPDATES -> UpdatesStep(tick, onNext = ::next)
                 Step.EXTRAS -> ExtrasStep(tick, onNext = ::next)
                 Step.DONE -> DoneStep(vm, onDone = onDone)
@@ -302,7 +307,7 @@ private fun WelcomeStep(onStart: () -> Unit) {
         scope.launch {
             withContext(Dispatchers.IO) { runCatching { Backup.read(context, uri).let { it to Backup.inspect(it) } } }
                 .onSuccess { pending = it }
-                .onFailure { android.widget.Toast.makeText(context, it.message ?: "Couldn't open that file. Choose a SunPods backup.", android.widget.Toast.LENGTH_LONG).show() }
+                .onFailure { android.widget.Toast.makeText(context, it.message ?: "Can't open this file. Choose a SunPods backup.", android.widget.Toast.LENGTH_LONG).show() }
         }
     }
     val colors = MaterialTheme.colorScheme
@@ -322,20 +327,20 @@ private fun WelcomeStep(onStart: () -> Unit) {
         },
         title = "Welcome to SunPods",
         body = "Everything your WF-1000XM5 can do, without the clutter.",
-        primary = "Get started",
+        primary = "Get Started",
         onPrimary = onStart,
-        secondary = "Restore from backup",
+        secondary = "Restore from Backup",
         onSecondary = { open.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }
     ) {
-        Feature(Icons.Rounded.BatteryChargingFull, "Battery at a glance", "Widgets, low battery alerts and battery health")
-        Feature(Icons.Rounded.GraphicEq, "Your sound, one tap away", "Noise control, EQ, touch controls and more")
-        Feature(Icons.Rounded.Lock, "Private by design", "No account and no internet. Everything stays on this phone.")
+        Feature(Icons.Rounded.BatteryChargingFull, "Battery at a Glance", "Widgets, low battery alerts and battery health")
+        Feature(Icons.Rounded.GraphicEq, "Your Sound, One Tap Away", "Noise control, EQ, touch controls and more")
+        Feature(Icons.Rounded.Lock, "Private by Design", "No account and no internet. Everything stays on this phone.")
     }
     pending?.let { (text, s) ->
         AlertDialog(
             onDismissRequest = { pending = null },
-            title = { Text("Restore this backup?") },
-            text = { Text("${s.settings} settings and ${s.historyRows} battery readings. SunPods will restart, then you can finish setup with your settings in place.") },
+            title = { Text("Restore This Backup?") },
+            text = { Text("This backup has ${s.settings} settings and ${s.historyRows} battery readings. SunPods will restart so you can finish setting up.") },
             confirmButton = {
                 TextButton(onClick = {
                     pending = null
@@ -373,21 +378,21 @@ private fun NearbyStep(tick: Int, onNext: () -> Unit) {
     when (gate.state) {
         Perm.ASK, Perm.GRANTED -> Page(
             progress = progressOf(Step.NEARBY), icon = Icons.Rounded.Bluetooth,
-            title = "Connect to your earbuds",
-            body = "SunPods uses Bluetooth to talk to your earbuds. Android calls this Nearby devices, and SunPods needs it to work.",
+            title = "Connect to Your Earbuds",
+            body = "SunPods needs Bluetooth to connect to your earbuds. Android calls this permission Nearby devices.",
             primary = "Allow", onPrimary = gate.request
         )
         Perm.DENIED -> Page(
             progress = progressOf(Step.NEARBY), icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
-            title = "SunPods needs Nearby devices",
-            body = "Without it, SunPods can't read battery levels or change settings. It's only used to talk to your earbuds.",
+            title = "SunPods Needs Nearby Devices",
+            body = "Without it, SunPods can't show battery levels or change settings. It's only used to connect to your earbuds.",
             primary = "Allow", onPrimary = gate.request,
             secondary = "Open Settings", onSecondary = { openAppSettings(context) }
         )
         Perm.BLOCKED -> Page(
             progress = progressOf(Step.NEARBY), icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
-            title = "Turn on Nearby devices in Settings",
-            body = "Android won't ask again. In Settings, go to Permissions, then Nearby devices, and choose Allow. SunPods continues when you come back.",
+            title = "Turn On Nearby Devices in Settings",
+            body = "Android won't ask again. In Settings, tap Permissions, then Nearby devices, then Allow. SunPods continues when you return.",
             primary = "Open Settings", onPrimary = { openAppSettings(context) }
         )
     }
@@ -430,6 +435,11 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
     LaunchedEffect(tick) {
         while (true) {
             val s = state
+            // Paired some other way while searching, such as through Google's Fast Pair popup.
+            if ((s is Buds.Searching || s is Buds.Pairing) && bondedEarbuds(context) != null && audioLinkUp(context)) {
+                pairNew = false
+                state = Buds.Connected
+            }
             if (s !is Buds.Searching && s !is Buds.Pairing && s !is Buds.Failed) {
                 state = when {
                     !bluetoothOn(context) -> Buds.BluetoothOff
@@ -448,16 +458,21 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
     // pairing mode without needing location or scan permissions; then we bond with them.
     val chooser = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (result.resultCode != Activity.RESULT_OK) {
-            note = "Search stopped. When the case light flashes blue, tap Find my earbuds."
+            // Closing the picker after pairing through Google's own popup is fine.
+            if (bondedEarbuds(context) != null && audioLinkUp(context)) {
+                note = null; pairNew = false; state = Buds.Connected
+                return@rememberLauncherForActivityResult
+            }
+            note = "Search stopped. When the case light flashes blue, tap Find My Earbuds."
             state = Buds.NotPaired
             return@rememberLauncherForActivityResult
         }
         note = null
         pairNew = false
         val device = pickedDevice(context, result.data)
-        if (device == null) { state = Buds.Failed("Couldn't tell which earbuds you picked. Try again."); return@rememberLauncherForActivityResult }
+        if (device == null) { state = Buds.Failed("Couldn't identify the earbuds you chose. Try again."); return@rememberLauncherForActivityResult }
         state = if (device.bondState == BluetoothDevice.BOND_BONDED) Buds.Waiting
-        else if (device.createBond()) Buds.Pairing else Buds.Failed("Pairing didn't start. Check the case light is flashing blue, then try again.")
+        else if (device.createBond()) Buds.Pairing else Buds.Failed("Pairing didn't start. Make sure the case light is flashing blue, then try again.")
     }
 
     if (state is Buds.Pairing) {
@@ -478,7 +493,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
     // Some phones never answer a search or a pairing request; don't leave a spinner forever.
     LaunchedEffect(state) {
         when (state) {
-            Buds.Searching -> { delay(60_000); if (state is Buds.Searching) state = Buds.Failed("No earbuds found in time. Check the case light is flashing blue and the case is next to your phone.") }
+            Buds.Searching -> { delay(60_000); if (state is Buds.Searching) state = Buds.Failed("No earbuds found. Make sure the case light is flashing blue and the case is next to your phone.") }
             Buds.Pairing -> { delay(45_000); if (state is Buds.Pairing) state = Buds.Failed("Pairing took too long. Put the earbuds back in pairing mode and try again.") }
             else -> Unit
         }
@@ -487,7 +502,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
     fun search() {
         note = null
         val cdm = context.getSystemService(CompanionDeviceManager::class.java)
-        if (cdm == null) { state = Buds.Failed("This phone can't search from SunPods. Pair in Bluetooth settings instead."); return }
+        if (cdm == null) { state = Buds.Failed("This phone can't search for earbuds in SunPods. Pair them in Bluetooth settings instead."); return }
         state = Buds.Searching
         val filter = BluetoothDeviceFilter.Builder()
             .setNamePattern(Pattern.compile(".*WF[- ]?1000XM5.*", Pattern.CASE_INSENSITIVE))
@@ -499,49 +514,57 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
                 chooser.launch(IntentSenderRequest.Builder(chooserLauncher).build())
             }
             override fun onFailure(error: CharSequence?) {
-                state = Buds.Failed("No earbuds found. Check the case light is flashing blue and the case is next to your phone.")
+                state = Buds.Failed("No earbuds found. Make sure the case light is flashing blue and the case is next to your phone.")
             }
         }
         runCatching {
             if (Build.VERSION.SDK_INT >= 33) cdm.associate(request, context.mainExecutor, callback)
             else @Suppress("DEPRECATION") cdm.associate(request, callback, null)
-        }.onFailure { state = Buds.Failed("Couldn't start the search. Pair in Bluetooth settings instead.") }
+        }.onFailure { state = Buds.Failed("Couldn't start searching. Pair your earbuds in Bluetooth settings instead.") }
     }
 
     val progress = progressOf(Step.EARBUDS)
     val battery by vm.battery.collectAsState()
     when (val s = state) {
-        Buds.Checking -> Page(progress, icon = Icons.Rounded.Headphones, title = "Looking for your earbuds", body = "Just a moment.", primary = null) {
+        Buds.Checking -> Page(progress, icon = Icons.Rounded.Headphones, title = "Looking for Your Earbuds", body = "One moment.", primary = null) {
             CircularProgressIndicator()
         }
         Buds.BluetoothOff -> Page(
             progress, icon = Icons.Rounded.BluetoothDisabled,
-            title = "Bluetooth is off", body = "Turn it on so SunPods can reach your earbuds.",
-            primary = "Turn on Bluetooth",
+            title = "Bluetooth Is Off", body = "Turn on Bluetooth to connect to your earbuds.",
+            primary = "Turn On Bluetooth",
             onPrimary = { runCatching { context.startActivity(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }.onFailure { openBluetoothSettings(context) } },
-            secondary = "Skip for now", onSecondary = onNext
+            secondary = "Not Now", onSecondary = onNext
         )
         Buds.NotPaired -> Page(
-            progress, art = { CaseBackArt() },
-            title = "Pair your earbuds",
-            body = "Put both earbuds in the case and keep the lid open. Hold the button on the back for 5 seconds, until the light flashes blue.",
-            primary = "Find my earbuds", onPrimary = ::search,
-            secondary = "Skip for now", onSecondary = onNext
+            progress, art = {
+                RenderClip(
+                    R.raw.anim_pair,
+                    "The case turns round, the button on the back is held down, then the light on the front flashes blue.",
+                    Modifier.fillMaxWidth().height(260.dp)
+                )
+            },
+            title = "Pair Your Earbuds",
+            body = "Put both earbuds in the case and keep the lid open. Press and hold the button on the back of the case for 5 seconds, until the light flashes blue.",
+            primary = "Find My Earbuds", onPrimary = ::search,
+            secondary = "Not Now", onSecondary = onNext
         ) {
             note?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center) }
         }
-        Buds.Searching -> Page(progress, icon = Icons.Rounded.BluetoothSearching, title = "Searching for earbuds", body = "Choose WF-1000XM5 when it appears. Keep the case open and near your phone.", primary = null) {
+        Buds.Searching -> Page(progress, icon = Icons.Rounded.BluetoothSearching, title = "Searching for Earbuds", body = "Choose WF-1000XM5 when it appears. Keep the case open and near your phone. If Google offers to connect them, that works too.", primary = null) {
             CircularProgressIndicator()
         }
-        Buds.Pairing -> Page(progress, icon = Icons.Rounded.BluetoothSearching, title = "Pairing your earbuds", body = "If Android asks you to confirm, tap Pair.", primary = null) {
+        Buds.Pairing -> Page(progress, icon = Icons.Rounded.BluetoothSearching, title = "Pairing Your Earbuds", body = "If Android asks you to confirm, tap Pair.", primary = null) {
             CircularProgressIndicator()
         }
         Buds.Waiting -> Page(
-            progress, icon = Icons.Rounded.Headphones,
-            title = "Open the case near your phone",
+            progress, art = {
+                RenderClip(R.raw.anim_open, "The case opens and both earbuds lift out.", Modifier.fillMaxWidth().height(260.dp))
+            },
+            title = "Open the Case Near Your Phone",
             body = "Your earbuds are paired. Open the lid or take them out, and they'll connect.",
             primary = null,
-            secondary = "Skip for now", onSecondary = onNext
+            secondary = "Not Now", onSecondary = onNext
         ) {
             CircularProgressIndicator()
             Spacer(Modifier.height(24.dp))
@@ -549,27 +572,27 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
             LaunchedEffect(Unit) { while (true) { delay(5_000); now = System.currentTimeMillis() } }
             if (waitingSince > 0 && now - waitingSince > 30_000) {
                 SetupInfo(
-                    Icons.Rounded.ErrorOutline, "Taking a while?",
-                    "Check your earbuds have some charge. If they're connected to another phone or laptop, disconnect them there."
+                    Icons.Rounded.ErrorOutline, "Taking a While?",
+                    "Make sure your earbuds have some charge. If they're connected to another phone or computer, disconnect them there."
                 )
                 Spacer(Modifier.height(8.dp))
             }
-            TextButton(onClick = { openBluetoothSettings(context) }) { Text("Connect in Bluetooth settings") }
-            TextButton(onClick = { pairNew = true; state = Buds.NotPaired }) { Text("Pair different earbuds") }
+            TextButton(onClick = { openBluetoothSettings(context) }) { Text("Connect in Bluetooth Settings") }
+            TextButton(onClick = { pairNew = true; state = Buds.NotPaired }) { Text("Pair Different Earbuds") }
         }
         Buds.Connected -> {
             val read = battery.left != null || battery.right != null
             if (!read && refreshed && !busy) Page(
                 // Linked over Bluetooth, but the control channel didn't answer (Sound Connect holds it, usually).
                 progress, icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
-                title = "Connected, but SunPods can't read them",
-                body = "Another app may be using the connection. Close Sony Sound Connect if it's open, then try again.",
-                primary = "Try again", onPrimary = { vm.refreshAll() },
-                secondary = "Continue anyway", onSecondary = onNext
+                title = "Can't Reach Your Earbuds",
+                body = "Your earbuds are connected, but another app may be using them. Close Sony Sound Connect if it's open, then try again.",
+                primary = "Try Again", onPrimary = { vm.refreshAll() },
+                secondary = "Continue Anyway", onSecondary = onNext
             ) else Page(
                 progress, icon = Icons.Rounded.CheckCircle,
                 title = "Connected",
-                body = if (read) "Here's your battery, straight from your earbuds." else "Reading your earbuds.",
+                body = if (read) "Here's your battery, straight from your earbuds." else "Checking battery levels.",
                 primary = "Continue", onPrimary = onNext
             ) {
                 if (read) Levels(battery) else CircularProgressIndicator()
@@ -577,9 +600,9 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         }
         is Buds.Failed -> Page(
             progress, icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
-            title = "Couldn't pair your earbuds", body = s.message,
-            primary = "Try again", onPrimary = { state = Buds.NotPaired },
-            secondary = "Open Bluetooth settings", onSecondary = { openBluetoothSettings(context) }
+            title = "Couldn't Pair Your Earbuds", body = s.message,
+            primary = "Try Again", onPrimary = { state = Buds.NotPaired },
+            secondary = "Open Bluetooth Settings", onSecondary = { openBluetoothSettings(context) }
         )
     }
 }
@@ -607,7 +630,7 @@ private fun Levels(battery: BatteryState) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
         listOf("Left" to battery.left, "Right" to battery.right, "Case" to battery.case).forEach { (label, level) ->
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(level?.takeIf { it in 1..100 }?.let { "$it%" } ?: "--", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(level?.takeIf { it in 1..100 }?.let { "$it%" } ?: (if (label == "Case") "Unknown" else "In Case"), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -645,6 +668,40 @@ private fun CaseBackArt() {
     }
 }
 
+// -------------------------------------------------------------------------------- 3b LE Audio
+
+/** Offers LE Audio right after pairing, using the same switch as Controls (Shizuku first). */
+@Composable
+private fun LeAudioStep(vm: SunpodsViewModel, onNext: () -> Unit) {
+    val context = LocalContext.current
+    val settings by vm.settings.collectAsState()
+    var switching by remember { mutableStateOf(false) }
+    var on by remember { mutableStateOf(LeAudio.anyConnected(context)) }
+    // The full check (Bluetooth stack plus its LE Audio service) and the earbuds' own answer.
+    // If either says no, this step isn't for this phone: move on without showing it.
+    LaunchedEffect(Unit) {
+        val phone = withContext(Dispatchers.IO) { LeAudio.verify(context) }
+        if (phone == LeAudio.Support.NOT_SUPPORTED || settings.leModeSupported == false) {
+            DiagnosticsStore.add(context, "Onboarding: LE Audio step skipped (phone $phone, earbuds ${settings.leModeSupported})")
+            onNext()
+        }
+    }
+    Page(
+        progress = progressOf(Step.LEAUDIO), icon = androidx.compose.material.icons.Icons.Rounded.Call,
+        title = if (on) "You're on LE Audio" else "Clearer Calls with LE Audio",
+        body = if (on) "Your earbuds are connected with LE Audio. You can switch back to Classic anytime in Controls."
+        else "LE Audio makes your voice sound clearer on calls. Connect to Two Devices and LDAC are off while it's on. You can switch back anytime in Controls.",
+        primary = if (on) "Continue" else "Use LE Audio",
+        onPrimary = { if (on) onNext() else switching = true },
+        secondary = if (on) null else "Not Now",
+        onSecondary = onNext
+    )
+    if (switching) LeSwitchSheet(on = true, settings = settings, closeOnSuccess = true) {
+        switching = false
+        on = LeAudio.anyConnected(context)
+    }
+}
+
 // -------------------------------------------------------------------------------- 4 stay up to date
 
 @Composable
@@ -655,9 +712,9 @@ private fun UpdatesStep(tick: Int, onNext: () -> Unit) {
     val allSet = (notify == null || notify.state == Perm.GRANTED) && unrestricted
     Page(
         progress = progressOf(Step.UPDATES), icon = Icons.Rounded.Notifications,
-        title = "Stay up to date",
+        title = "Stay Up to Date",
         body = "Keep the widget, alerts and automations working when SunPods is closed. SunPods only checks your earbuds every few minutes while they're connected.",
-        primary = if (allSet) "Continue" else "Continue without these",
+        primary = if (allSet) "Continue" else "Continue Without These",
         onPrimary = onNext
     ) {
         if (!allSet) {
@@ -668,12 +725,12 @@ private fun UpdatesStep(tick: Int, onNext: () -> Unit) {
             Spacer(Modifier.height(12.dp))
         }
         if (notify != null) SetupRow(
-            Icons.Rounded.Notifications, "Notifications", "Alerts when your earbuds or case run low",
+            Icons.Rounded.Notifications, "Notifications", "Alerts when your earbuds or case are running low",
             done = notify.state == Perm.GRANTED,
             action = if (notify.state == Perm.BLOCKED) "Settings" else "Allow"
         ) { if (notify.state == Perm.BLOCKED) openNotificationSettings(context) else notify.request() }
         SetupRow(
-            Icons.Rounded.BatteryChargingFull, "Run in background", "Stops your phone from closing SunPods",
+            Icons.Rounded.BatteryChargingFull, "Run in Background", "Stops your phone from closing SunPods",
             done = unrestricted, action = "Allow"
         ) { BackgroundAccess.request(context) }
     }
@@ -713,7 +770,7 @@ private fun ExtrasStep(tick: Int, onNext: () -> Unit) {
     val refused = !lastSeen && (location.state == Perm.DENIED || location.state == Perm.BLOCKED)
     Page(
         progress = progressOf(Step.EXTRAS), icon = Icons.Rounded.Tune,
-        title = "Optional extras",
+        title = "Optional Extras",
         body = "Turn these on now or later.",
         primary = "Continue", onPrimary = onNext
     ) {
@@ -723,8 +780,8 @@ private fun ExtrasStep(tick: Int, onNext: () -> Unit) {
                     Icon(Icons.Rounded.LocationOn, contentDescription = null, tint = colors.primary)
                     Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Last seen", style = MaterialTheme.typography.titleSmall)
-                        Text("Saves where your earbuds disconnect, in case you lose them. Stays on this phone.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                        Text("Last Seen", style = MaterialTheme.typography.titleSmall)
+                        Text("Saves where your earbuds disconnect in case you lose them. Locations stay on this phone.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
                     }
                     Spacer(Modifier.width(12.dp))
                     Switch(checked = lastSeen, onCheckedChange = { on ->
@@ -737,19 +794,19 @@ private fun ExtrasStep(tick: Int, onNext: () -> Unit) {
                 if (refused) {
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        if (location.state == Perm.BLOCKED) "Location is off for SunPods. Turn it on in Settings to use Last seen."
-                        else "Location wasn't allowed, so Last seen stays off.",
+                        if (location.state == Perm.BLOCKED) "Location is off for SunPods. Turn it on in Settings to use Last Seen."
+                        else "Location wasn't allowed, so Last Seen is off.",
                         style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant
                     )
                 }
                 if (lastSeen && background.state != Perm.GRANTED) {
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        "To save the spot when SunPods is closed, choose Allow all the time.",
+                        "To save locations when SunPods is closed, choose Allow all the time.",
                         style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant
                     )
                     TextButton(onClick = { if (background.state == Perm.BLOCKED) openAppSettings(context) else background.request() }) {
-                        Text("Allow all the time")
+                        Text("Allow All the Time")
                     }
                 }
             }
@@ -784,14 +841,14 @@ private fun DoneStep(vm: SunpodsViewModel, onDone: () -> Unit) {
     var picking by remember { mutableStateOf(false) }
     Page(
         progress = 1f, icon = Icons.Rounded.CheckCircle,
-        title = "You're all set",
+        title = "You're All Set",
         body = if (connected) "Your earbuds are ready." else "SunPods connects as soon as your earbuds do.",
-        primary = "Start using SunPods",
+        primary = "Start Using SunPods",
         onPrimary = { OnboardingStore.setDone(context, true); onDone() }
     ) {
         if (connected) { Levels(battery); Spacer(Modifier.height(24.dp)) }
         SetupRow(
-            Icons.Rounded.Widgets, "Add a widget",
+            Icons.Rounded.Widgets, "Add a Widget",
             if (pinned) "Added. Check your home screen, or add another size." else "See your battery on the home screen. Small, medium or large.",
             done = false, action = "Choose"
         ) { picking = true }

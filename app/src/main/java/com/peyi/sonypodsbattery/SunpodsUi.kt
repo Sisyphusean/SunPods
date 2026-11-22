@@ -10,9 +10,12 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.foundation.Canvas
@@ -350,7 +353,7 @@ fun SunpodsApp(
                             Tab.SOUND -> SoundScreen(settings, vm)
                             Tab.CONTROLS -> ControlsScreen(settings, vm)
                             Tab.BATTERY -> BatteryInsightsScreen(battery)
-                            Tab.DEVICE -> DeviceScreen(battery, settings, onShareDiagnostics, onOpenBluetoothSettings, dynamicColor, onDynamicColorChange)
+                            Tab.DEVICE -> DeviceScreen(battery, settings, onShareDiagnostics, onOpenBluetoothSettings, dynamicColor, onDynamicColorChange, vm.liveAt.collectAsState().value)
                         }
                     }
                 }
@@ -401,22 +404,43 @@ private val TransparentItem @Composable get() =
     ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
 
 @Composable
-internal fun ToggleRow(icon: ImageVector?, title: String, subtitle: String, checked: Boolean?, onChange: (Boolean) -> Unit) {
+internal fun ToggleRow(icon: ImageVector?, title: String, subtitle: String, checked: Boolean?, onChange: (Boolean) -> Unit) =
+    ToggleRow(icon, title, subtitle, checked, null, onChange)
+
+/** [offNote]: the setting can't be used right now; shown greyed out and off, with this reason. */
+@Composable
+internal fun ToggleRow(icon: ImageVector?, title: String, subtitle: String, checked: Boolean?, offNote: String?, onChange: (Boolean) -> Unit) {
     val known = checked != null
+    val off = offNote != null
+    val on = checked == true && !off
+    val faded = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     ListItem(
         modifier = Modifier.toggleable(
-            value = checked == true,
-            enabled = known,
+            value = on,
+            enabled = known && !off,
             role = Role.Switch,
             onValueChange = onChange
         ),
-        headlineContent = { Text(title) },
-        supportingContent = { Text(if (known) subtitle else "Pull down to refresh") },
-        leadingContent = icon?.let { { RowIcon(it, active = checked == true) } },
-        trailingContent = { Switch(checked = checked == true, enabled = known, onCheckedChange = null) },
+        headlineContent = { Text(title, color = if (off) faded else androidx.compose.ui.graphics.Color.Unspecified) },
+        supportingContent = { Text(offNote ?: if (known) subtitle else "Pull down to refresh") },
+        leadingContent = icon?.let { { RowIcon(it, active = on) } },
+        trailingContent = { Switch(checked = on, enabled = known && !off, onCheckedChange = null) },
         colors = TransparentItem
     )
 }
+
+internal const val LE_OFF_NOTE = "Off while LE Audio is on"
+
+/** True while the earbuds are set to LE Audio or connected over it; some features are off then. */
+@Composable
+internal fun rememberLeOn(settings: DeviceSettings): Boolean {
+    val context = LocalContext.current
+    return remember(settings.readAt, settings.leOn) { settings.leOn == true || LeAudio.anyConnected(context) }
+}
+
+/** [LE_OFF_NOTE] while LE Audio is on, else null. */
+@Composable
+internal fun leOffNote(settings: DeviceSettings): String? = if (rememberLeOn(settings)) LE_OFF_NOTE else null
 
 @Composable
 private fun NavRow(icon: ImageVector, title: String, value: String?, onClick: () -> Unit) {
@@ -482,9 +506,9 @@ internal fun <T> ChoiceSheet(
 private fun PermissionBanner(onRequest: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.extraLarge) {
         Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Allow Nearby devices", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+            Text("Allow Nearby Devices", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
             Text(
-                "SunPods needs this to talk to your earbuds over Bluetooth.",
+                "SunPods needs this to connect to your earbuds over Bluetooth.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
@@ -555,7 +579,7 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
                 },
                 label = "battery"
             ) { on ->
-                if (on) BatteryCard(battery, busy) else LastReading(battery)
+                if (on) BatteryCard(battery, busy, vm.liveAt.collectAsState().value) else LastReading(battery)
             }
         }
         KeepRunningCard(resumes)
@@ -567,11 +591,11 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
             Column(verticalArrangement = Arrangement.spacedBy(GroupGap)) {
                 NoiseControl(battery, vm)
                 Group(
-                    "Quick settings",
+                    "Quick Settings",
                     rows = listOf(
-                        { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "Restores detail in compressed music", settings.dseeOn, vm::setDsee) },
+                        { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "Restores detail in compressed music", settings.dseeOn, leOffNote(settings), vm::setDsee) },
                         { ToggleRow(Icons.Rounded.RecordVoiceOver, "Speak-to-Chat", "Pauses music when you start talking", settings.speakToChat, vm::setSpeakToChat) },
-                        { ToggleRow(Icons.Rounded.Sensors, "Pause when removed", "Pauses music when you take an earbud out", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) }
+                        { ToggleRow(Icons.Rounded.Sensors, "Pause When Removed", "Pauses music when you take an earbud out", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) }
                     )
                 )
             }
@@ -588,7 +612,8 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
 
 /** Left, right and case as rings around the rendered parts. */
 @Composable
-private fun BatteryCard(battery: BatteryState, busy: Boolean) {
+private fun BatteryCard(battery: BatteryState, busy: Boolean, liveAt: Long = 0L) {
+    val heard = maxOf(battery.updatedAt, liveAt)
     val context = LocalContext.current
     val outlook = remember(battery.updatedAt) {
         BatteryInsights.outlook(BatteryHistory.load(context, System.currentTimeMillis() - 7L * 86_400_000), battery)
@@ -605,9 +630,8 @@ private fun BatteryCard(battery: BatteryState, busy: Boolean) {
             when {
                 busy -> "Checking your earbuds…"
                 battery.updatedAt == 0L -> "Pull down to refresh."
-                outlook.caseNeedsCharge -> "Case is low. Charge it tonight."
-                outlook.minutesLeft != null -> "About ${BatteryInsights.formatMinutes(outlook.minutesLeft)} of listening left. Updated ${relative(battery.updatedAt)}."
-                else -> "Updated ${relative(battery.updatedAt)}."
+                outlook.caseNeedsCharge -> "Case battery is low. Charge it tonight."
+                else -> "Updated ${relative(heard)}."
             }
         )
     }
@@ -662,16 +686,20 @@ private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int,
                 painter = painterResource(art),
                 contentDescription = null,
                 alpha = if (level == null) 0.4f else 1f,
-                modifier = Modifier.size(52.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value }
+                modifier = Modifier.size(if (art == R.drawable.bud_case) 40.dp else 52.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value }
             )
         }
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value }) {
-            Text(
-                if (level == null) "--" else (sweep * 100).roundToInt().toString(),
-                style = MaterialTheme.typography.titleLarge,
-                color = if (low) colors.error else colors.onSurface
-            )
+            if (level == null) {
+                Text(if (label == "Case") "Unknown" else "In Case", style = MaterialTheme.typography.titleSmall, color = colors.onSurfaceVariant)
+            } else {
+                Text(
+                    (sweep * 100).roundToInt().toString(),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = if (low) colors.error else colors.onSurface
+                )
+            }
             if (level != null) {
                 Text("%", style = MaterialTheme.typography.titleSmall, color = colors.onSurfaceVariant, modifier = Modifier.padding(bottom = 2.dp, start = 1.dp))
             }
@@ -697,7 +725,7 @@ private fun LastReading(battery: BatteryState) {
     }
     if (last == null) return
     Column {
-        SectionHeader("Last reading")
+        SectionHeader("Last Reading")
         SunCard {
             Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 LevelBar("Left", last.left, Modifier.weight(1f))
@@ -721,7 +749,7 @@ private fun LevelBar(label: String, level: Int?, modifier: Modifier = Modifier) 
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
-            Text(value?.let { "$it%" } ?: "--", style = MaterialTheme.typography.labelLarge)
+            Text(value?.let { "$it%" } ?: "Unknown", style = MaterialTheme.typography.labelLarge)
         }
         Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(colors.surfaceContainerHighest)) {
             Box(Modifier.fillMaxWidth((value ?: 0) / 100f).fillMaxHeight().clip(CircleShape).background(colors.outline))
@@ -765,24 +793,24 @@ private fun LastSeenCard() {
     if (!(enabled && hasPermission)) {
         if (dismissed && !enabled) return
         Column {
-            SectionHeader("Last seen")
+            SectionHeader("Last Seen")
             SunCard {
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RowIcon(Icons.Rounded.LocationOn)
                         Spacer(Modifier.width(16.dp))
-                        Text("Remember where you left them", style = MaterialTheme.typography.titleMedium)
+                        Text("Turn On Last Seen", style = MaterialTheme.typography.titleMedium)
                     }
                     Text(
-                        if (enabled) "Location is off for SunPods, so Last seen can't save where your earbuds disconnect."
-                        else "SunPods can save where your earbuds disconnect, so you know where to look. It stays on this phone.",
+                        if (enabled) "Location access is off for SunPods, so Last Seen can't save where your earbuds disconnect."
+                        else "SunPods can save where your earbuds disconnect, so you know where to look. The location stays on this phone.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
-                        Button(onClick = ::turnOn) { Text("Turn on") }
+                        Button(onClick = ::turnOn) { Text("Turn On") }
                         if (!enabled) {
-                            TextButton(onClick = { LastSeenStore.dismissPrompt(context); tick++ }) { Text("Not now") }
+                            TextButton(onClick = { LastSeenStore.dismissPrompt(context); tick++ }) { Text("Not Now") }
                         }
                     }
                 }
@@ -808,18 +836,18 @@ private fun LastSeenCard() {
     val findHub = remember { context.packageManager.getLaunchIntentForPackage("com.google.android.apps.adm") }
 
     Column {
-        SectionHeader("Last seen")
+        SectionHeader("Last Seen")
         SunCard {
             if (spot == null) {
                 Text(
-                    "SunPods saves the spot next time your earbuds disconnect.",
+                    "SunPods saves the location the next time your earbuds disconnect.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = colors.onSurfaceVariant,
                     modifier = Modifier.padding(20.dp)
                 )
             } else {
                 val openMaps = {
-                    val uri = android.net.Uri.parse("geo:${spot.lat},${spot.lng}?q=${spot.lat},${spot.lng}(${android.net.Uri.encode("Earbuds last seen")})")
+                    val uri = android.net.Uri.parse("geo:${spot.lat},${spot.lng}?q=${spot.lat},${spot.lng}(${android.net.Uri.encode("Earbuds Last Seen")})")
                     runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
                     Unit
                 }
@@ -867,14 +895,14 @@ private fun LastSeenCard() {
                 RowDivider(inset = 20.dp)
                 Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp)) {
                     Text(
-                        "Allow location all the time to save the spot even when SunPods is closed.",
+                        "To save the location when SunPods is closed, allow location access all the time.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant
                     )
                     TextButton(
                         onClick = { backgroundLauncher.launch(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) },
                         contentPadding = PaddingValues(horizontal = 0.dp)
-                    ) { Text("Allow all the time") }
+                    ) { Text("Allow All the Time") }
                 }
             }
         }
@@ -939,16 +967,16 @@ private fun LastSeenMap(modifier: Modifier = Modifier) {
 private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
     var level by remember(battery.ambientLevel) { mutableFloatStateOf(battery.ambientLevel.toFloat()) }
     Column {
-        SectionHeader("Noise control")
+        SectionHeader("Noise Control")
         SunCard {
             Row(
                 Modifier.fillMaxWidth().padding(8.dp).selectableGroup(),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                ModeButton(Icons.Rounded.NoiseAware, "Noise cancelling", battery.listeningMode == ListeningMode.NOISE_CANCELLING, Modifier.weight(1f)) {
+                ModeButton(Icons.Rounded.NoiseAware, "Noise Cancelling", battery.listeningMode == ListeningMode.NOISE_CANCELLING, Modifier.weight(1f)) {
                     vm.setListeningMode(ListeningMode.NOISE_CANCELLING, level.roundToInt(), battery.focusOnVoice)
                 }
-                ModeButton(Icons.Rounded.Hearing, "Ambient", battery.listeningMode == ListeningMode.AMBIENT, Modifier.weight(1f)) {
+                ModeButton(Icons.Rounded.Hearing, "Ambient Sound", battery.listeningMode == ListeningMode.AMBIENT, Modifier.weight(1f)) {
                     vm.setListeningMode(ListeningMode.AMBIENT, level.roundToInt(), battery.focusOnVoice)
                 }
                 ModeButton(Icons.Rounded.NoiseControlOff, "Off", battery.listeningMode == ListeningMode.OFF, Modifier.weight(1f)) {
@@ -964,7 +992,7 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
                     RowDivider(inset = 20.dp)
                     Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Ambient level", style = MaterialTheme.typography.bodyLarge)
+                            Text("Ambient Sound Level", style = MaterialTheme.typography.bodyLarge)
                             Text("${level.roundToInt()}", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
                         }
                         Slider(
@@ -974,11 +1002,11 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
                             steps = 18,
                             colors = quietSlider(),
                             onValueChangeFinished = { vm.setListeningMode(ListeningMode.AMBIENT, level.roundToInt(), battery.focusOnVoice) },
-                            modifier = Modifier.semantics { contentDescription = "Ambient sound level" }
+                            modifier = Modifier.semantics { contentDescription = "Ambient Sound Level" }
                         )
                     }
                     RowDivider(inset = 20.dp)
-                    ToggleRow(null, "Focus on voice", "Let voices through more clearly", battery.focusOnVoice) {
+                    ToggleRow(null, "Focus on Voice", "Lets voices through more clearly", battery.focusOnVoice) {
                         vm.setListeningMode(ListeningMode.AMBIENT, level.roundToInt(), it)
                     }
                 }
@@ -986,7 +1014,7 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
         }
         val context = LocalContext.current
         val automation = remember(battery.listeningMode, battery.updatedAt) { AutomationStore.active(context) }
-        Footer(automation?.let { "Set by an automation: $it. Pick a mode to override it." } ?: "You can also tap the earbuds picture to switch modes.")
+        Footer(automation?.let { "Set by an automation: $it. Choose a mode to override it." } ?: "You can also tap the earbuds to switch modes.")
     }
 }
 
@@ -1022,8 +1050,12 @@ private fun ModeButton(icon: ImageVector, label: String, selected: Boolean, modi
     }
 }
 
+/** A time shown on its own, such as a row value: "Just now", "5 minutes ago". */
+private fun relativeValue(time: Long): String = relative(time).replaceFirstChar { it.uppercase() }
+
 private fun relative(time: Long): String =
-    DateUtils.getRelativeTimeSpanString(time, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString().lowercase()
+    if (System.currentTimeMillis() - time < 60_000) "just now"
+    else DateUtils.getRelativeTimeSpanString(time, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString().lowercase()
 
 // ======================================================================
 // Sound
@@ -1064,16 +1096,16 @@ private fun SoundScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
     }
 
     Group(
-        "Audio quality",
-        footer = settings.codec?.let { "Now playing over $it. Changing priority briefly reconnects your earbuds." },
+        "Audio Quality",
+        footer = settings.codec?.let { "Now playing over $it. Changing Connection Priority briefly reconnects your earbuds." },
         rows = listOf(
-            { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "Restores detail in compressed music. Uses a little more battery.", settings.dseeOn, vm::setDsee) },
+            { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "Restores detail in compressed music. Uses a little more battery.", settings.dseeOn, leOffNote(settings), vm::setDsee) },
             {
                 var open by remember { mutableStateOf(false) }
-                NavRow(Icons.Rounded.BluetoothAudio, "Connection priority", settings.priority?.label ?: "Not read yet") { open = true }
+                NavRow(Icons.Rounded.BluetoothAudio, "Connection Priority", settings.priority?.label ?: "Connect to Check") { open = true }
                 if (open) {
                     ChoiceSheet(
-                        "Connection priority",
+                        "Connection Priority",
                         ConnectionPriority.entries.toList(),
                         settings.priority,
                         label = { it.label },
@@ -1100,9 +1132,9 @@ private fun EqPanel(settings: DeviceSettings, vm: SunpodsViewModel) {
         SectionHeader("Equaliser")
         SunCard {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
-                Text(settings.eqPreset?.label ?: "Not read yet", style = MaterialTheme.typography.headlineSmall)
+                Text(settings.eqPreset?.label ?: "Connect to Check", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    if (editable) "Drag the sliders to shape your sound." else "A Sony preset. Choose Custom to edit.",
+                    if (editable) "Drag the sliders to shape your sound." else "A Sony preset. Tap Customise to edit.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.onSurfaceVariant
                 )
@@ -1154,7 +1186,7 @@ private fun EqPanel(settings: DeviceSettings, vm: SunpodsViewModel) {
                         TextButton(onClick = {
                             values = List(6) { 0 }
                             vm.setEqBands(0, List(5) { 0 })
-                        }) { Text("Reset to flat") }
+                        }) { Text("Reset to Flat") }
                     } else {
                         FilledTonalButton(onClick = { vm.setEqPreset(EqPreset.CUSTOM_1) }) {
                             Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -1222,18 +1254,19 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
     val right = settings.touchRight
 
     Column {
-        SectionHeader("Touch controls")
+        SectionHeader("Touch Controls")
         SunCard {
             Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TouchSide("Left", R.drawable.bud_left, left, Modifier.weight(1f)) { picked -> right?.let { vm.setTouch(picked, it) } }
-                TouchSide("Right", R.drawable.bud_right, right, Modifier.weight(1f)) { picked -> left?.let { vm.setTouch(it, picked) } }
+                val options = settings.touchOptions
+                TouchSide("Left", R.drawable.bud_left, left, options?.get(0), Modifier.weight(1f)) { picked -> vm.setTouch(picked, null) }
+                TouchSide("Right", R.drawable.bud_right, right, options?.get(1), Modifier.weight(1f)) { picked -> vm.setTouch(null, picked) }
             }
             if (left == TouchFunction.AMBIENT_SOUND_CONTROL || right == TouchFunction.AMBIENT_SOUND_CONTROL) {
                 RowDivider(inset = 20.dp)
                 var open by remember { mutableStateOf(false) }
-                NavRow(Icons.Rounded.NoiseAware, "A tap cycles through", settings.noiseCycle?.label ?: "Not read yet") { open = true }
+                NavRow(Icons.Rounded.NoiseAware, "Tap Cycles Through", settings.noiseCycle?.label ?: "Connect to Check") { open = true }
                 if (open) {
-                    ChoiceSheet("A tap cycles through", NoiseCycle.entries.toList(), settings.noiseCycle,
+                    ChoiceSheet("Tap Cycles Through", NoiseCycle.entries.toList(), settings.noiseCycle,
                         label = { it.label }, onDismiss = { open = false }, onPick = vm::setNoiseCycle)
                 }
             }
@@ -1248,7 +1281,7 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
         if (settings.speakToChat == true) {
             add {
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
-                    Text("Voice detection", style = MaterialTheme.typography.bodyLarge)
+                    Text("Voice Detection", style = MaterialTheme.typography.bodyLarge)
                     Spacer(Modifier.height(12.dp))
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         val options = SpeakToChatSensitivity.entries
@@ -1264,9 +1297,9 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
             }
             add {
                 var open by remember { mutableStateOf(false) }
-                NavRow(Icons.Rounded.Timer, "End chat mode", settings.speakToChatTimeout?.label ?: "Not read yet") { open = true }
+                NavRow(Icons.Rounded.Timer, "End Chat Mode", settings.speakToChatTimeout?.label ?: "Connect to Check") { open = true }
                 if (open) {
-                    ChoiceSheet("End chat mode after", SpeakToChatTimeout.entries.toList(), settings.speakToChatTimeout,
+                    ChoiceSheet("End Chat Mode After", SpeakToChatTimeout.entries.toList(), settings.speakToChatTimeout,
                         label = { it.label }, onDismiss = { open = false }) { vm.setSpeakToChatConfig(sensitivity, it) }
                 }
             }
@@ -1275,10 +1308,10 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
     Group("Speak-to-Chat", rows = chatRows)
 
     Group(
-        "Wearing detection",
+        "Wearing Detection",
         rows = listOf(
-            { ToggleRow(Icons.Rounded.Sensors, "Pause when removed", "Music pauses when you take an earbud out", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) },
-            { ToggleRow(Icons.Rounded.PowerSettingsNew, "Power off when removed", "Turns off when both earbuds are out, to save battery", settings.autoOffWhenRemoved, vm::setAutoOff) }
+            { ToggleRow(Icons.Rounded.Sensors, "Pause When Removed", "Music pauses when you take an earbud out", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) },
+            { ToggleRow(Icons.Rounded.PowerSettingsNew, "Power Off When Removed", "Turns off when both earbuds are out, to save battery", settings.autoOffWhenRemoved, vm::setAutoOff) }
         )
     )
 
@@ -1290,17 +1323,19 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
     val general = settings.general.orEmpty()
     if (general.isNotEmpty()) {
         Group(
-            "Connection and calls",
+            "Connection and Calls",
             rows = general.map { g ->
                 {
-                    ToggleRow(generalIcon(g.key), g.title, g.subtitle, g.on) { on -> vm.setGeneral(g.slot, on) }
+                    // Two devices at once needs Classic; the earbuds turn it off on LE Audio.
+                    val offNote = if (g.key == "MULTIPOINT_SETTING") leOffNote(settings) else null
+                    ToggleRow(generalIcon(g.key), g.title, g.subtitle, g.on, offNote) { on -> vm.setGeneral(g.slot, on) }
                 }
             }
         )
     }
 
     val live = vm.battery.collectAsState().value
-    DevicesCard(connected = live.left != null || live.right != null)
+    DevicesCard(connected = live.left != null || live.right != null, leOn = rememberLeOn(settings))
 }
 
 private fun generalIcon(key: String) = when {
@@ -1312,13 +1347,15 @@ private fun generalIcon(key: String) = when {
 
 /** One earbud: its render, its side and what a touch does. Tap to change. */
 @Composable
-private fun TouchSide(side: String, art: Int, current: TouchFunction?, modifier: Modifier = Modifier, onPick: (TouchFunction) -> Unit) {
+private fun TouchSide(side: String, art: Int, current: TouchFunction?, options: List<TouchOption>?, modifier: Modifier = Modifier, onPick: (TouchFunction) -> Unit) {
+    // What the earbuds list for this side, in their words; the full list only if they haven't said.
+    fun hint(f: TouchFunction) = options?.firstOrNull { it.function == f }?.let(TouchCapability::describe) ?: touchHint(f)
     val colors = MaterialTheme.colorScheme
     var open by remember { mutableStateOf(false) }
     Column(
         modifier
             .clip(RoundedCornerShape(20.dp))
-            .clickable(enabled = current != null, onClickLabel = "Change $side earbud touch") { open = true }
+            .clickable(onClickLabel = "Change $side earbud touch control") { open = true }
             .padding(vertical = 16.dp, horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -1328,27 +1365,30 @@ private fun TouchSide(side: String, art: Int, current: TouchFunction?, modifier:
         Spacer(Modifier.height(8.dp))
         Surface(color = colors.secondaryContainer, shape = CircleShape) {
             Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(current?.label ?: "Not read yet", style = MaterialTheme.typography.labelLarge, color = colors.onSecondaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Text(current?.label ?: "Connect to Check", style = MaterialTheme.typography.labelLarge, color = colors.onSecondaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 Spacer(Modifier.width(4.dp))
                 Icon(Icons.Rounded.ExpandMore, contentDescription = null, tint = colors.onSecondaryContainer, modifier = Modifier.size(18.dp))
             }
         }
         if (current != null) {
             Spacer(Modifier.height(8.dp))
-            Text(touchHint(current), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, textAlign = TextAlign.Center, minLines = 2)
+            Text(hint(current), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, textAlign = TextAlign.Center, minLines = 2)
         }
     }
     if (open) {
-        ChoiceSheet("$side earbud", TouchFunction.entries.toList(), current,
-            label = { it.label }, detail = ::touchHint, onDismiss = { open = false }, onPick = onPick)
+        ChoiceSheet("$side Earbud", options?.map { it.function }
+            // Before the earbuds have said: the options every model has. Volume Control is its own
+            // option only on some models (not the XM5), so it waits for their list.
+            ?: TouchFunction.entries.filter { it != TouchFunction.VOLUME_CONTROL || it == current }, current,
+            label = { it.label }, detail = { hint(it) }, onDismiss = { open = false }, onPick = onPick)
     }
 }
 
 private fun touchHint(function: TouchFunction): String = when (function) {
-    TouchFunction.AMBIENT_SOUND_CONTROL -> "Tap: switch noise mode. Hold: Quick Attention."
-    TouchFunction.PLAYBACK_CONTROL -> "Tap: play/pause. Double: next. Triple: previous. Hold: assistant."
-    TouchFunction.VOLUME_CONTROL -> "Tap: volume up. Hold: volume down."
-    TouchFunction.NONE -> "Touch does nothing on this side."
+    TouchFunction.AMBIENT_SOUND_CONTROL -> "Tap to switch noise control mode. Hold for Quick Attention."
+    TouchFunction.PLAYBACK_CONTROL -> "Tap to play or pause. Double-tap for next, triple-tap for previous. Hold for voice assistant."
+    TouchFunction.VOLUME_CONTROL -> "Tap to turn the volume up. Hold to turn it down."
+    TouchFunction.NONE -> "Touch controls are off on this side."
 }
 
 // ======================================================================
@@ -1362,7 +1402,8 @@ private fun DeviceScreen(
     onShareDiagnostics: () -> Unit,
     onOpenBluetoothSettings: () -> Unit,
     dynamicColor: Boolean,
-    onDynamicColorChange: (Boolean) -> Unit
+    onDynamicColorChange: (Boolean) -> Unit,
+    liveAt: Long = 0L
 ) {
     val colors = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1385,17 +1426,17 @@ private fun DeviceScreen(
         Spacer(Modifier.height(8.dp))
         Text(settings.modelName ?: "WF-1000XM5", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(4.dp))
-        Text("Sony wireless earbuds", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+        Text("Sony wireless noise cancelling earbuds", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
     }
 
     Group(
         "About",
         inset = 20.dp,
         rows = listOf(
-            { InfoRow("Firmware", settings.firmware ?: "Not read yet") },
-            { InfoRow("Codec", settings.codec ?: "Not read yet") },
-            { InfoRow("Battery checked", if (battery.updatedAt == 0L) "Never" else relative(battery.updatedAt)) },
-            { InfoRow("Settings checked", if (settings.readAt == 0L) "Never" else relative(settings.readAt)) }
+            { InfoRow("Firmware Version", settings.firmware ?: "Connect to Check") },
+            { InfoRow("Audio Codec", settings.codec ?: "Connect to Check") },
+            { InfoRow("Battery Last Updated", if (battery.updatedAt == 0L) "Never" else relativeValue(maxOf(battery.updatedAt, liveAt))) },
+            { InfoRow("Settings Last Synced", if (settings.readAt == 0L) "Never" else relativeValue(settings.readAt)) }
         )
     )
 
@@ -1406,13 +1447,13 @@ private fun DeviceScreen(
         rows = listOf(
             {
                 var picking by remember { mutableStateOf(false) }
-                NavRow(Icons.Rounded.Widgets, "Add a widget", "Small, medium or large") { picking = true }
+                NavRow(Icons.Rounded.Widgets, "Add a Widget", "Choose from small, medium and large sizes") { picking = true }
                 if (picking) WidgetPickerSheet(onDismiss = { picking = false })
             },
             {
                 ToggleRow(
-                    Icons.Rounded.Palette, "Match wallpaper colours",
-                    "Use your wallpaper colours instead of SunPods amber", dynamicColor, onDynamicColorChange
+                    Icons.Rounded.Palette, "Use Wallpaper Colours",
+                    "Matches the app's colours to your wallpaper", dynamicColor, onDynamicColorChange
                 )
             }
         )
@@ -1420,20 +1461,68 @@ private fun DeviceScreen(
 
     YourDataGroup()
 
+    UpdatesGroup()
+
     Group(
         "Help",
         rows = listOf(
-            { NavRow(Icons.Rounded.Bluetooth, "Bluetooth settings", "Pair, forget or reconnect", onOpenBluetoothSettings) },
-            { NavRow(Icons.Rounded.BugReport, "Share diagnostics", "Send a log to help fix problems", onShareDiagnostics) },
+            { NavRow(Icons.Rounded.Bluetooth, "Bluetooth Settings", "Pair, reconnect or forget your earbuds", onOpenBluetoothSettings) },
+            { NavRow(Icons.Rounded.BugReport, "Send Diagnostics", "Share a technical log to help solve problems", onShareDiagnostics) },
             {
                 val context = LocalContext.current
-                NavRow(Icons.Rounded.RestartAlt, "Set up again", "Permissions, pairing and extras, step by step") {
+                NavRow(Icons.Rounded.RestartAlt, "Run Setup Again", "Review permissions, pairing and optional features") {
                     OnboardingStore.setDone(context, false)
                     Backup.restart(context)
                 }
             }
         ),
-        footer = "No account and no internet. Your earbuds allow one control app at a time, so close Sony Sound Connect while using SunPods.\n\nSunPods ${SunpodsInfo.VERSION}"
+        footer = "SunPods works without an account. Its only use of the internet is the update check, which you can turn off. Your earbuds connect to one control app at a time, so close Sony Sound Connect while you use SunPods.\n\nVersion ${SunpodsInfo.VERSION}. Free and open source under the GPL-3.0."
+    )
+}
+
+@Composable
+private fun UpdatesGroup() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var on by remember { mutableStateOf(Updates.enabled(context)) }
+    var checking by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<String?>(null) }
+    var found by remember { mutableStateOf<Updates.Release?>(null) }
+    Group(
+        "Updates",
+        rows = listOf(
+            {
+                ToggleRow(Icons.Rounded.SystemUpdate, "Check for Updates", "Once a day, SunPods asks GitHub for a new version and lets you know", on) {
+                    on = it
+                    Updates.setEnabled(context, it)
+                }
+            },
+            {
+                val release = found
+                NavRow(
+                    Icons.Rounded.Refresh,
+                    if (release != null) "Get SunPods ${release.version}" else "Check Now",
+                    if (checking) "Checking" else result ?: "You have version ${SunpodsInfo.VERSION}"
+                ) {
+                    if (release != null) {
+                        Updates.open(context, release.url)
+                    } else if (!checking) {
+                        checking = true
+                        scope.launch {
+                            val latest = Updates.latest()
+                            found = latest?.takeIf { Updates.isNewer(it.version, SunpodsInfo.VERSION) }
+                            result = when {
+                                latest == null -> "Couldn't reach GitHub. Check your connection and try again."
+                                found != null -> "Version ${latest.version} is out. Tap to download it."
+                                else -> "You're up to date (version ${SunpodsInfo.VERSION})"
+                            }
+                            checking = false
+                        }
+                    }
+                }
+            },
+            { NavRow(Icons.Rounded.Code, "Source Code", "See the code, report a bug or suggest a feature on GitHub") { Updates.open(context, "https://github.com/${Updates.REPO}") } }
+        )
     )
 }
 
@@ -1449,12 +1538,12 @@ private fun LastSeenSettings() {
         }
     }
     Group(
-        "Find my earbuds",
+        "Find My Earbuds",
         rows = buildList {
             add {
                 ToggleRow(
-                    Icons.Rounded.LocationOn, "Remember where you left them",
-                    "Saves the spot where they disconnect, on this phone only", enabled
+                    Icons.Rounded.LocationOn, "Last Seen",
+                    "Saves where your earbuds disconnect. Stored only on this phone.", enabled
                 ) { on ->
                     if (on && !LastSeenStore.hasLocationPermission(context)) {
                         launcher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
@@ -1465,7 +1554,7 @@ private fun LastSeenSettings() {
                 }
             }
             if (enabled && hasSpot) {
-                add { NavRow(Icons.Rounded.LocationOff, "Forget saved location", null) { LastSeenStore.clear(context); hasSpot = false } }
+                add { NavRow(Icons.Rounded.LocationOff, "Clear Saved Location", null) { LastSeenStore.clear(context); hasSpot = false } }
             }
         }
     )
@@ -1494,7 +1583,8 @@ internal object DemoMode {
 }
 
 object SunpodsInfo {
-    const val VERSION = "2.22.3"
+    /** From the build, so it can't go stale. */
+    val VERSION: String = BuildConfig.VERSION_NAME
 }
 
 private val PROMPT_VOLUMES = listOf(-2, -1, 0, 1, 2)
@@ -1509,17 +1599,17 @@ private fun VoicePromptsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
     var end by remember { mutableStateOf(QuietHours.endHour(context)) }
     val rows = mutableListOf<@Composable () -> Unit>()
     rows += {
-        ToggleRow(Icons.Rounded.RecordVoiceOver, "Voice prompts", "Spoken alerts like \"Battery about 20%\"", settings.promptsOn) { vm.setPrompts(it) }
+        ToggleRow(Icons.Rounded.RecordVoiceOver, "Voice Prompts", "Spoken alerts such as \"Battery about 20%\"", settings.promptsOn) { vm.setPrompts(it) }
     }
     if (settings.promptVolume != null) rows += {
         var open by remember { mutableStateOf(false) }
-        NavRow(Icons.Rounded.VolumeUp, "Prompt volume", promptVolumeLabel(settings.promptVolume)) { open = true }
-        if (open) ChoiceSheet("Prompt volume", PROMPT_VOLUMES, settings.promptVolume, label = ::promptVolumeLabel, onDismiss = { open = false }) {
+        NavRow(Icons.Rounded.VolumeUp, "Prompt Volume", promptVolumeLabel(settings.promptVolume)) { open = true }
+        if (open) ChoiceSheet("Prompt Volume", PROMPT_VOLUMES, settings.promptVolume, label = ::promptVolumeLabel, onDismiss = { open = false }) {
             vm.setPromptVolume(it)
         }
     }
     rows += {
-        ToggleRow(Icons.Rounded.Bedtime, "Quiet hours", "Prompts off from ${hourLabel(start)} to ${hourLabel(end)}, then back on", quiet) {
+        ToggleRow(Icons.Rounded.Bedtime, "Quiet Hours", "Turns prompts off from ${hourLabel(start)} to ${hourLabel(end)}", quiet) {
             quiet = it; vm.setQuietHours(it, start, end)
         }
     }
@@ -1527,21 +1617,21 @@ private fun VoicePromptsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
         rows += {
             var open by remember { mutableStateOf(false) }
             NavRow(Icons.Rounded.NightsStay, "Starts", hourLabel(start)) { open = true }
-            if (open) ChoiceSheet("Quiet from", (0..23).toList(), start, label = ::hourLabel, onDismiss = { open = false }) {
+            if (open) ChoiceSheet("Quiet Hours Start", (0..23).toList(), start, label = ::hourLabel, onDismiss = { open = false }) {
                 start = it; vm.setQuietHours(true, it, end)
             }
         }
         rows += {
             var open by remember { mutableStateOf(false) }
             NavRow(Icons.Rounded.WbSunny, "Ends", hourLabel(end)) { open = true }
-            if (open) ChoiceSheet("Quiet until", (0..23).toList(), end, label = ::hourLabel, onDismiss = { open = false }) {
+            if (open) ChoiceSheet("Quiet Hours End", (0..23).toList(), end, label = ::hourLabel, onDismiss = { open = false }) {
                 end = it; vm.setQuietHours(true, start, it)
             }
         }
     }
     Group(
-        "Voice prompts",
-        footer = if (quiet) "Quiet hours are set on your earbuds, so they work even when SunPods is closed. The connection prompt may still play once if your earbuds connect during quiet hours." else null,
+        "Voice Prompts",
+        footer = if (quiet) "Quiet Hours are set on your earbuds, so they work even when SunPods is closed. The connection prompt may still play once if your earbuds connect during Quiet Hours." else null,
         rows = rows
     )
 }
@@ -1558,14 +1648,14 @@ private fun YourDataGroup() {
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
             val ok = withContext(Dispatchers.IO) { runCatching { Backup.write(context, uri, Backup.export(context)) }.isSuccess }
-            toast(if (ok) "Backup saved" else "Couldn't save the backup")
+            toast(if (ok) "Backup saved" else "Couldn't save the backup. Try again.")
         }
     }
     val csv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
             val ok = withContext(Dispatchers.IO) { runCatching { Backup.write(context, uri, Backup.historyCsv(context)) }.isSuccess }
-            toast(if (ok) "Battery history exported" else "Couldn't export battery history")
+            toast(if (ok) "Battery history exported" else "Couldn't export battery history. Try again.")
         }
     }
     val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1574,33 +1664,33 @@ private fun YourDataGroup() {
             val result = withContext(Dispatchers.IO) {
                 runCatching { Backup.read(context, uri).let { it to Backup.inspect(it) } }
             }
-            result.onSuccess { pending = it }.onFailure { toast(it.message ?: "Couldn't open that file. Choose a SunPods backup.") }
+            result.onSuccess { pending = it }.onFailure { toast(it.message ?: "This file isn't a SunPods backup. Choose another file.") }
         }
     }
 
     Group(
-        "Your data",
+        "Your Data",
         rows = listOf(
-            { NavRow(Icons.Rounded.SaveAlt, "Back up", "Save settings, automations, Last seen and battery history to a file") { save.launch(Backup.suggestedName()) } },
-            { NavRow(Icons.Rounded.SettingsBackupRestore, "Restore", "Bring back data from a SunPods backup") { open.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) } },
+            { NavRow(Icons.Rounded.SaveAlt, "Back Up", "Save your settings, automations, Last Seen location and battery history to a file") { save.launch(Backup.suggestedName()) } },
+            { NavRow(Icons.Rounded.SettingsBackupRestore, "Restore from Backup", "Load your data from a SunPods backup file") { open.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) } },
             {
-                NavRow(Icons.Rounded.TableChart, "Export battery history", "Save as a CSV file for spreadsheets") {
+                NavRow(Icons.Rounded.TableChart, "Export Battery History", "Save as a CSV file") {
                     csv.launch("SunPods-battery-history-" + java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date()) + ".csv")
                 }
             }
         ),
-        footer = "Files stay where you save them. SunPods has no internet access. Backups include your Last seen location, so keep them private."
+        footer = "Files are saved only where you choose. Backups include your Last Seen location, so store them securely."
     )
 
     pending?.let { (text, s) ->
         val date = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(s.exportedAt))
         AlertDialog(
             onDismissRequest = { pending = null },
-            title = { Text("Restore this backup?") },
+            title = { Text("Restore This Backup?") },
             text = {
                 Text(
-                    "Saved $date from SunPods ${s.appVersion}: ${s.settings} settings, ${s.historyRows} battery readings and ${s.healthRows} battery health records.\n\n" +
-                        "Your settings will be replaced. Battery history is merged, so nothing is lost. SunPods restarts afterwards."
+                    "Created $date in SunPods ${s.appVersion}. Includes ${s.settings} settings, ${s.historyRows} battery readings and ${s.healthRows} battery health records.\n\n" +
+                        "This replaces your current settings and merges your battery history. SunPods restarts when it's done."
                 )
             },
             confirmButton = {
@@ -1608,7 +1698,7 @@ private fun YourDataGroup() {
                     pending = null
                     scope.launch {
                         val ok = withContext(Dispatchers.IO) { runCatching { Backup.restore(context, text) }.isSuccess }
-                        if (ok) Backup.restart(context) else toast("Couldn't restore that backup. Try another file.")
+                        if (ok) Backup.restart(context) else toast("Couldn't restore this backup. Try another file.")
                     }
                 }) { Text("Restore") }
             },
@@ -1628,36 +1718,47 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
     var tick by remember { mutableStateOf(0) }
     val le = remember(settings.readAt, tick) { LeAudio.anyConnected(context) }
     val rows = mutableListOf<@Composable () -> Unit>()
-    rows += { NavRow(Icons.Rounded.Mic, "Test your call mic", "Hear yourself the way callers do") { testing = true } }
-    if (settings.leModeSupported == true) rows += {
-        NavRow(Icons.Rounded.BluetoothAudio, "Connection mode", if (le) "LE Audio" else "Classic") { choosing = true }
+    rows += { NavRow(Icons.Rounded.Mic, "Test Your Call Mic", "Hear yourself the way callers do") { testing = true } }
+    val phoneLe = remember { LeAudio.phoneSupports(context) }
+    if (settings.leModeSupported == true && phoneLe) rows += {
+        NavRow(Icons.Rounded.BluetoothAudio, "Connection Mode", if (le) "LE Audio" else "Classic") { choosing = true }
+    }
+    // Earbuds that can do LE Audio on a phone that can't: say so instead of hiding it.
+    if (settings.leModeSupported == true && !phoneLe) rows += {
+        InfoRow("Connection Mode", "Classic")
     }
     // A switch that didn't complete can leave the earbuds' LE Audio setting on while the phone
     // still uses Classic, which turns off Connect to 2 devices.
-    if (settings.leOn == true && !le) rows += {
-        val scope = rememberCoroutineScope()
-        var busy by remember { mutableStateOf(false) }
-        NavRow(Icons.Rounded.RestartAlt, "Finish switching back to Classic", if (busy) "Updating your earbuds" else "Your earbuds still have LE Audio on. Tap to turn it off.") {
-            if (busy) return@NavRow
-            busy = true
-            scope.launch {
-                val ok = RefreshCoordinator.awaitSession(context, "Connection mode") { s -> SonyFeatures.setLeAudio(s, settings, false) }.getOrDefault(false)
-                DiagnosticsStore.add(context, "Connection mode: turned the earbuds' LE Audio setting off: $ok")
-                busy = false
-                vm.refreshAll()
-            }
-        }
+    // Repair rows wait until a switch has had time to settle; mid-switch the links are meant to be in flux.
+    val settling = remember(settings.readAt, tick) { SonyControlSessionManager.switchedRecently(context) }
+    LaunchedEffect(settling) { if (settling) { delay(30_000); tick++ } }
+    // Set to Classic but not connected at all, as after a switch the phone didn't finish.
+    val classicUp = remember(settings.readAt, tick) { runCatching { context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.getProfileConnectionState(android.bluetooth.BluetoothProfile.A2DP) == android.bluetooth.BluetoothProfile.STATE_CONNECTED }.getOrDefault(false) }
+    if (!settling && !le && !classicUp) rows += {
+        NavRow(Icons.Rounded.RestartAlt, "Reconnect Your Earbuds", "Your earbuds aren't connected. Tap to pair them again.") { switching = false }
+    }
+    // The reverse: the earbuds are set to Classic but one is still holding on to LE Audio.
+    if (!settling && le && (settings.leOn == false || SonyControlSessionManager.classicOnly(context))) rows += {
+        NavRow(Icons.Rounded.RestartAlt, "Finishing the Switch to Classic", "Put both earbuds in the case, close the lid for 10 seconds, then take them out.") { tick++ }
+    }
+    if (!settling && settings.leOn == true && !le) rows += {
+        NavRow(Icons.Rounded.RestartAlt, "Finish Switching Back to Classic", "Your earbuds still have LE Audio on. Tap to turn it off.") { switching = false }
     }
     Group(
         "Calls",
-        footer = if (settings.leModeSupported == true) "LE Audio often makes your voice clearer on calls. It needs a phone that supports it." else null,
+        footer = when {
+            settings.leModeSupported != true -> null
+            phoneLe -> "LE Audio often makes your voice clearer on calls. It needs a phone that supports it."
+            android.os.Build.VERSION.SDK_INT < 33 -> "Your earbuds support LE Audio, but it needs Android 13 or later. They use Classic on this phone."
+            else -> "Your earbuds support LE Audio, but this phone doesn't, or it's turned off in Developer options. They use Classic on this phone."
+        },
         rows = rows
     )
     if (testing) MicTestSheet(onDismiss = { testing = false })
     if (choosing) ChoiceSheet(
-        "Connection mode", listOf(false, true), le,
+        "Connection Mode", listOf(false, true), le,
         label = { if (it) "LE Audio" else "Classic" },
-        detail = { if (it) "Clearer calls on phones that support it. Connect to 2 devices turns off." else "Works with every phone and device. Connect to 2 devices available." },
+        detail = { if (it) "Clearer calls on phones that support it. Turns off Connect to Two Devices." else "Works with every phone and device. Connect to Two Devices is available." },
         onDismiss = { choosing = false }
     ) { pick -> choosing = false; if (pick != le) confirm = pick }
     confirm?.let { on ->
@@ -1666,8 +1767,8 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
             title = { Text(if (on) "Switch to LE Audio?" else "Switch to Classic?") },
             text = {
                 Text(
-                    (if (on) "Your earbuds disconnect and reconnect using LE Audio. Connect to 2 devices turns off while it's on."
-                    else "Your earbuds disconnect and reconnect using Classic Bluetooth.") + "\n\nWear both earbuds before you switch."
+                    (if (on) "Your earbuds will reconnect using LE Audio. The first time, SunPods helps you pair them again. Connect to Two Devices and LDAC are off while LE Audio is on."
+                    else "Your earbuds will reconnect using Classic. You may need to pair them again.") + "\n\nWear both earbuds before you switch."
                 )
             },
             confirmButton = { TextButton(onClick = { confirm = null; switching = on }) { Text("Switch") } },

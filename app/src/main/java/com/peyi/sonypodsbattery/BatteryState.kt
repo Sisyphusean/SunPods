@@ -84,6 +84,7 @@ object DiagnosticsStore {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val current = prefs.getString(KEY, "").orEmpty().lineSequence().filter { it.isNotBlank() }.toMutableList()
         current += "${System.currentTimeMillis()}: $message"
+        android.util.Log.i("SunPods", message)
         prefs.edit().putString(KEY, current.takeLast(40).joinToString("\n")).apply()
     }
 

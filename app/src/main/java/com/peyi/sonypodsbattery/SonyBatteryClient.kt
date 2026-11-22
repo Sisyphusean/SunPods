@@ -12,14 +12,21 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 enum class ListeningMode(val label: String) {
-    NOISE_CANCELLING("Noise cancelling"),
-    AMBIENT("Ambient sound"),
+    NOISE_CANCELLING("Noise Cancelling"),
+    AMBIENT("Ambient Sound"),
     OFF("Off");
 
     companion object {
         fun fromStored(value: String?): ListeningMode? = entries.firstOrNull { it.name == value }
     }
 }
+
+/** The earbuds' confirmation alert (99 ...) and the app's answer to it (98 ...). */
+private const val ALERT_NOTIFY = 0x99.toByte()
+private const val ALERT_ANSWER = 0x98.toByte()
+
+/** Which inquired type these earbuds answer noise control questions on, once known. */
+@Volatile private var noiseType: Byte? = null
 
 class SonyControlChannelUnavailableException(cause: Throwable?) :
     IOException("Sony control channel unavailable", cause)
@@ -37,6 +44,8 @@ object SonyControlSessionManager {
 
     private var state = SonySessionState.DISCONNECTED
     private var activeAddress: String? = null
+    /** The LE earbud the control channel is open on, in LE Audio mode. */
+    @Volatile private var activeLeAddress: String? = null
     private var activeSocket: SonyLink? = null
     private var connectingSocket: SonyLink? = null
     private var activeSession: SonyBatteryClient.SonySession? = null
@@ -48,19 +57,137 @@ object SonyControlSessionManager {
     fun currentState(): SonySessionState = state
 
     @SuppressLint("MissingPermission")
+    /** One command at a time on the link, so live checks never interleave with other requests. */
+    private val io = java.util.concurrent.locks.ReentrantLock()
+
     internal fun <T> withSession(
         context: Context,
         device: BluetoothDevice,
         action: (SonyBatteryClient.SonySession) -> T
     ): T {
-        val session = getOrOpen(context, device)
+        io.lock()
+        try {
+            val session = getOrOpen(context, device)
+            return try {
+                action(session)
+            } catch (error: SonyControlChannelUnavailableException) {
+                throw error
+            } catch (refused: EarbudsUnavailableException) {
+                // The earbuds answered, they just said no: the link is fine, so keep it and don't retry.
+                throw refused
+            } catch (error: Exception) {
+                close(context, "I/O failure: ${error.message ?: error.javaClass.simpleName}")
+                throw SonyControlChannelUnavailableException(error)
+            }
+        } finally {
+            io.unlock()
+        }
+    }
+
+    /**
+     * Like [withSession], then runs the same action on the other earbud in LE Audio mode. Over LE
+     * each earbud has its own control channel and keeps its own settings (a change sent to the
+     * right earbud never reaches the left), so Sony's app writes to both. Classic needs nothing:
+     * the earbuds share settings between themselves. The other earbud failing isn't fatal.
+     */
+    internal fun <T> withBothEarbuds(
+        context: Context,
+        device: BluetoothDevice,
+        action: (SonyBatteryClient.SonySession) -> T
+    ): T {
+        io.lock()
+        try {
+            val result = withSession(context, device, action)
+            onOtherEarbud(context) { action(it) }
+            return result
+        } finally {
+            io.unlock()
+        }
+    }
+
+    /**
+     * The earbuds' own connection setting as last seen: true = Classic only. While they're set to
+     * Classic, SunPods never opens its LE control channel. Holding that link open after a switch
+     * kept the right earbud on LE Audio indefinitely, because it waits for the phone to let go.
+     */
+    fun setClassicOnly(context: Context, classicOnly: Boolean) {
+        context.getSharedPreferences("sunpods_connection", Context.MODE_PRIVATE).edit().putBoolean("classic_only", classicOnly).apply()
+    }
+
+    fun classicOnlyKnown(context: Context): Boolean =
+        context.getSharedPreferences("sunpods_connection", Context.MODE_PRIVATE).contains("classic_only")
+
+    fun classicOnly(context: Context): Boolean {
+        val p = context.getSharedPreferences("sunpods_connection", Context.MODE_PRIVATE)
+        if (p.contains("classic_only")) return p.getBoolean("classic_only", false)
+        // Installs from before this flag: fall back to the last reading of the earbuds' setting.
+        return SettingsStore.load(context).leOn == false
+    }
+
+    /** A switch between Classic and LE Audio just started; the links are expected to be in flux. */
+    fun noteSwitch(context: Context) {
+        context.getSharedPreferences("sunpods_connection", Context.MODE_PRIVATE).edit().putLong("switch_at", System.currentTimeMillis()).apply()
+    }
+
+    fun switchedRecently(context: Context, withinMs: Long = 90_000): Boolean =
+        System.currentTimeMillis() - context.getSharedPreferences("sunpods_connection", Context.MODE_PRIVATE).getLong("switch_at", 0) < withinMs
+
+    /** The earbuds' Classic link dropping; a run of these with no audio means a broken pairing. */
+    fun noteAclDrop(context: Context) {
+        context.getSharedPreferences("sunpods_connection", Context.MODE_PRIVATE).edit().putLong("acl_drop_at", System.currentTimeMillis()).apply()
+    }
+
+    fun aclDroppedRecently(context: Context, withinMs: Long = 60_000): Boolean =
+        System.currentTimeMillis() - context.getSharedPreferences("sunpods_connection", Context.MODE_PRIVATE).getLong("acl_drop_at", 0) < withinMs
+
+    /** Drops the LE control channel so the earbuds can leave LE Audio, after a switch to Classic. */
+    fun releaseLe(context: Context) {
+        setClassicOnly(context, true)
+        io.lock()
+        try {
+            if (activeSocket is GattLink || connectingSocket is GattLink) close(context, "earbuds switched to Classic")
+        } finally {
+            io.unlock()
+        }
+    }
+
+    /** Runs [action] on a short-lived control channel to the other LE earbud, if there is one. */
+    @SuppressLint("MissingPermission")
+    internal fun <T> onOtherEarbud(context: Context, action: (SonyBatteryClient.SonySession) -> T): T? {
+        if (activeSocket !is GattLink) return null
+        val main = activeLeAddress ?: run { DiagnosticsStore.add(context, "Other earbud: skipped, no LE address for this session"); return null }
+        val connected = LeAudio.connectedEarbuds(context)
+        val other = connected.firstOrNull { !it.address.equals(main, true) } ?: run {
+            DiagnosticsStore.add(context, "Other earbud: skipped, session on $main, LE earbuds ${connected.map { it.address }}")
+            return null
+        }
+        io.lock()
+        var link: SonyLink? = null
         return try {
-            action(session)
-        } catch (error: SonyControlChannelUnavailableException) {
-            throw error
+            link = GattLink.open(context, other) { }
+            val session = SonyBatteryClient.SonySession(link)
+            session.initialize()
+            action(session).also { DiagnosticsStore.add(context, "Other earbud (${other.address}): done") }
         } catch (error: Exception) {
-            close(context, "I/O failure: ${error.message ?: error.javaClass.simpleName}")
-            throw SonyControlChannelUnavailableException(error)
+            DiagnosticsStore.add(context, "Other earbud (${other.address}) didn't take the change: ${error.message ?: error.javaClass.simpleName}")
+            null
+        } finally {
+            runCatching { link?.close() }
+            io.unlock()
+        }
+    }
+
+    /** Like [withSession], but returns null at once if another command is using the link. */
+    internal fun <T> withSessionIfFree(
+        context: Context,
+        device: BluetoothDevice,
+        action: (SonyBatteryClient.SonySession) -> T
+    ): T? {
+        if (!io.tryLock()) return null
+        try {
+            return withSession(context, device, action)
+        } finally {
+            io.unlock()
         }
     }
 
@@ -108,6 +235,10 @@ object SonyControlSessionManager {
             val session = activeSession
             if (state == SonySessionState.CONNECTED && activeAddress == address && session != null) {
                 if (System.currentTimeMillis() - session.lastHeard < IDLE_DROP_MS) return session
+                // The LE channel reports a drop straight away, so a quiet one is still good: reuse it
+                // instead of closing and reopening it at every check. If it has gone stale after
+                // all, the command fails and the caller's retry opens a fresh one.
+                if (activeSocket is GattLink && activeSocket?.isConnected == true) return session
                 true
             } else false
         }
@@ -124,6 +255,11 @@ object SonyControlSessionManager {
         var lastError: Exception? = null
         // In LE Audio mode there's no Classic link to open; go straight to the LE control channel.
         if (LeAudio.anyConnected(context)) {
+            if (classicOnly(context)) {
+                // Set to Classic but the phone is still on LE: stay off the LE link so it can drop.
+                synchronized(this) { if (connectionGeneration == generation) updateStateLocked(context, SonySessionState.DISCONNECTED) }
+                throw SonyControlChannelUnavailableException(IOException("Earbuds are leaving LE Audio"))
+            }
             openGatt(context, device, generation)?.let { return it }
         }
         val attempts = listOf(UUID_V2, UUID_V1).flatMap { u -> listOf(true, false).map { u to it } }
@@ -195,6 +331,7 @@ object SonyControlSessionManager {
                     connectingSocket = null
                     activeSocket = link
                     activeAddress = device.address
+                    activeLeAddress = candidate.address
                     activeSession = session
                     updateStateLocked(context, SonySessionState.CONNECTED)
                 }
@@ -266,8 +403,29 @@ class SonyBatteryClient(private val context: Context) {
         val left: Int?, val right: Int?, val case: Int?,
         val leftCharging: Boolean, val rightCharging: Boolean, val caseCharging: Boolean,
         /** The earbuds' own bytes, for diagnostics. */
-        val raw: String = ""
+        val raw: String = "",
+        /** The listening mode the earbuds say they're in, or null if they didn't answer. */
+        val mode: ModeReport? = null
     )
+
+    /** Noise control as the earbuds report it (reply 0x67 or notification 0x69, inquired type 0x15). */
+    data class ModeReport(val mode: ListeningMode, val focusOnVoice: Boolean, val ambientLevel: Int, val raw: String) {
+        companion object {
+            fun parse(p: ByteArray): ModeReport? {
+                if (p.size < 7 || (p[0] != 0x67.toByte() && p[0] != 0x69.toByte()) || (p[1] != 0x15.toByte() && p[1] != 0x17.toByte())) return null
+                val mode = when {
+                    p[3].toInt() == 0 -> ListeningMode.OFF
+                    p[4].toInt() == 0 -> ListeningMode.NOISE_CANCELLING
+                    p[4].toInt() == 1 -> ListeningMode.AMBIENT
+                    else -> return null
+                }
+                return ModeReport(
+                    mode, p[5].toInt() == 1, (p[6].toInt() and 0xff).coerceIn(1, 20),
+                    p.joinToString(" ") { "%02x".format(it.toInt() and 0xff) }
+                )
+            }
+        }
+    }
 
     @SuppressLint("MissingPermission")
     fun findEarbuds(): BluetoothDevice? {
@@ -279,16 +437,25 @@ class SonyBatteryClient(private val context: Context) {
     fun read(device: BluetoothDevice): Result =
         SonyControlSessionManager.withSession(context, device) { s ->
             val result = s.readBattery()
+            val mode = runCatching { s.readMode() }.getOrNull()
             runCatching { QuietHours.enforce(context, s) }
             runCatching { SonyFeatures.refreshCodec(context, s) }
-            result
+            result.copy(mode = mode)
+        }
+
+    /** Levels, case and mode only, for live updates. Null if another command is using the link. */
+    @SuppressLint("MissingPermission")
+    fun readLive(device: BluetoothDevice): Result? =
+        SonyControlSessionManager.withSessionIfFree(context, device) { s ->
+            s.readBattery().copy(mode = runCatching { s.readMode() }.getOrNull())
         }
 
     @SuppressLint("MissingPermission")
     fun setListeningMode(device: BluetoothDevice, mode: ListeningMode, ambientLevel: Int = 20, focusOnVoice: Boolean = false) {
-        SonyControlSessionManager.withSession(context, device) {
+        val note = SonyControlSessionManager.withBothEarbuds(context, device) {
             it.setAmbientSoundMode(mode, ambientLevel, focusOnVoice)
         }
+        DiagnosticsStore.add(context, "Listening mode $mode: $note")
     }
 
     internal class SonySession(private val socket: SonyLink) {
@@ -316,10 +483,15 @@ class SonyBatteryClient(private val context: Context) {
                     if (count > 0) lastHeard = System.currentTimeMillis()
                     if (count > 0) for (frame in decoder.feed(buffer.copyOf(count))) {
                         if (frame.type == SonyProtocol.ACK) sequence = frame.sequence
-                        if (frame.type == SonyProtocol.DATA_MDR || frame.type == SonyProtocol.DATA_MDR_NO2) {
+                        else if (BuildConfig.DEBUG) android.util.Log.d("SunPods", "rx ${frame.type}: ${hex(frame.payload)}")
+                        if (!socket.acksItself && (frame.type == SonyProtocol.DATA_MDR || frame.type == SonyProtocol.DATA_MDR_NO2)) {
                             output.write(SonyProtocol.encode(SonyProtocol.ACK, 1 - frame.sequence, byteArrayOf()))
                             output.flush()
                         }
+                        // The earbuds announce mode changes they make themselves (touch, one earbud in or out).
+                        if (frame.type == SonyProtocol.DATA_MDR) ModeReport.parse(frame.payload)?.let { reportedMode = it }
+                        // A confirmation alert the earbuds want answered (see withConfirmation).
+                        if (frame.type == SonyProtocol.DATA_MDR && frame.payload.size >= 3 && frame.payload[0] == ALERT_NOTIFY) lastAlert = frame.payload
                         if (match(frame)) return frame
                     }
                 } else {
@@ -328,6 +500,28 @@ class SonyBatteryClient(private val context: Context) {
                 }
             }
             return null
+        }
+
+        @Volatile private var lastAlert: ByteArray? = null
+        private var alertsOn = false
+
+        /**
+         * Runs a change the earbuds only apply after the app confirms it, such as Connect to Two
+         * Devices or LE Audio. Sound Connect switches the earbuds' confirmation alerts on for every
+         * connection (94 00 00); with them off, the earbuds acknowledge such a change and then drop
+         * it. With them on, the earbuds send an alert (99 [kind, code, ...]) and wait for the answer
+         * (98 [kind, code, 01] for OK). Returns the alert that was confirmed, or null if none came.
+         */
+        fun withConfirmation(timeoutMs: Long = 2_500, change: () -> Unit): ByteArray? {
+            // Sent before every confirmed change, not once per session: a switch back to Classic
+            // over LE Audio was seen to get no alert when this had been sent earlier on the link.
+            command(byteArrayOf(0x94.toByte(), 0x00, 0x00), 1_000)
+            alertsOn = true
+            lastAlert = null
+            change()
+            val alert = lastAlert ?: waitFor(timeoutMs) { lastAlert != null }?.let { lastAlert } ?: return null
+            send(byteArrayOf(ALERT_ANSWER, alert[1], alert[2], 0x01))
+            return alert
         }
 
         fun initialize() {
@@ -357,17 +551,60 @@ class SonyBatteryClient(private val context: Context) {
             )
         }
 
+        /** Latest mode the earbuds reported on this session, from a reply or a notification. */
+        @Volatile var reportedMode: ModeReport? = null
+
+        /** Asks the earbuds which listening mode they're actually in. */
+        fun readMode(): ModeReport? {
+            val types = noiseType?.let { listOf(it) } ?: listOf<Byte>(0x17, 0x15)
+            for (t in types) {
+                val p = request(byteArrayOf(0x66, t), 800) ?: continue
+                android.util.Log.i("SunPods", "Noise control reply for type ${"%02x".format(t)}: ${hex(p)}")
+                noiseType = t
+                return ModeReport.parse(p) ?: reportedMode
+            }
+            return reportedMode
+        }
+
         private fun charging(status: Byte) = status.toInt() == 1 || status.toInt() == 3
         private fun hex(b: ByteArray) = b.joinToString(" ") { "%02x".format(it.toInt() and 0xff) }
 
-        fun setAmbientSoundMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean) {
+        /**
+         * Sets noise control and checks the earbuds really applied it. Over LE Audio the XM5 has been
+         * seen to acknowledge the change and then stay where it was, so after the ACK this reads the
+         * mode back; if it didn't take, it retries once with confirmation alerts on (94 00 00) and
+         * answers any alert, the way Sound Connect does. Returns a line for diagnostics.
+         */
+        fun setAmbientSoundMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean): String {
             val enabled = if (mode == ListeningMode.OFF) 0 else 1
             val ambient = if (mode == ListeningMode.AMBIENT) 1 else 0
-            send(byteArrayOf(0x68, 0x15, 0x01, enabled.toByte(), ambient.toByte(), if (focusOnVoice) 0x01 else 0x00, ambientLevel.coerceIn(1, 20).toByte()))
-            waitFor(2_500) { frame ->
-                frame.type == SonyProtocol.ACK ||
-                    (frame.type == SonyProtocol.DATA_MDR && frame.payload.firstOrNull() in listOf(0x67.toByte(), 0x69.toByte()))
-            } ?: throw IOException("Earbuds did not confirm the listening mode")
+            val type = noiseType ?: 0x17.toByte()
+            // The XM5 takes noise control on type 0x17; an unknown type is acknowledged but ignored.
+            val payload = byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), if (focusOnVoice) 0x01 else 0x00, ambientLevel.coerceIn(1, 20).toByte())
+            val seen = StringBuilder()
+            fun sendAndWatch() {
+                send(payload)
+                waitFor(2_500) { frame ->
+                    if (frame.type != SonyProtocol.ACK) seen.append(" rx${frame.type}[${hex(frame.payload)}]")
+                    frame.type == SonyProtocol.ACK ||
+                        (frame.type == SonyProtocol.DATA_MDR && frame.payload.firstOrNull() in listOf(0x67.toByte(), 0x69.toByte()))
+                } ?: throw IOException("Earbuds did not confirm the listening mode")
+                // Give the earbuds a moment to announce the result (69 17) or an alert (99).
+                waitFor(400) { frame ->
+                    if (frame.type != SonyProtocol.ACK) seen.append(" rx${frame.type}[${hex(frame.payload)}]")
+                    false
+                }
+            }
+            fun applied(): ModeReport? = readMode()?.takeIf { it.mode == mode }
+
+            sendAndWatch()
+            applied()?.let { return "applied (sent ${hex(payload)};$seen)" }
+            val first = "not applied, earbuds report ${reportedMode?.raw ?: "nothing"} (sent ${hex(payload)};$seen)"
+            seen.setLength(0)
+            val alert = withConfirmation(1_500) { sendAndWatch() }
+            val after = applied()
+            return "$first; retry with alerts${alert?.let { " answered ${hex(it)}" } ?: ""}:$seen -> " +
+                if (after != null) "applied" else "still ${reportedMode?.raw ?: "unknown"}"
         }
 
         private fun percent(value: Byte): Int? = (value.toInt() and 0xff).takeIf { it in 0..100 }

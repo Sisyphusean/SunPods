@@ -242,8 +242,8 @@ object BatteryInsights {
         val m = minutes % 60
         return when {
             h == 0 -> "$m min"
-            m == 0 -> "$h h"
-            else -> "$h h $m min"
+            m == 0 -> "$h hr"
+            else -> "$h hr $m min"
         }
     }
 }
@@ -271,8 +271,8 @@ object BatteryNudges {
                 val left = (level / outlook.drainPerHour * 60).roundToInt()
                 notify(
                     context, 3001 + side.length,
-                    "$side earbud at $level%",
-                    "About ${BatteryInsights.formatMinutes(left)} of listening left. Put it in the case to charge."
+                    "$side Earbud at $level%",
+                    "About ${BatteryInsights.formatMinutes(left)} of listening time remaining. Put it in the case to charge."
                 )
                 prefs.edit().putBoolean(key, true).apply()
             }
@@ -302,8 +302,8 @@ object BatteryNudges {
         ) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Battery alerts", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Alerts when your earbuds or case run low"
+            NotificationChannel(CHANNEL, "Battery Alerts", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "Alerts when your earbuds or case are running low."
             }
         )
         val open = PendingIntent.getActivity(

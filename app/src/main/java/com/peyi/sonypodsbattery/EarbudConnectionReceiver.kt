@@ -125,12 +125,22 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
             return
         }
 
+        if (action == LE_AUDIO_CONNECTION_STATE_CHANGED &&
+            intent.getIntExtra(android.bluetooth.BluetoothProfile.EXTRA_STATE, -1) == android.bluetooth.BluetoothProfile.STATE_CONNECTED
+        ) ClassicRepair.check(app, "LE Audio connected while set to Classic")
+
         if (action == BluetoothDevice.ACTION_ACL_DISCONNECTED) {
             val target = device ?: return
             DiagnosticsStore.add(context.applicationContext, "ACL disconnected fallback: $deviceLabel")
+            SonyControlSessionManager.noteAclDrop(context.applicationContext)
+            ClassicRepair.check(context.applicationContext, "Classic link dropped")
             val pendingResult = goAsync()
             CoroutineScope(Dispatchers.IO).launch {
                 try {
+                    if (stillConnected(context.applicationContext)) {
+                        DiagnosticsStore.add(context.applicationContext, "Ignored disconnect, still connected by another link: $deviceLabel")
+                        return@launch
+                    }
                     val spot = launch { LastSeenStore.captureAtDisconnect(context.applicationContext) }
                     RefreshCoordinator.handleDeviceDisconnected(context.applicationContext, target)
                     spot.join()
@@ -160,10 +170,14 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
             EarbudConnectionStateStore.markA2dp(app, a2dpState, target)
             RefreshCoordinator.handleA2dpConnected(app, target)
         } else {
-            EarbudConnectionStateStore.markA2dp(app, a2dpState, target)
             val pendingResult = goAsync()
             CoroutineScope(Dispatchers.IO).launch {
                 try {
+                    if (stillConnected(app)) {
+                        DiagnosticsStore.add(app, "Ignored disconnect, still connected by another link: $deviceLabel")
+                        return@launch
+                    }
+                    EarbudConnectionStateStore.markA2dp(app, a2dpState, target)
                     val spot = launch { LastSeenStore.captureAtDisconnect(app) }
                     RefreshCoordinator.handleDeviceDisconnected(app, target)
                     spot.join()
@@ -174,3 +188,13 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
         }
     }
 }
+
+/**
+ * True while these earbuds still have an audio link of either kind. Switching between Classic and
+ * LE Audio drops one link while the other carries on, which isn't the earbuds going away.
+ */
+private suspend fun stillConnected(context: Context): Boolean = runCatching {
+    if (LeAudio.connectedEarbuds(context).isNotEmpty()) return@runCatching true
+    val earbuds = SonyBatteryClient(context).findEarbuds() ?: return@runCatching false
+    A2dpConnectionHelper.isConnected(context, earbuds) == true
+}.getOrDefault(false)

@@ -128,9 +128,9 @@ private fun ListeningLeftCard(battery: BatteryState, outlook: BatteryOutlook) {
 
     Surface(color = colors.primaryContainer, shape = MaterialTheme.shapes.extraLarge) {
         Column(Modifier.fillMaxWidth().padding(24.dp)) {
-            Text("Listening left", style = MaterialTheme.typography.labelLarge, color = colors.onPrimaryContainer)
+            Text("Listening Time Remaining", style = MaterialTheme.typography.labelLarge, color = colors.onPrimaryContainer)
             Text(
-                if (minutes == null) "--" else BatteryInsights.formatMinutes(shown.roundToInt()),
+                if (minutes == null) { if (battery.leftCharging || battery.rightCharging) "Charging" else "Unavailable" } else BatteryInsights.formatMinutes(shown.roundToInt()),
                 style = MaterialTheme.typography.displayMedium,
                 color = colors.onPrimaryContainer
             )
@@ -138,14 +138,14 @@ private fun ListeningLeftCard(battery: BatteryState, outlook: BatteryOutlook) {
                 when {
                     minutes == null && buds.isEmpty() && (battery.leftCharging || battery.rightCharging) -> "Both earbuds are charging in the case."
                     minutes == null -> "Take your earbuds out to see how long they'll last."
-                    outlook.measured -> "Based on this week's listening. ${outlook.lowestBud} earbud runs out first."
+                    outlook.measured -> "Based on this week's listening. The ${outlook.lowestBud?.lowercase()} earbud runs out first."
                     else -> "Based on Sony's rating until SunPods learns how you listen."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.onPrimaryContainer
             )
             Spacer(Modifier.height(20.dp))
-            Text("If you listen with", style = MaterialTheme.typography.labelLarge, color = colors.onPrimaryContainer)
+            Text("Estimate for", style = MaterialTheme.typography.labelLarge, color = colors.onPrimaryContainer)
             Spacer(Modifier.height(8.dp))
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 EstimateMode.entries.forEachIndexed { i, m ->
@@ -213,10 +213,10 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
 
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            SectionHeader("Battery history", Modifier.weight(1f).padding(top = 12.dp))
+            SectionHeader("Battery History", Modifier.weight(1f).padding(top = 12.dp))
             SingleChoiceSegmentedButtonRow(Modifier.width(180.dp)) {
-                SegmentedButton(selected = !week, onClick = { week = false; picked = null }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("24 h") }
-                SegmentedButton(selected = week, onClick = { week = true; picked = null }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("7 days") }
+                SegmentedButton(selected = !week, onClick = { week = false; picked = null }, shape = SegmentedButtonDefaults.itemShape(0, 2)) { Text("1 Day") }
+                SegmentedButton(selected = week, onClick = { week = true; picked = null }, shape = SegmentedButtonDefaults.itemShape(1, 2)) { Text("7 Days") }
             }
         }
         Spacer(Modifier.height(4.dp))
@@ -224,7 +224,7 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
                 if (shown.isEmpty()) {
                     Text(
-                        "Battery history appears here once your earbuds are out of the case. Readings stay on this phone.",
+                        "Battery history appears after you take your earbuds out of the case. It stays on this phone.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 24.dp)
@@ -237,8 +237,8 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                 val clock = DateFormat.getTimeFormat(context)
                 Text(
                     when {
-                        slot == null -> "Latest, ${whenLabel(context, point.time, now).replaceFirstChar { it.lowercase() }}"
-                        slot.sample == null -> "${clock.format(java.util.Date(slot.start))} to ${clock.format(java.util.Date(slot.end))}, no reading"
+                        slot == null -> whenLabel(context, point.time, now)
+                        slot.sample == null -> "${clock.format(java.util.Date(slot.start))} to ${clock.format(java.util.Date(slot.end))}, no data"
                         else -> whenLabel(context, point.time, now)
                     },
                     style = MaterialTheme.typography.labelLarge,
@@ -254,7 +254,7 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                         Row(verticalAlignment = Alignment.Bottom) {
                             Text(name, style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
                             Spacer(Modifier.width(6.dp))
-                            Text(if (show) v?.takeIf { it in 1..100 }?.let { "$it%" } ?: "--" else "--", style = MaterialTheme.typography.titleMedium)
+                            Text(if (show) v?.takeIf { it in 1..100 }?.let { "$it%" } ?: (if (name == "Case") "Unknown" else "In Case") else "Unknown", style = MaterialTheme.typography.titleMedium)
                         }
                     }
                     if (show && point.anyBudCharging()) {
@@ -274,7 +274,7 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                             }
                         },
                         modifier = Modifier.weight(1f).height(180.dp)
-                            .semantics { contentDescription = "Battery history chart. Touch and drag to read each bar." }
+                            .semantics { contentDescription = "Battery history chart. Touch and drag to see each bar." }
                     )
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.height(180.dp), verticalArrangement = Arrangement.SpaceBetween) {
@@ -306,8 +306,8 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
         }
         Footer(
             "Each bar is ${if (week) "3 hours" else "half an hour"}" +
-                (if (series == Series.BUDS) ", showing the lower earbud" else "") +
-                ". Green means charging. Gaps mean no reading."
+                (if (series == Series.BUDS) " and shows the lower earbud" else "") +
+                ". Green means charging. Gaps mean no data."
         )
     }
 }
@@ -417,7 +417,7 @@ private fun WeekCard(samples: List<BatterySample>, now: Long) {
     val shortName = java.text.SimpleDateFormat("EEEEE", java.util.Locale.getDefault())
 
     Column {
-        SectionHeader("Listening this week")
+        SectionHeader("Listening This Week")
         SunCard {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
                 val (dayStart, minutes) = days[picked.coerceIn(days.indices)]
@@ -500,36 +500,36 @@ private fun StatsGrid(battery: BatteryState, samples: List<BatterySample>, outlo
 
     val stats = listOf(
         Stat(
-            "Drain", "${outlook.drainPerHour.roundToInt()}% an hour",
+            "Drain", "${outlook.drainPerHour.roundToInt()}% per hour",
             if (outlook.measured) "Measured this week" else "Sony's rating",
-            "How fast an earbud empties while you listen. SunPods measures it after about an hour of listening."
+            "How fast an earbud's battery drops while you listen. SunPods measures this after about an hour of listening."
         ),
         Stat(
-            "Out of the case", charged?.let { relativeShort(it, now) } ?: "--",
-            if (charged == null) "Not seen yet" else "Since the last charge",
+            "Out of the Case", charged?.let { relativeShort(it, now) } ?: "Not Yet",
+            if (charged == null) "Shows after the next charge" else "Since the last charge",
             "When you last took your earbuds out of the case after charging."
         ),
         Stat(
             "Balance",
             when {
-                leftRate == null || rightRate == null -> "--"
+                leftRate == null || rightRate == null -> "Not Yet"
                 abs(leftRate - rightRate) < 1.5 -> "Even"
                 leftRate > rightRate -> "Left faster"
                 else -> "Right faster"
             },
-            if (leftRate == null || rightRate == null) "Needs more listening" else "L ${leftRate.roundToInt()}%  R ${rightRate.roundToInt()}% an hour",
-            "Compares how fast each earbud drains. A big gap can mean one handles calls or touch controls more, or its battery is ageing."
+            if (leftRate == null || rightRate == null) "Available after more listening" else "L ${leftRate.roundToInt()}% · R ${rightRate.roundToInt()}% per hour",
+            "Compares how fast each earbud drains. A big gap can mean one handles more calls or touch controls, or its battery is ageing."
         ),
         Stat(
-            "Case reserve",
-            case?.let { "%.1f charges".format(it / 100.0 * 2) } ?: "--",
-            case?.let { "Case at $it%" } ?: "Open the case to check it",
+            "Case Reserve",
+            case?.let { "%.1f charges".format(it / 100.0 * 2) } ?: "Unknown",
+            case?.let { "Case at $it%" } ?: "Open the case to check",
             "A full WF-1000XM5 case recharges both earbuds about twice. This shows how many charges it has left."
         )
     )
     var open by rememberSaveable { mutableIntStateOf(-1) }
     Column {
-        SectionHeader("At a glance")
+        SectionHeader("At a Glance")
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             stats.chunked(2).forEachIndexed { row, pair ->
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -573,7 +573,7 @@ private fun relativeShort(time: Long, now: Long): String {
     val minutes = ((now - time) / 60_000).coerceAtLeast(0)
     return when {
         minutes < 60 -> "$minutes min ago"
-        minutes < 48 * 60 -> "${minutes / 60} h ago"
+        minutes < 48 * 60 -> "${minutes / 60} hr ago"
         else -> "${minutes / (24 * 60)} days ago"
     }
 }
@@ -589,13 +589,13 @@ private fun AlertsCard() {
     Column {
         SectionHeader("Alerts")
         SunCard {
-            ToggleRow(Icons.Rounded.BatteryAlert, "Low earbud battery", "Alerts you when an earbud runs low", buds) {
+            ToggleRow(Icons.Rounded.BatteryAlert, "Low Earbud Battery", "Notifies you when an earbud runs low", buds) {
                 buds = it; BatteryNudges.setBudAlerts(context, it)
             }
             AnimatedVisibility(buds, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                 Column(Modifier.fillMaxWidth().padding(start = 72.dp, end = 20.dp, bottom = 8.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Alert at", style = MaterialTheme.typography.bodyMedium)
+                        Text("Alert Level", style = MaterialTheme.typography.bodyMedium)
                         Text("${threshold.roundToInt()}%", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                     }
                     Slider(
@@ -605,12 +605,12 @@ private fun AlertsCard() {
                         valueRange = 10f..30f,
                         steps = 3,
                         colors = SliderDefaults.colors(activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent),
-                        modifier = Modifier.semantics { contentDescription = "Low earbud alert level" }
+                        modifier = Modifier.semantics { contentDescription = "Low earbud battery alert level" }
                     )
                 }
             }
             HorizontalDivider(Modifier.padding(start = 72.dp, end = 20.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
-            ToggleRow(SunIcons.Case, "Low case battery", "Reminds you to charge the case at 20%", case) {
+            ToggleRow(SunIcons.Case, "Low Case Battery", "Reminds you to charge the case at 20%", case) {
                 case = it; BatteryNudges.setCaseAlerts(context, it)
             }
         }

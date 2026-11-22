@@ -147,11 +147,11 @@ internal object MicTest {
 
     /** Plain-language verdicts, most important first. */
     fun verdicts(a: Analysis): List<String> = buildList {
-        if (a.voiceDb < -42) add("Your voice came through very quietly. Make sure both earbuds sit snugly, as they also pick up your voice through your ear.")
-        else if (a.voiceDb < -32) add("Your voice is a little quiet. A snugger fit or speaking slightly louder helps.")
-        if (a.voiceDb - a.noiseDb < 15) add("Background noise is high compared with your voice. Callers may struggle here.")
-        if (a.clipped > 0.01) add("Parts were too loud and distorted.")
-        if (isEmpty()) add("Sounds clear. If callers still struggle, the Bluetooth link may be dropping: keep your phone on the same side as your earbuds.")
+        if (a.voiceDb < -42) add("Your voice is very quiet. Make sure both earbuds fit snugly, as they also pick up your voice through your ear.")
+        else if (a.voiceDb < -32) add("Your voice is a little quiet. A snugger fit or speaking slightly louder can help.")
+        if (a.voiceDb - a.noiseDb < 15) add("Background noise is loud compared with your voice. Callers may find it hard to hear you here.")
+        if (a.clipped > 0.01) add("Some parts were too loud and sounded distorted.")
+        if (isEmpty()) add("Your voice sounds clear. If callers still have trouble hearing you, the Bluetooth connection may be dropping out. Keep your phone on the same side as your earbuds.")
     }
 }
 
@@ -179,7 +179,7 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
             val device = MicTest.routeToEarbuds(context)
             if (device == null) {
                 MicTest.release(context)
-                state = MicState.Failed("Couldn't use your earbuds' mic. Make sure they're connected, then try again.")
+                state = MicState.Failed("Can't use your earbuds' mic. Make sure they're connected and try again.")
                 return@launch
             }
             try {
@@ -200,7 +200,7 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
     }
 
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) run() else state = MicState.Failed("SunPods needs microphone access for the test. It only records while the test runs.")
+        if (granted) run() else state = MicState.Failed("SunPods needs microphone access to run the test. It only records during the test.")
     }
 
     fun start() {
@@ -210,7 +210,7 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
 
     ModalBottomSheet(onDismissRequest = { MicTest.release(context); onDismiss() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp).navigationBarsPadding()) {
-            Text("Test your call mic", style = MaterialTheme.typography.titleLarge)
+            Text("Test Your Call Mic", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
             val colors = MaterialTheme.colorScheme
             when (val s = state) {
@@ -223,12 +223,12 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
                         MicTest.LENGTHS.forEach { n ->
                             androidx.compose.material3.FilterChip(
                                 selected = seconds == n, onClick = { seconds = n },
-                                label = { Text("$n s") }
+                                label = { Text("$n sec") }
                             )
                         }
                     }
                     Spacer(Modifier.height(20.dp))
-                    Button(onClick = ::start, modifier = Modifier.fillMaxWidth()) { Text("Start recording") }
+                    Button(onClick = ::start, modifier = Modifier.fillMaxWidth()) { Text("Start Recording") }
                 }
                 MicState.Starting -> {
                     Text("Switching your earbuds to call mode.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
@@ -239,7 +239,7 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
                     Spacer(Modifier.height(16.dp))
                     LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth().height(10.dp).clip(CircleShape))
                     Spacer(Modifier.height(8.dp))
-                    Text("${s.left} s left", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                    Text("${s.left} sec left", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
                 }
                 MicState.Playing -> {
                     Text("Playing it back through your earbuds.", style = MaterialTheme.typography.bodyMedium)
@@ -259,14 +259,14 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
                                 MicTest.release(context)
                                 state = MicState.Done(analysis, samples)
                             }
-                        }, modifier = Modifier.weight(1f)) { Text("Play again") }
-                        Button(onClick = ::start, modifier = Modifier.weight(1f)) { Text("Test again") }
+                        }, modifier = Modifier.weight(1f)) { Text("Play Again") }
+                        Button(onClick = ::start, modifier = Modifier.weight(1f)) { Text("Test Again") }
                     }
                 }
                 is MicState.Failed -> {
                     Text(s.message, style = MaterialTheme.typography.bodyLarge)
                     Spacer(Modifier.height(20.dp))
-                    Button(onClick = ::start, modifier = Modifier.fillMaxWidth()) { Text("Try again") }
+                    Button(onClick = ::start, modifier = Modifier.fillMaxWidth()) { Text("Try Again") }
                 }
             }
         }

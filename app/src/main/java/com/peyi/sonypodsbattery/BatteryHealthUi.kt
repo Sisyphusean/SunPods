@@ -26,7 +26,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private fun modeName(mode: Char) = when (mode) {
-    'N' -> "noise cancelling"; 'A' -> "ambient sound"; 'O' -> "noise control off"; else -> "your usual mode"
+    'N' -> "Noise Cancelling"; 'A' -> "Ambient Sound"; 'O' -> "Noise Control Off"; else -> "your usual mode"
 }
 
 private fun codecName(c: Char) = when (c) { 'L' -> "LDAC"; 'A' -> "AAC"; 'S' -> "SBC"; 'C' -> "LC3"; else -> null }
@@ -36,8 +36,8 @@ private fun setupText(r: BatteryHealth.Report): String {
     val s = r.setup ?: return modeName(r.mode)
     return buildString {
         append(modeName(s.mode))
-        append(" at ${s.volume.roundToInt()}% volume")
-        codecName(s.codec)?.let { append(" with $it") }
+        append(", ${s.volume.roundToInt()}% volume")
+        codecName(s.codec)?.let { append(", $it") }
     }
 }
 
@@ -53,22 +53,22 @@ internal fun BatteryHealthCard(refreshKey: Long) {
     }
     val colors = MaterialTheme.colorScheme
     Column {
-        SectionHeader("Battery health")
+        SectionHeader("Battery Health")
         SunCard {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
                 val r = report
                 val left = r?.left
                 val right = r?.right
                 if (r == null || (left == null && right == null)) {
-                    Text("Learning your batteries", style = MaterialTheme.typography.titleMedium)
+                    Text("Learning Your Batteries", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Listen for about 2½ hours with each earbud to see their health. Short sessions count, so you never need to run them flat.",
+                        "Listen for about 2½ hours with each earbud to see battery health. Short listens count too, so there's no need to run them flat.",
                         style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant
                     )
                     return@Column
                 }
-                Text("Per full charge, ${setupText(r)}", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                Text("Per full charge using ${setupText(r)}.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     BudHealth("Left", left, Modifier.weight(1f))
@@ -92,7 +92,7 @@ internal fun BatteryHealthCard(refreshKey: Long) {
 
                 if (r.costs.isNotEmpty()) {
                     Spacer(Modifier.height(16.dp))
-                    Text("What uses the most battery", style = MaterialTheme.typography.titleSmall)
+                    Text("What Uses the Most Battery", style = MaterialTheme.typography.titleSmall)
                     Spacer(Modifier.height(6.dp))
                     r.costs.take(4).forEach { c ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -111,7 +111,7 @@ internal fun BatteryHealthCard(refreshKey: Long) {
         val listened = listOfNotNull(report?.left?.listened, report?.right?.listened).maxOrNull()
         Footer(
             if (listened != null) "Based on ${hm(listened)} of listening in the last ${report!!.windowDays} days, adjusted to your usual settings. Changing the volume or codec won't count as wear."
-            else "Health comes from how fast each earbud drains while you listen."
+            else "Battery health is based on how fast each earbud drains while you listen."
         )
     }
 }
@@ -119,11 +119,11 @@ internal fun BatteryHealthCard(refreshKey: Long) {
 @Composable
 private fun BudHealth(side: String, bud: BatteryHealth.Bud?, modifier: Modifier) {
     val colors = MaterialTheme.colorScheme
-    Column(modifier.semantics { contentDescription = "$side earbud: ${bud?.let { hm(it.hoursPerCharge) } ?: "not enough data yet"} per charge" }) {
+    Column(modifier.semantics { contentDescription = "$side earbud: ${bud?.let { hm(it.hoursPerCharge) + " per charge" } ?: "still learning"}" }) {
         Text(side, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
         if (bud == null) {
             Text("Learning", style = MaterialTheme.typography.titleLarge)
-            Text("Needs more listening", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+            Text("Available after more listening", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         } else {
             Text(hm(bud.hoursPerCharge), style = MaterialTheme.typography.titleLarge)
             Text("${hm(bud.low)} to ${hm(bud.high)}", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)

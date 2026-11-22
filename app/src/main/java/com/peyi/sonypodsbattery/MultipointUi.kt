@@ -51,7 +51,7 @@ import kotlinx.coroutines.launch
 
 /** Controls tab: the devices the earbuds remember, with connect, disconnect, play here and forget. */
 @Composable
-internal fun DevicesCard(connected: Boolean) {
+internal fun DevicesCard(connected: Boolean, leOn: Boolean = false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var devices by remember { mutableStateOf(DevicesCache.last) }
@@ -70,11 +70,28 @@ internal fun DevicesCard(connected: Boolean) {
         busy = key
         note = null
         scope.launch {
-            val ok = RefreshCoordinator.awaitSession(context, label, block).getOrDefault(false)
+            val ok = RefreshCoordinator.awaitSession(context, label, action = block).getOrDefault(false)
             if (!ok) note = failed
             reload()
             busy = null
         }
+    }
+
+    // On LE Audio the earbuds don't share their device list and connect to one device only.
+    if (leOn && !DemoMode.on(context)) {
+        Column {
+            SectionHeader("Devices")
+            SunCard {
+                androidx.compose.material3.ListItem(
+                    headlineContent = { Text("Manage Devices", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)) },
+                    supportingContent = { Text(LE_OFF_NOTE) },
+                    leadingContent = { RowIcon(Icons.Rounded.Devices, active = false) },
+                    colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
+                )
+            }
+            Footer("On LE Audio your earbuds connect to one device at a time. Switch to Classic in Controls to see your devices or use two at once.")
+        }
+        return
     }
 
     LaunchedEffect(connected) {
@@ -101,7 +118,7 @@ internal fun DevicesCard(connected: Boolean) {
                     playing = list.playing(d),
                     busy = busy == d.address,
                     enabled = busy == null,
-                    onConnect = { run(d.address, "Connect ${d.name}", "Couldn't connect to ${d.name}. Check its Bluetooth is on and it's nearby.") { Multipoint.act(it, d, DeviceAction.CONNECT) } },
+                    onConnect = { run(d.address, "Connect ${d.name}", "Couldn't connect to ${d.name}. Make sure its Bluetooth is on and it's nearby.") { Multipoint.act(it, d, DeviceAction.CONNECT) } },
                     onDisconnect = { run(d.address, "Disconnect ${d.name}", "Couldn't disconnect ${d.name}. Try again.") { Multipoint.act(it, d, DeviceAction.DISCONNECT) } },
                     onPlayHere = { run(d.address, "Play on ${d.name}", "Couldn't move audio to ${d.name}. It may be on a call.") { Multipoint.playOn(it, d) } },
                     onForget = { forgetting = d }
@@ -117,14 +134,14 @@ internal fun DevicesCard(connected: Boolean) {
                 }
             }
         }
-        Footer(note ?: "To use two devices at once, turn on Connect to 2 devices. A forgotten device has to pair again to reconnect.")
+        Footer(note ?: "To use two devices at the same time, turn on Connect to Two Devices. A forgotten device needs to pair again to reconnect.")
     }
 
     forgetting?.let { d ->
         AlertDialog(
             onDismissRequest = { forgetting = null },
             title = { Text("Forget ${d.name}?") },
-            text = { Text("Your earbuds won't connect to it any more. To use it again, pair from its Bluetooth settings.") },
+            text = { Text("Your earbuds will no longer connect to this device. To use it again, pair it from its Bluetooth settings.") },
             confirmButton = {
                 TextButton(onClick = {
                     forgetting = null
@@ -169,11 +186,11 @@ private fun DeviceRow(
     var menu by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val state = when {
-        playing -> "Playing audio"
+        playing -> "Playing Audio"
         device.connected -> "Connected"
-        else -> "Not connected"
+        else -> "Not Connected"
     }
-    val status = if (isPhone) "This phone · $state" else state
+    val status = if (isPhone) "This Phone · $state" else state
     Row(
         Modifier.fillMaxWidth()
             .clickable(enabled = enabled && !device.connected, onClickLabel = "Connect") { onConnect() }
@@ -198,12 +215,12 @@ private fun DeviceRow(
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     if (!device.connected) DropdownMenuItem(text = { Text("Connect") }, onClick = { menu = false; onConnect() })
-                    if (device.connected && !playing) DropdownMenuItem(text = { Text("Switch audio to this device") }, onClick = { menu = false; onPlayHere() })
+                    if (device.connected && !playing) DropdownMenuItem(text = { Text("Switch Audio to This Device") }, onClick = { menu = false; onPlayHere() })
                     // Dropping or forgetting this phone would cut SunPods off; do that in Android's Bluetooth settings.
                     if (device.connected && !isPhone) DropdownMenuItem(text = { Text("Disconnect") }, onClick = { menu = false; onDisconnect() })
                     if (!isPhone) DropdownMenuItem(text = { Text("Forget", color = colors.error) }, onClick = { menu = false; onForget() })
                     // This phone, connected and playing, had no options at all, so the menu never opened.
-                    if (isPhone) DropdownMenuItem(text = { Text("Bluetooth settings") }, onClick = {
+                    if (isPhone) DropdownMenuItem(text = { Text("Bluetooth Settings") }, onClick = {
                         menu = false
                         runCatching {
                             context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -226,7 +243,7 @@ private fun PairRow(pairing: Boolean, enabled: Boolean, onChange: (Boolean) -> U
         ) {
             RowIcon(if (pairing) Icons.Rounded.BluetoothSearching else Icons.Rounded.Add, active = pairing)
             Spacer(Modifier.width(16.dp))
-            Text(if (pairing) "Stop pairing" else "Pair a new device", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            Text(if (pairing) "Stop Pairing" else "Pair a New Device", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         }
         AnimatedVisibility(pairing) {
             Text(

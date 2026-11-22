@@ -39,8 +39,8 @@ import androidx.compose.ui.unit.sp
 /** The three home screen widgets, smallest first. */
 internal enum class WidgetSize(val title: String, val detail: String, val receiver: Class<*>) {
     SMALL("Small", "Battery levels in one line", SunpodsMiniWidgetReceiver::class.java),
-    MEDIUM("Medium", "Left, right and case", SunpodsMediumWidgetReceiver::class.java),
-    LARGE("Large", "Battery and noise control buttons", SonyPodsBatteryWidgetReceiver::class.java)
+    MEDIUM("Medium", "Left, right and case levels", SunpodsMediumWidgetReceiver::class.java),
+    LARGE("Large", "Battery levels and noise control buttons", SonyPodsBatteryWidgetReceiver::class.java)
 }
 
 internal object WidgetPins {
@@ -61,10 +61,10 @@ internal fun WidgetPickerSheet(onDismiss: () -> Unit, onRequested: (WidgetSize) 
     var asked by remember { mutableStateOf<WidgetSize?>(null) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp).navigationBarsPadding()) {
-            Text("Add a widget", style = MaterialTheme.typography.titleLarge)
+            Text("Add a Widget", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(4.dp))
             Text(
-                if (supported) "Choose a size. Your home screen asks you to confirm."
+                if (supported) "Choose a size, then confirm on your home screen."
                 else "Your home screen doesn't let apps add widgets. Touch and hold an empty spot, tap Widgets, then find SunPods.",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant
             )

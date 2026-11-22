@@ -32,7 +32,13 @@ class MainActivity : ComponentActivity() {
         BackgroundAccess.askOnce(this)
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        ShizukuWatch.onNotificationTap(this, intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (ShizukuWatch.onNotificationTap(this, intent)) { super.onCreate(savedInstanceState); return }
         // Splash exit: the mark grows and fades as the page fades through to SunPods.
         // Fast phones are ready before the logo finishes assembling, so wait out the rest of
         // the icon animation before the exit plays.
@@ -82,6 +88,16 @@ class MainActivity : ComponentActivity() {
         if (!onboarding) { if (!hasPermission) askForPermissions() else BackgroundAccess.askOnce(this) }
     }
 
+    override fun onStart() {
+        super.onStart()
+        vm.setLive(true)
+    }
+
+    override fun onStop() {
+        vm.setLive(false)
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         hasPermission = hasBluetoothPermission()
@@ -108,8 +124,8 @@ class MainActivity : ComponentActivity() {
     private fun shareDiagnostics() {
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "SunPods diagnostics")
+            putExtra(Intent.EXTRA_SUBJECT, "SunPods Diagnostics")
             putExtra(Intent.EXTRA_TEXT, DiagnosticsStore.text(this@MainActivity))
-        }, "Share diagnostics"))
+        }, "Share Diagnostics"))
     }
 }

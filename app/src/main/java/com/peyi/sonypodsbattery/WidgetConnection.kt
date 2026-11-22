@@ -29,7 +29,7 @@ internal fun agoShort(time: Long): String {
     return when {
         minutes < 1 -> "just now"
         minutes < 60 -> "$minutes min ago"
-        minutes < 48 * 60 -> "${minutes / 60} h ago"
+        minutes < 48 * 60 -> "${minutes / 60} hr ago"
         else -> "${minutes / (24 * 60)} days ago"
     }
 }

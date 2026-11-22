@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">SunPods</string>
-    <string name="widget_label">SunPods large</string>
-    <string name="widget_description">Battery levels plus noise control buttons</string>
-    <string name="mini_widget_label">SunPods small</string>
-    <string name="mini_widget_description">Battery levels at a glance</string>
-    <string name="medium_widget_label">SunPods medium</string>
-    <string name="medium_widget_description">Left, right and case levels with refresh</string>
-    <string name="tile_label">Noise control</string>
+    <string name="widget_label">SunPods Large</string>
+    <string name="widget_description">Check battery levels and change noise control.</string>
+    <string name="mini_widget_label">SunPods Small</string>
+    <string name="mini_widget_description">Check battery levels at a glance.</string>
+    <string name="medium_widget_label">SunPods Medium</string>
+    <string name="medium_widget_description">Check left, right and case battery levels, and refresh them.</string>
+    <string name="tile_label">Noise Control</string>
 </resources>

@@ -389,8 +389,8 @@ internal object BatteryHealth {
         binary("LDAC instead of AAC", 4) { it.codec == 'L' }
         binary("DSEE Extreme", 8) { it.dsee == true }
         binary("Speak-to-Chat", 9) { it.speakToChat == true }
-        binary("Ambient sound instead of cancelling", 0) { it.mode == 'A' }
-        binary("Noise control off instead of cancelling", 1) { it.mode == 'O' }
+        binary("Ambient Sound instead of Noise Cancelling", 0) { it.mode == 'A' }
+        binary("Noise Control off instead of Noise Cancelling", 1) { it.mode == 'O' }
         val vols = list.mapNotNull { it.volume }
         if (vols.isNotEmpty() && vols.max() - vols.min() >= 20) out += Cost("Every 10% more volume", exp(model.beta[3] * 0.2) - 1)
         return out.filter { abs(it.change) >= 0.03 }.sortedByDescending { abs(it.change) }

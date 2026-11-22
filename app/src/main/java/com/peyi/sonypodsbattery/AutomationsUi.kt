@@ -55,9 +55,9 @@ internal fun AutomationsCard() {
         SectionHeader("Automations")
         SunCard {
             key(tick) {
-                RuleRow(Icons.Rounded.Call, Trigger.CALL, "During calls", "Hear yourself and the room while you talk") { tick++ }
+                RuleRow(Icons.Rounded.Call, Trigger.CALL, "During Calls", "Hear yourself and the room while you talk") { tick++ }
                 RowDivider()
-                RuleRow(Icons.Rounded.DirectionsWalk, Trigger.WALKING, "While walking", "Hear traffic and people around you while you walk") { on ->
+                RuleRow(Icons.Rounded.DirectionsWalk, Trigger.WALKING, "While Walking", "Hear traffic and people around you while you walk") { on ->
                     if (on && context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
                         walkLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
                         false
@@ -71,7 +71,7 @@ internal fun AutomationsCard() {
                 }) { tick++ }
             }
         }
-        Footer("Works while your earbuds are connected. Afterwards your previous mode comes back, unless you changed it yourself.")
+        Footer("Works while your earbuds are connected. When an automation ends, your previous mode returns unless you changed it.")
     }
 }
 
@@ -100,7 +100,7 @@ private fun RuleRow(
         ActionPill(rule.action) { pick = true }
     }
     if (pick) {
-        ChoiceSheet("$title, switch to", AutoAction.entries.toList(), rule.action, label = { it.label }, onDismiss = { pick = false }) {
+        ChoiceSheet(title, AutoAction.entries.toList(), rule.action, label = { it.label }, onDismiss = { pick = false }) {
             rule = rule.copy(action = it)
             AutomationStore.setRule(context, trigger, rule)
         }
@@ -113,7 +113,7 @@ private fun ActionPill(action: AutoAction, onClick: () -> Unit) {
         Modifier.fillMaxWidth().padding(start = 72.dp, end = 20.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("Switch to", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
+        Text("Mode", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
         Spacer(Modifier.width(16.dp))
         TextButton(onClick = onClick, modifier = Modifier.weight(1f)) {
             Text(
@@ -138,7 +138,7 @@ private fun PlacesSection(onNeedLocation: () -> Unit, onChange: () -> Unit) {
             RowIcon(Icons.Rounded.Wifi, active = places.isNotEmpty())
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text("At a place", style = MaterialTheme.typography.bodyLarge)
+                Text("At a Place", style = MaterialTheme.typography.bodyLarge)
                 Text("Set a mode for a Wi-Fi network, like home or work", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -157,7 +157,7 @@ private fun PlacesSection(onNeedLocation: () -> Unit, onChange: () -> Unit) {
         }
         Row(Modifier.padding(start = 44.dp, top = 4.dp)) {
             when {
-                !hasLocation -> TextButton(onClick = onNeedLocation) { Text("Allow location to see Wi-Fi names") }
+                !hasLocation -> TextButton(onClick = onNeedLocation) { Text("Allow Location to See Wi-Fi Names") }
                 here == null -> Text("Connect to a Wi-Fi network to add it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(12.dp))
                 places.none { it.ssid == here } -> TextButton(onClick = { editing = Place(here, AutoAction.NC) }) {
                     Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -168,7 +168,7 @@ private fun PlacesSection(onNeedLocation: () -> Unit, onChange: () -> Unit) {
         }
         if (places.isNotEmpty() && !hasBackground) {
             Text(
-                "For places to work in the background, allow location all the time.",
+                "To use places in the background, allow location all the time.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 56.dp, top = 4.dp)
@@ -176,7 +176,7 @@ private fun PlacesSection(onNeedLocation: () -> Unit, onChange: () -> Unit) {
         }
     }
     editing?.let { place ->
-        ChoiceSheet("At ${place.ssid}, switch to", AutoAction.entries.toList(), place.action, label = { it.label }, onDismiss = { editing = null }) { action ->
+        ChoiceSheet("At ${place.ssid}", AutoAction.entries.toList(), place.action, label = { it.label }, onDismiss = { editing = null }) { action ->
             places = places.filter { it.ssid != place.ssid } + place.copy(action = action)
             AutomationStore.setPlaces(context, places)
             onChange()

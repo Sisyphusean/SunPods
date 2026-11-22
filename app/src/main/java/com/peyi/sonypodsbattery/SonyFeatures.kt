@@ -23,8 +23,8 @@ enum class EqPreset(val code: Int, val label: String) {
     MELLOW(0x12, "Mellow"),
     RELAXED(0x13, "Relaxed"),
     VOCAL(0x14, "Vocal"),
-    TREBLE(0x15, "Treble boost"),
-    BASS(0x16, "Bass boost"),
+    TREBLE(0x15, "Treble Boost"),
+    BASS(0x16, "Bass Boost"),
     SPEECH(0x17, "Speech"),
     MANUAL(0xa0, "Manual"),
     CUSTOM_1(0xa1, "Custom 1"),
@@ -37,14 +37,75 @@ enum class EqPreset(val code: Int, val label: String) {
     }
 }
 
-enum class TouchFunction(val code: Int, val label: String, val short: String) {
-    AMBIENT_SOUND_CONTROL(0x00, "Ambient sound control", "Ambient"),
-    PLAYBACK_CONTROL(0x20, "Playback control", "Playback"),
-    VOLUME_CONTROL(0x10, "Volume control", "Volume"),
-    NONE(0xff, "Not assigned", "None");
+enum class TouchFunction(val code: Int, val label: String, val short: String, val alsoReadAs: Int? = null) {
+    // The XM5 reports and expects 0x35 here; older Sony earbuds used 0x00.
+    AMBIENT_SOUND_CONTROL(0x35, "Noise Control", "Ambient", alsoReadAs = 0x00),
+    PLAYBACK_CONTROL(0x20, "Playback Control", "Playback"),
+    VOLUME_CONTROL(0x10, "Volume Control", "Volume"),
+    NONE(0xff, "Not Assigned", "None");
 
     companion object {
-        fun from(code: Int?): TouchFunction? = entries.firstOrNull { it.code == code }
+        fun from(code: Int?): TouchFunction? = entries.firstOrNull { it.code == code || (code != null && it.alsoReadAs == code) }
+    }
+}
+
+/** One function the earbuds offer for a touch sensor, with what each gesture then does (action to function codes). */
+data class TouchOption(val function: TouchFunction, val actions: List<Pair<Int, Int>>)
+
+/**
+ * The earbuds' own list of what each touch sensor can do (Sony's "capability", GET 0xf0 0x03), the
+ * list Sound Connect builds its menu from. Layout, as Sound Connect parses it:
+ *   [f1 03 nKeys {key type defaultPreset nPresets {preset nActions nCustom
+ *       {action function}*nActions {action defaultFunction n function*n}*nCustom}*}*]
+ * The XM5 offers Noise Control, Playback Control and Not Assigned per side; volume is part of both
+ * (tap repeatedly: left down, right up), not a function of its own.
+ */
+/** Touch options per side (0 left, 1 right) as the earbuds list them; null if they haven't said. */
+val DeviceSettings.touchOptions: Map<Int, List<TouchOption>>?
+    get() = touchCap?.let { hex -> TouchCapability.parse(ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }) }
+
+object TouchCapability {
+    fun parse(p: ByteArray): Map<Int, List<TouchOption>>? = runCatching {
+        fun u(i: Int) = p[i].toInt() and 0xff
+        var i = 2
+        val out = mutableMapOf<Int, List<TouchOption>>()
+        repeat(u(i++)) {
+            val key = u(i)
+            i += 3 // key, key type, default preset
+            val options = mutableListOf<TouchOption>()
+            repeat(u(i++)) {
+                val preset = u(i); val nActions = u(i + 1); val nCustom = u(i + 2)
+                i += 3
+                val actions = mutableListOf<Pair<Int, Int>>()
+                repeat(nActions) { actions += u(i) to u(i + 1); i += 2 }
+                repeat(nCustom) { actions += u(i) to u(i + 1); i += 3 + u(i + 2) }
+                TouchFunction.from(preset)?.let { f -> if (options.none { it.function == f }) options += TouchOption(f, actions) }
+            }
+            out[key] = options
+        }
+        out.takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
+    private fun gesture(action: Int) = when (action) {
+        0x00 -> "Tap"; 0x01 -> "Double-tap"; 0x02 -> "Triple-tap"; 0x03 -> "Tap repeatedly"
+        0x10 -> "Tap and hold"; 0x11 -> "Double-tap and hold"; 0x21, 0x22 -> "Hold"
+        else -> null
+    }
+
+    private fun result(function: Int) = when (function) {
+        in 0x01..0x04, in 0x50..0x56, 0x59 -> "change noise mode"
+        0x10 -> "Quick Attention"; 0x11 -> "optimise noise cancelling"
+        0x20 -> "play or pause"; 0x21 -> "next track"; 0x22 -> "previous track"
+        0x23 -> "volume up"; 0x24 -> "volume down"
+        in 0x30..0x3b -> "voice assistant"
+        0x70 -> "mute your mic"
+        else -> null
+    }
+
+    /** "Tap: play or pause. Double-tap: next track. Tap repeatedly: volume down." */
+    fun describe(option: TouchOption): String {
+        val parts = option.actions.sortedBy { it.first }.mapNotNull { (a, f) -> val g = gesture(a); val r = result(f); if (g != null && r != null) "$g: $r" else null }
+        return if (parts.isEmpty()) "Touch controls are off on this side." else parts.joinToString(". ", postfix = ".")
     }
 }
 
@@ -57,10 +118,10 @@ enum class SpeakToChatSensitivity(val code: Int, val label: String) {
 }
 
 enum class SpeakToChatTimeout(val code: Int, val label: String) {
-    SHORT(0x00, "Short (~5 s)"),
-    STANDARD(0x01, "Standard (~15 s)"),
-    LONG(0x02, "Long (~30 s)"),
-    NEVER(0x03, "Don't end automatically");
+    SHORT(0x00, "Short (about 5 seconds)"),
+    STANDARD(0x01, "Standard (about 15 seconds)"),
+    LONG(0x02, "Long (about 30 seconds)"),
+    NEVER(0x03, "Never");
 
     companion object {
         fun from(code: Int?): SpeakToChatTimeout? = entries.firstOrNull { it.code == code }
@@ -68,8 +129,8 @@ enum class SpeakToChatTimeout(val code: Int, val label: String) {
 }
 
 enum class ConnectionPriority(val code: Int, val label: String, val detail: String) {
-    SOUND_QUALITY(0x00, "Prioritise sound quality", "Uses LDAC when your phone supports it"),
-    STABLE_CONNECTION(0x01, "Prioritise stable connection", "Better in crowded places, uses SBC or AAC");
+    SOUND_QUALITY(0x00, "Prioritise Sound Quality", "Uses LDAC when your phone supports it"),
+    STABLE_CONNECTION(0x01, "Prioritise Stable Connection", "Uses SBC or AAC for a steadier connection in crowded places");
 
     companion object {
         fun from(code: Int?): ConnectionPriority? = entries.firstOrNull { it.code == code }
@@ -77,10 +138,10 @@ enum class ConnectionPriority(val code: Int, val label: String, val detail: Stri
 }
 
 enum class NoiseCycle(val code: Int, val label: String) {
-    NC_AMBIENT_OFF(0x01, "Noise cancelling, Ambient, Off"),
-    NC_AMBIENT(0x02, "Noise cancelling, Ambient"),
-    NC_OFF(0x03, "Noise cancelling, Off"),
-    AMBIENT_OFF(0x04, "Ambient, Off");
+    NC_AMBIENT_OFF(0x01, "Noise Cancelling, Ambient Sound, Off"),
+    NC_AMBIENT(0x02, "Noise Cancelling, Ambient Sound"),
+    NC_OFF(0x03, "Noise Cancelling, Off"),
+    AMBIENT_OFF(0x04, "Ambient Sound, Off");
 
     companion object {
         fun from(code: Int?): NoiseCycle? = entries.firstOrNull { it.code == code }
@@ -97,10 +158,10 @@ data class GeneralSetting(val slot: Int, val key: String, val on: Boolean?) {
 
     companion object {
         private val GS_TITLES = mapOf(
-            "MULTIPOINT_SETTING" to ("Connect to 2 devices" to "Stay connected to your phone and another device at once"),
-            "SIDETONE_SETTING" to ("Hear your voice on calls" to "Plays your own voice back so you don't shout"),
-            "TWS_ONE_SIDE_USE_NCASM_SETTING" to ("Noise control with one earbud" to "Keeps noise control on when you wear one earbud"),
-            "FACETAP_SETTING" to ("Tap your face to control" to "Tap near the earbud instead of on it")
+            "MULTIPOINT_SETTING" to ("Connect to Two Devices" to "Stay connected to your phone and another device at the same time"),
+            "SIDETONE_SETTING" to ("Hear Your Voice on Calls" to "Hear yourself in your earbuds while you talk"),
+            "TWS_ONE_SIDE_USE_NCASM_SETTING" to ("Noise Control with One Earbud" to "Keeps noise control on when you wear one earbud"),
+            "FACETAP_SETTING" to ("Face Tap" to "Tap near your ear instead of on the earbud")
         )
 
         private fun pretty(key: String) = key.removeSuffix("_SETTING").lowercase().replace('_', ' ')
@@ -125,6 +186,8 @@ data class DeviceSettings(
     val autoOffWhenRemoved: Boolean? = null,
     val touchLeft: TouchFunction? = null,
     val touchRight: TouchFunction? = null,
+    /** The earbuds' touch capability reply, as hex; see [TouchCapability]. */
+    val touchCap: String? = null,
     val noiseCycle: NoiseCycle? = null,
     /** null until the slots have been probed once; empty means the earbuds offer none. */
     val general: List<GeneralSetting>? = null,
@@ -148,6 +211,7 @@ internal object SonyFeatures {
     private const val POWER_GET_PARAM = 0x26
     private const val EQEBB_GET_PARAM = 0x56
     private const val AUDIO_GET_PARAM = 0xe6
+    private const val SYSTEM_GET_CAPABILITY = 0xf0
     private const val SYSTEM_GET_PARAM = 0xf6
     private const val SYSTEM_GET_EXT_PARAM = 0xfa
     private const val GS_GET_CAPABILITY = 0xd0
@@ -157,6 +221,8 @@ internal object SonyFeatures {
     private const val GS_ON = 0x00
     private const val GS_OFF = 0x01
     private const val LANGUAGE_ENGLISH = 0x01
+    /** General settings the earbuds only change after the app confirms an alert. */
+    private val GS_CONFIRMED = setOf("MULTIPOINT_SETTING")
 
     // Inquired types
     private const val INFO_MODEL = 0x01
@@ -191,6 +257,7 @@ internal object SonyFeatures {
         r = readPause(s, r)
         r = readAutoOff(s, r)
         r = readTouch(s, r)
+        r = readTouchCap(s, r)
         r = readNoiseCycle(s, r)
         r = readGeneral(s, r)
         r = readPrompts(s, r)
@@ -221,6 +288,12 @@ internal object SonyFeatures {
         return r.copy(leModeSupported = true, leOn = if (p.size >= 3) u(p[2]) == 0 else r.leOn)
     }
 
+    /** The earbuds' own connection setting: true = LE Audio, false = Classic only, null = no answer. */
+    fun readLeOn(s: SonyBatteryClient.SonySession): Boolean? {
+        val p = s.request(bytes(LEA_GET_PARAM, LEA_CLASSIC_LE), timeoutMs = 1_500) ?: return null
+        return if (p.size >= 3) u(p[2]) == 0 else null
+    }
+
     /** The earbuds' Bluetooth addresses (Classic and LE), for pairing LE Audio if Android needs to. */
     fun leAddresses(s: SonyBatteryClient.SonySession): List<String> {
         val p = s.request(bytes(LEA_GET_CAPABILITY, 0x00), timeoutMs = 1_000) ?: return emptyList()
@@ -228,8 +301,38 @@ internal object SonyFeatures {
         return listOf(2, 19, 36).map { String(p, it, 17, Charsets.US_ASCII) }.filter { Regex("([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}").matches(it) }
     }
 
-    fun setLeAudio(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): Boolean =
-        s.command(bytes(LEA_GET_PARAM + 2, LEA_CLASSIC_LE, if (on) 0x00 else 0x01, 0x00))
+    /**
+     * Turns the earbuds' LE Audio Priority on or off the way Sound Connect does: SET with "change the
+     * setting and the connection method" when this phone can use LE Audio (the setting only
+     * otherwise), then confirm the alert the earbuds send. Returns true once the earbuds have taken
+     * the change; they then disconnect and come back in the new mode.
+     */
+    fun setLeAudio(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean, phoneSupportsLe: Boolean = true): Boolean {
+        // Going to Classic the earbuds answer with alert 0x2e (they'll drop the link and wait in
+        // Classic pairing mode); going to LE with 0x09. Either way nothing happens until it's
+        // confirmed, so try twice before giving up.
+        repeat(2) { attempt ->
+            val alert = s.withConfirmation(timeoutMs = 3_500) {
+                s.command(bytes(LEA_GET_PARAM + 2, LEA_CLASSIC_LE, if (on) 0x00 else 0x01, if (phoneSupportsLe) 0x00 else 0x01))
+            }
+            if (alert != null) return true
+            // No alert seen, yet the earbuds can still be holding the change until it's confirmed
+            // (seen over both LE and Classic). Answering the alert they'd have sent applies it:
+            // they report the new setting (0x49 0x0c), then drop the link to switch.
+            android.util.Log.i("SunPods", "LE Audio switch attempt ${attempt + 1}: no alert, confirming anyway")
+            val applied = runCatching {
+                s.send(bytes(0x98, 0x00, if (on) 0x09 else 0x2e, 0x01))
+                s.waitFor(1_500) { it.type == SonyProtocol.DATA_MDR && it.payload.size >= 3 && u(it.payload[0]) == LEA_GET_PARAM + 3 && u(it.payload[1]) == LEA_CLASSIC_LE }
+                    ?.let { (u(it.payload[2]) == 0) == on }
+            }.getOrElse { true } // the link dropping right away means it switched
+            if (applied == true) return true
+            // Still nothing: the earbuds either applied it straight away or dropped it, so ask.
+            val p = runCatching { s.request(bytes(LEA_GET_PARAM, LEA_CLASSIC_LE), timeoutMs = 800) }.getOrNull()
+            if (p != null && p.size >= 3 && (u(p[2]) == 0) == on) return true
+            android.util.Log.i("SunPods", "LE Audio switch attempt ${attempt + 1}: no alert, earbuds report ${p?.joinToString(" ") { "%02x".format(it.toInt() and 0xff) }}")
+        }
+        return false
+    }
 
     fun setPrompts(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
         VoicePrompts.setOn(s, on)
@@ -265,8 +368,11 @@ internal object SonyFeatures {
     }
 
     fun setGeneral(s: SonyBatteryClient.SonySession, r: DeviceSettings, slot: Int, on: Boolean): DeviceSettings {
-        s.command(bytes(GS_GET_PARAM + 2, slot, GS_BOOLEAN, if (on) GS_ON else GS_OFF))
-        val value = readGeneralValue(s, slot)
+        val write = { s.command(bytes(GS_GET_PARAM + 2, slot, GS_BOOLEAN, if (on) GS_ON else GS_OFF)); Unit }
+        // Settings that make the earbuds reconnect, like Connect to Two Devices, wait for the app to confirm.
+        if (r.general?.firstOrNull { it.slot == slot }?.key in GS_CONFIRMED) s.withConfirmation { write() } else write()
+        // The earbuds may drop the link to apply it, so a failed read keeps the value just set.
+        val value = runCatching { readGeneralValue(s, slot) }.getOrNull()
         return r.copy(general = r.general?.map { if (it.slot == slot) it.copy(on = value ?: on) else it })
     }
 
@@ -370,8 +476,19 @@ internal object SonyFeatures {
 
     private fun readTouch(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
         val p = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_ASSIGNABLE)) ?: return r
+        android.util.Log.i("SunPods", "Touch controls reported: " + p.joinToString(" ") { "%02x".format(it.toInt() and 0xff) })
         if (p.size < 5) return r
-        return r.copy(touchLeft = TouchFunction.from(u(p[3])), touchRight = TouchFunction.from(u(p[4])))
+        // A side the earbuds report with a code we don't know keeps its last known value.
+        return r.copy(
+            touchLeft = TouchFunction.from(u(p[3])) ?: r.touchLeft,
+            touchRight = TouchFunction.from(u(p[4])) ?: r.touchRight
+        )
+    }
+
+    private fun readTouchCap(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
+        val p = s.request(bytes(SYSTEM_GET_CAPABILITY, SYSTEM_ASSIGNABLE), timeoutMs = 700) ?: return r
+        if (TouchCapability.parse(p) == null) return r
+        return r.copy(touchCap = p.joinToString("") { "%02x".format(it.toInt() and 0xff) })
     }
 
     // Which modes a tap on a "noise control" earbud cycles through: [fb, 03, 01, 00, 01, 00, mode]
@@ -382,7 +499,7 @@ internal object SonyFeatures {
     }
 
     fun setNoiseCycle(s: SonyBatteryClient.SonySession, r: DeviceSettings, cycle: NoiseCycle): DeviceSettings {
-        s.command(bytes(SYSTEM_GET_EXT_PARAM + 2, SYSTEM_ASSIGNABLE, 0x01, 0x00, 0x01, 0x00, cycle.code))
+        s.command(bytes(SYSTEM_GET_EXT_PARAM + 2, SYSTEM_ASSIGNABLE, 0x01, TouchFunction.AMBIENT_SOUND_CONTROL.code, 0x01, 0x00, cycle.code))
         return readNoiseCycle(s, r)
     }
 
@@ -413,8 +530,9 @@ internal object SonyFeatures {
     }
 
     fun setPriority(s: SonyBatteryClient.SonySession, r: DeviceSettings, priority: ConnectionPriority): DeviceSettings {
-        s.command(bytes(AUDIO_GET_PARAM + 2, prioritySub ?: AUDIO_CONNECTION_MODE_ALT, priority.code))
-        return readPriority(s, r)
+        // With Connect to Two Devices on, a change of codec priority can need confirming too.
+        s.withConfirmation(timeoutMs = 1_200) { s.command(bytes(AUDIO_GET_PARAM + 2, prioritySub ?: AUDIO_CONNECTION_MODE_ALT, priority.code)) }
+        return runCatching { readPriority(s, r) }.getOrDefault(r.copy(priority = priority))
     }
 
     fun setSpeakToChat(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
@@ -452,9 +570,31 @@ internal object SonyFeatures {
         return readAutoOff(s, r)
     }
 
-    fun setTouch(s: SonyBatteryClient.SonySession, r: DeviceSettings, left: TouchFunction, right: TouchFunction): DeviceSettings {
-        s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_ASSIGNABLE, 0x02, left.code, right.code))
-        return readTouch(s, r)
+    /**
+     * Changes one side's touch control (pass null for the side to leave alone). The other side is
+     * sent back exactly as the earbuds report it, so it never needs to have been read beforehand.
+     */
+    fun setTouch(s: SonyBatteryClient.SonySession, r: DeviceSettings, left: TouchFunction?, right: TouchFunction?): DeviceSettings {
+        val now = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_ASSIGNABLE))?.takeIf { it.size >= 5 }
+        // Noise control has two codes (0x00 and 0x35); write it back in the form these earbuds report.
+        val ambientCode = listOfNotNull(now?.let { u(it[3]) }, now?.let { u(it[4]) })
+            .firstOrNull { TouchFunction.from(it) == TouchFunction.AMBIENT_SOUND_CONTROL } ?: TouchFunction.AMBIENT_SOUND_CONTROL.code
+        fun code(f: TouchFunction) = if (f == TouchFunction.AMBIENT_SOUND_CONTROL) ambientCode else f.code
+        val l = left?.let(::code) ?: now?.let { u(it[3]) } ?: r.touchLeft?.let(::code)
+        val rt = right?.let(::code) ?: now?.let { u(it[4]) } ?: r.touchRight?.let(::code)
+        if (l == null || rt == null) throw EarbudsUnavailableException("Can't load your touch controls. Make sure your earbuds are connected, then try again.")
+        // Moving Playback Control (it carries the voice assistant) makes the earbuds ask for a
+        // confirmation first (alert 99 00 0f); without an answer they keep the old setting.
+        s.withConfirmation(timeoutMs = 1_200) { s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_ASSIGNABLE, 0x02, l, rt)) }
+        val after = readTouch(s, r)
+        val side = if (left != null) "left" else "right"
+        if ((left != null && after.touchLeft != left) || (right != null && after.touchRight != right)) {
+            // The earbuds turn a function they don't accept into "not assigned"; put the old one back.
+            if (now != null) runCatching { s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_ASSIGNABLE, 0x02, u(now[3]), u(now[4]))) }
+            val name = (left ?: right)?.label ?: "That function"
+            throw EarbudsUnavailableException("Your earbuds didn't accept $name on the $side. Your touch controls are unchanged.")
+        }
+        return after
     }
 
     private fun bytes(vararg values: Int) = ByteArray(values.size) { values[it].toByte() }
@@ -483,7 +623,7 @@ object SettingsStore {
                 speakToChatSensitivity = SpeakToChatSensitivity.from(int("s2cSens")),
                 speakToChatTimeout = SpeakToChatTimeout.from(int("s2cTime")),
                 pauseWhenRemoved = bool("pause"), autoOffWhenRemoved = bool("autoOff"),
-                touchLeft = TouchFunction.from(int("tl")), touchRight = TouchFunction.from(int("tr")),
+                touchLeft = TouchFunction.from(int("tl")), touchRight = TouchFunction.from(int("tr")), touchCap = str("tcap"),
                 noiseCycle = NoiseCycle.from(int("cycle")),
                 general = if (o.has("gs")) o.getJSONArray("gs").let { a ->
                     (0 until a.length()).map { i ->
@@ -501,6 +641,10 @@ object SettingsStore {
     }
 
     fun save(context: Context, s: DeviceSettings) {
+        // Picks up a switch made in Sony's app or by hand, not only SunPods' own.
+        // Only a first guess: after that the user's own switch decides. The earbuds can report LE
+        // while the phone has them on Classic, and that mustn't turn the Classic repair off.
+        if (!SonyControlSessionManager.classicOnlyKnown(context)) s.leOn?.let { SonyControlSessionManager.setClassicOnly(context, !it) }
         val o = JSONObject()
         s.modelName?.let { o.put("model", it) }
         s.firmware?.let { o.put("fw", it) }
@@ -518,6 +662,7 @@ object SettingsStore {
         s.autoOffWhenRemoved?.let { o.put("autoOff", it) }
         s.touchLeft?.let { o.put("tl", it.code) }
         s.touchRight?.let { o.put("tr", it.code) }
+        s.touchCap?.let { o.put("tcap", it) }
         s.noiseCycle?.let { o.put("cycle", it.code) }
         s.general?.let { list ->
             o.put("gs", org.json.JSONArray().also { a ->

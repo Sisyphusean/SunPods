@@ -77,12 +77,12 @@ internal object Backup {
 
     fun write(context: Context, uri: Uri, text: String) {
         context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
-            ?: throw IllegalStateException("Couldn't save to that file")
+            ?: throw IllegalStateException("Couldn't save to this file. Choose another location.")
     }
 
     fun read(context: Context, uri: Uri): String =
         context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
-            ?: throw IllegalStateException("Couldn't open the file")
+            ?: throw IllegalStateException("Couldn't open this file. Try again.")
 
     // ------------------------------------------------------------------ import
 

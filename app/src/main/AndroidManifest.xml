@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Only for the daily check for a new version on GitHub (Settings > Updates). -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
@@ -30,6 +32,11 @@
         <package android:name="com.google.android.apps.adm" />
     </queries>
 
+    <!-- To tell whether Shizuku is installed and open it, for LE Audio pairing. -->
+    <queries>
+        <package android:name="moe.shizuku.privileged.api" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -49,6 +56,17 @@
         <activity
             android:name=".LaunchSonyAppActivity"
             android:exported="false" />
+
+        <!-- Shizuku hands SunPods its binder through this provider (optional, for LE Audio pairing). -->
+        <provider
+            android:name="com.peyi.sonypodsbattery.SunpodsShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- Developer hook for adb only: DUMP is held by the shell, never by other apps. -->
 
         <receiver
             android:name=".EarbudConnectionReceiver"

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -89,6 +90,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.snapshotFlow
 import kotlin.math.roundToInt
 import kotlin.math.PI
 import kotlin.math.cos
@@ -160,14 +164,17 @@ internal val SolarTypography: Typography = Typography().let { t ->
 // ======================================================================
 
 private fun modeTitle(mode: ListeningMode?, connected: Boolean, ambient: Int): String = when {
-    !connected -> "Not connected"
-    mode == ListeningMode.NOISE_CANCELLING -> "Noise cancelling"
-    mode == ListeningMode.AMBIENT -> "Ambient sound · $ambient"
-    mode == ListeningMode.OFF -> "Noise control off"
+    !connected -> "Not Connected"
+    mode == ListeningMode.NOISE_CANCELLING -> "Noise Cancelling"
+    mode == ListeningMode.AMBIENT -> "Ambient Sound · $ambient"
+    mode == ListeningMode.OFF -> "Noise Control Off"
     else -> "Connected"
 }
 
 internal const val TURNTABLE_FRAMES = 72
+
+/** What the Home hero is showing: the closed case, the buds, or a clip between them. */
+internal enum class HeroPhase { CASE, OPENING, BUDS, CLOSING }
 
 /** Frame index (0 until TURNTABLE_FRAMES) for a spin angle in degrees; frame k = k * 5 degrees. */
 internal fun turntableFrameFor(angleDeg: Float): Int =
@@ -254,6 +261,50 @@ internal fun SolarHero(
         }
     }
 
+    // While the earbuds are away the hero shows the closed case. When they connect, the lid opens
+    // and the buds fly out to the hero pose; when they disconnect, the buds turn to face front and
+    // fly back in as the lid closes. Each clip starts and ends on the exact frame it replaces, so
+    // the cuts between clip and turntable are invisible.
+    var phase by remember { mutableStateOf(if (connected) HeroPhase.BUDS else HeroPhase.CASE) }
+    LaunchedEffect(connected) {
+        val animationsOn = android.provider.Settings.Global.getFloat(
+            context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f
+        ) > 0f
+        // Let a clip in flight finish, so the next one starts from the frame on screen.
+        if (withTimeoutOrNull(7000) { snapshotFlow { phase }.first { it == HeroPhase.CASE || it == HeroPhase.BUDS } } == null) {
+            phase = if (phase == HeroPhase.OPENING) HeroPhase.BUDS else HeroPhase.CASE
+        }
+        if (connected && phase == HeroPhase.CASE) {
+            if (animationsOn) {
+                phase = HeroPhase.OPENING
+                withTimeoutOrNull(6000) { snapshotFlow { phase }.first { it == HeroPhase.BUDS } }
+            }
+            phase = HeroPhase.BUDS
+        } else if (!connected && phase == HeroPhase.BUDS) {
+            settle?.cancel()
+            if (animationsOn) {
+                val home = (angle.value / 360f).roundToInt() * 360f
+                if (angle.value != home) angle.animateTo(home, tween(380, easing = FastOutSlowInEasing))
+                angle.snapTo(0f)
+                shown = frames.load(0) ?: shown
+                phase = HeroPhase.CLOSING
+                withTimeoutOrNull(4000) { snapshotFlow { phase }.first { it == HeroPhase.CASE } }
+            }
+            angle.snapTo(0f)
+            phase = HeroPhase.CASE
+        }
+    }
+    val showCase = phase != HeroPhase.BUDS
+
+    val heroAlpha by animateFloatAsState(
+        when {
+            connected -> 1f
+            phase == HeroPhase.CLOSING -> 1f
+            else -> 0.8f
+        },
+        tween(400), label = "heroAlpha"
+    )
+
     // No card around the hero: the buds float on the page with a soft glow that follows the mode.
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
@@ -279,24 +330,28 @@ internal fun SolarHero(
                     val tracker = VelocityTracker()
                     detectHorizontalDragGestures(
                         onDragStart = {
-                            settle?.cancel()
-                            tracker.resetTracking()
-                            scope.launch { angle.stop() }
+                            if (!showCase) {
+                                settle?.cancel()
+                                tracker.resetTracking()
+                                scope.launch { angle.stop() }
+                            }
                         },
                         onHorizontalDrag = { change, dx ->
-                            change.consume()
-                            tracker.addPosition(change.uptimeMillis, change.position)
-                            scope.launch { angle.snapTo(angle.value + dx * degPerPx) }
+                            if (!showCase) {
+                                change.consume()
+                                tracker.addPosition(change.uptimeMillis, change.position)
+                                scope.launch { angle.snapTo(angle.value + dx * degPerPx) }
+                            }
                         },
-                        onDragEnd = { settleHome(tracker.calculateVelocity().x * degPerPx) },
-                        onDragCancel = { settleHome(0f) }
+                        onDragEnd = { if (!showCase) settleHome(tracker.calculateVelocity().x * degPerPx) },
+                        onDragCancel = { if (!showCase) settleHome(0f) }
                     )
                 }
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     enabled = connected,
-                    onClickLabel = "Change noise control",
+                    onClickLabel = "Change Noise Control",
                     onClick = onCycle
                 )
                 .semantics {
@@ -311,20 +366,34 @@ internal fun SolarHero(
                     })
                 }
         ) {
-            Image(
+            // The connect clip ends on the hero pose itself, so the cut to the interactive buds
+            // is invisible: both share one layout and the same float, tilt and bump.
+            val heroLayer = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth(0.94f)
+                .aspectRatio(1000f / 712f)
+                .graphicsLayer {
+                    translationY = bob * 5.dp.toPx()
+                    rotationZ = tilt * 1.5f
+                    scaleX = bump.value
+                    scaleY = bump.value
+                    alpha = heroAlpha
+                }
+            if (showCase) RenderClipOnce(
+                if (phase == HeroPhase.CLOSING) R.raw.anim_hero_close else R.raw.anim_hero,
+                play = phase == HeroPhase.OPENING || phase == HeroPhase.CLOSING,
+                onEnd = {
+                    phase = when (phase) {
+                        HeroPhase.OPENING -> HeroPhase.BUDS
+                        HeroPhase.CLOSING -> HeroPhase.CASE
+                        else -> phase
+                    }
+                },
+                modifier = heroLayer
+            ) else Image(
                 bitmap = shown ?: frames.loadNow(0) ?: ImageBitmap(1, 1),
                 contentDescription = null,
-                colorFilter = if (connected) null else ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }),
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .fillMaxWidth(0.94f)
-                    .graphicsLayer {
-                        translationY = bob * 5.dp.toPx()
-                        rotationZ = tilt * 1.5f
-                        scaleX = bump.value
-                        scaleY = bump.value
-                        alpha = if (connected) 1f else 0.5f
-                    }
+                modifier = heroLayer
             )
         }
         Spacer(Modifier.height(8.dp))

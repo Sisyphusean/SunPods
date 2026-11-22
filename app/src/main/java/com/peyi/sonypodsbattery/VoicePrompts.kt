@@ -74,10 +74,10 @@ internal object QuietHours {
         if (want && !silenced && !pr.getBoolean("override", false)) {
             val current = VoicePrompts.read(s).on ?: return
             pr.edit().putBoolean("restore", current).putBoolean("silenced", true).apply()
-            if (current) VoicePrompts.setOn(s, false)
+            if (current) { VoicePrompts.setOn(s, false); SonyControlSessionManager.onOtherEarbud(context) { VoicePrompts.setOn(it, false) } }
             DiagnosticsStore.add(context, "Quiet hours: voice prompts off")
         } else if (!want && silenced) {
-            if (pr.getBoolean("restore", true)) VoicePrompts.setOn(s, true)
+            if (pr.getBoolean("restore", true)) { VoicePrompts.setOn(s, true); SonyControlSessionManager.onOtherEarbud(context) { VoicePrompts.setOn(it, true) } }
             pr.edit().putBoolean("silenced", false).apply()
             DiagnosticsStore.add(context, "Quiet hours over: voice prompts restored")
         }

@@ -76,10 +76,10 @@ private fun MiniContent(snapshot: WidgetSnapshot, palette: WidgetPalette) {
                 modifier = GlanceModifier.size(16.dp)
             )
             Text(
-                text = if (!snapshot.connected) "Not connected" else when (state.listeningMode) {
-                    ListeningMode.NOISE_CANCELLING -> "Noise cancelling"
-                    ListeningMode.AMBIENT -> "Ambient ${state.ambientLevel}"
-                    ListeningMode.OFF -> "Noise control off"
+                text = if (!snapshot.connected) "Not Connected" else when (state.listeningMode) {
+                    ListeningMode.NOISE_CANCELLING -> "Noise Cancelling"
+                    ListeningMode.AMBIENT -> "Ambient Sound ${state.ambientLevel}"
+                    ListeningMode.OFF -> "Noise Control Off"
                     null -> "SunPods"
                 },
                 style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium, color = colors.onSurfaceVariant),
@@ -118,8 +118,8 @@ private fun MiniLevel(label: String, rawLevel: Int?, charging: Boolean, palette:
     Column(modifier = modifier) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
-                text = level?.toString() ?: "--",
-                style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Medium, color = if (low) colors.error else if (stale) colors.onSurfaceVariant else colors.onSurface),
+                text = level?.toString() ?: if (label == "Case") "Unknown" else "In Case",
+                style = TextStyle(fontSize = if (level == null) 12.sp else 18.sp, fontWeight = FontWeight.Medium, color = if (low) colors.error else if (stale) colors.onSurfaceVariant else colors.onSurface),
                 maxLines = 1
             )
             Text(

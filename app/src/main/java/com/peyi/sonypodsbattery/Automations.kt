@@ -32,10 +32,10 @@ import org.json.JSONObject
  */
 
 enum class AutoAction(val label: String) {
-    NC("Noise cancelling"),
-    AMBIENT("Ambient sound"),
-    AMBIENT_VOICE("Ambient sound with voice focus"),
-    OFF("Noise control off");
+    NC("Noise Cancelling"),
+    AMBIENT("Ambient Sound"),
+    AMBIENT_VOICE("Ambient Sound with Focus on Voice"),
+    OFF("Off");
 
     val mode: ListeningMode
         get() = when (this) {

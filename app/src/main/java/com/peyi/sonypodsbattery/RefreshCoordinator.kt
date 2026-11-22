@@ -90,8 +90,9 @@ object RefreshCoordinator {
     internal suspend fun <T> awaitSession(
         context: Context,
         label: String,
+        bothEarbuds: Boolean = false,
         action: (SonyBatteryClient.SonySession) -> T
-    ): Result<T> = SonyCommandCoordinator.awaitCustom(context, label, action)
+    ): Result<T> = SonyCommandCoordinator.awaitCustom(context, label, bothEarbuds, action)
 
     suspend fun awaitRefresh(
         context: Context,
@@ -155,7 +156,9 @@ private sealed interface SonyCommand {
         val context: Context,
         val label: String,
         val action: (SonyBatteryClient.SonySession) -> Any?,
-        val completion: CompletableDeferred<Result<Any?>>
+        val completion: CompletableDeferred<Result<Any?>>,
+        /** A setting change: in LE Audio mode it goes to both earbuds. */
+        val bothEarbuds: Boolean = false
     ) : SonyCommand
 
 }
@@ -568,21 +571,23 @@ private object SonyCommandCoordinator {
         val app = command.context.applicationContext
         val client = SonyBatteryClient(app)
         val target = client.findEarbuds()
-            ?: return Result.failure(EarbudsUnavailableException("Pair your WF-1000XM5 in Bluetooth settings first"))
+            ?: return Result.failure(EarbudsUnavailableException("Pair your WF-1000XM5 in Bluetooth settings, then try again."))
         if (A2dpConnectionHelper.isConnected(app, target) == false) {
-            return Result.failure(EarbudsUnavailableException("Earbuds aren't connected"))
+            return Result.failure(EarbudsUnavailableException("Your earbuds aren't connected. Connect them and try again."))
         }
         val wasConnected = SonyControlSessionManager.currentState() == SonySessionState.CONNECTED
         return try {
             Result.success(
                 try {
-                    SonyControlSessionManager.withSession(app, target, command.action)
+                    if (command.bothEarbuds) SonyControlSessionManager.withBothEarbuds(app, target, command.action)
+                    else SonyControlSessionManager.withSession(app, target, command.action)
                 } catch (stale: SonyControlChannelUnavailableException) {
                     if (!wasConnected) throw stale
                     // The cached socket may have died silently; reopen once before giving up.
                     DiagnosticsStore.add(app, "${command.label}: session failed, retrying once")
                     SonyControlSessionManager.prepareManualReconnect(app)
-                    SonyControlSessionManager.withSession(app, target, command.action)
+                    if (command.bothEarbuds) SonyControlSessionManager.withBothEarbuds(app, target, command.action)
+                    else SonyControlSessionManager.withSession(app, target, command.action)
                 }
             )
         } catch (error: Exception) {
@@ -595,10 +600,11 @@ private object SonyCommandCoordinator {
     suspend fun <T> awaitCustom(
         context: Context,
         label: String,
+        bothEarbuds: Boolean,
         action: (SonyBatteryClient.SonySession) -> T
     ): Result<T> {
         val completion = CompletableDeferred<Result<Any?>>()
-        commands.send(SonyCommand.Custom(context.applicationContext, label, { action(it) }, completion))
+        commands.send(SonyCommand.Custom(context.applicationContext, label, { action(it) }, completion, bothEarbuds))
         startWorker()
         return completion.await().map { it as T }
     }
@@ -700,7 +706,7 @@ private object SonyCommandCoordinator {
                 null -> {
                     DiagnosticsStore.add(app, "A2DP state unavailable; refresh skipped")
                     command.onComplete?.invoke()
-                    return persistCheckedState(previous.copy(status = "Couldn't check the earbud connection. Try again."))
+                    return persistCheckedState(previous.copy(status = "Can't check the connection to your earbuds. Try again."))
                 }
             }
         }
@@ -719,7 +725,7 @@ private object SonyCommandCoordinator {
             return persistCheckedState(previous)
         }
         val state = if (target == null) {
-            persistCheckedState(previous.copy(status = "Pair your WF-1000XM5 in Bluetooth settings first"))
+            persistCheckedState(previous.copy(status = "Pair your WF-1000XM5 in Bluetooth settings first."))
         } else try {
             val wasConnected = SonyControlSessionManager.currentState() == SonySessionState.CONNECTED
             val tRead = System.currentTimeMillis()
@@ -738,32 +744,17 @@ private object SonyCommandCoordinator {
                 EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, target)
             }
             DiagnosticsStore.add(app, "Refresh succeeded; case reported=${result.case != null}; ${result.raw}")
-            fun inferred(part: String, before: Int?, now: Int?, reported: Boolean) =
-                ChargeInference.charging(app, part, before, previous.updatedAt, now, reported)
-            BatteryState(
-                result.left,
-                result.right,
-                result.case,
-                inferred("left", previous.left, result.left, result.leftCharging),
-                inferred("right", previous.right, result.right, result.rightCharging),
-                inferred("case", previous.case, result.case, result.caseCharging),
-                previous.listeningMode,
-                previous.ambientLevel,
-                previous.focusOnVoice,
-                System.currentTimeMillis(),
-                checkedAt,
-                if (result.case == null) "Updated. Open the case to refresh its battery." else "Updated"
-            )
+            stateFrom(app, previous, result, checkedAt)
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
             DiagnosticsStore.add(app, "Refresh failed: ${error.javaClass.simpleName}: ${error.message}")
-            persistCheckedState(previous.copy(status = "Couldn't connect. Close Sony Sound Connect and try again."))
+            persistCheckedState(previous.copy(status = "Can't reach your earbuds. Close Sony Sound Connect and try again."))
         } catch (error: SecurityException) {
             DiagnosticsStore.add(app, "Refresh blocked: ${error.message ?: error.javaClass.simpleName}")
-            persistCheckedState(previous.copy(status = "Android blocked Bluetooth. Share diagnostics from the Device tab."))
+            persistCheckedState(previous.copy(status = "Android blocked Bluetooth access. Share diagnostics from the Device tab."))
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Refresh failed: ${error.javaClass.simpleName}: ${error.message}")
-            persistCheckedState(previous.copy(status = "Couldn't connect. Close Sony Sound Connect and try again."))
+            persistCheckedState(previous.copy(status = "Can't reach your earbuds. Close Sony Sound Connect and try again."))
         }
 
         if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED &&
@@ -814,14 +805,14 @@ private object SonyCommandCoordinator {
                     DiagnosticsStore.add(app, "A2DP state unavailable; control command skipped")
                     return finishControlCommand(
                         app,
-                        previous.copy(status = "Couldn't check the earbud connection. Try again."),
+                        previous.copy(status = "Can't check the connection to your earbuds. Try again."),
                         command.requestedAtMillis
                     )
                 }
             }
         }
         val state = if (target == null) {
-            previous.copy(status = "Pair your WF-1000XM5 in Bluetooth settings first")
+            previous.copy(status = "Pair your WF-1000XM5 in Bluetooth settings first.")
         } else try {
             executeConfirmedControlCommand(
                 app,
@@ -836,15 +827,15 @@ private object SonyCommandCoordinator {
                 listeningMode = command.mode,
                 ambientLevel = command.ambientLevel,
                 focusOnVoice = command.focusOnVoice,
-                status = "${command.mode.label} enabled"
+                status = "Switched to ${command.mode.label}"
             )
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
             DiagnosticsStore.add(app, "Listening mode terminal failure: ${error.javaClass.simpleName}: ${error.message}")
-            previous.copy(status = "Couldn't change mode. Close Sony Sound Connect and try again.")
+            previous.copy(status = "Can't change noise control. Close Sony Sound Connect and try again.")
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Listening mode failed: ${error.javaClass.simpleName}: ${error.message}")
-            previous.copy(status = "Couldn't change mode. Close Sony Sound Connect and try again.")
+            previous.copy(status = "Can't change noise control. Close Sony Sound Connect and try again.")
         }
 
         return finishControlCommand(app, state, command.requestedAtMillis)
@@ -873,14 +864,14 @@ private object SonyCommandCoordinator {
                     DiagnosticsStore.add(app, "A2DP state unavailable; control command skipped")
                     return finishControlCommand(
                         app,
-                        previous.copy(status = "Couldn't check the earbud connection. Try again."),
+                        previous.copy(status = "Can't check the connection to your earbuds. Try again."),
                         command.requestedAtMillis
                     )
                 }
             }
         }
         val state = if (target == null) {
-            previous.copy(status = "Pair your WF-1000XM5 in Bluetooth settings first")
+            previous.copy(status = "Pair your WF-1000XM5 in Bluetooth settings first.")
         } else try {
             executeConfirmedControlCommand(
                 app,
@@ -895,15 +886,15 @@ private object SonyCommandCoordinator {
                 listeningMode = ListeningMode.AMBIENT,
                 ambientLevel = level,
                 focusOnVoice = command.focusOnVoice,
-                status = "Ambient sound enabled"
+                status = "Switched to Ambient Sound"
             )
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
             DiagnosticsStore.add(app, "Ambient level terminal failure: ${error.javaClass.simpleName}: ${error.message}")
-            previous.copy(status = "Couldn't change the ambient level. Close Sony Sound Connect and try again.")
+            previous.copy(status = "Can't change the Ambient Sound level. Close Sony Sound Connect and try again.")
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Ambient level failed: ${error.javaClass.simpleName}: ${error.message}")
-            previous.copy(status = "Couldn't change the ambient level. Close Sony Sound Connect and try again.")
+            previous.copy(status = "Can't change the Ambient Sound level. Close Sony Sound Connect and try again.")
         }
 
         return finishControlCommand(app, state, command.requestedAtMillis)

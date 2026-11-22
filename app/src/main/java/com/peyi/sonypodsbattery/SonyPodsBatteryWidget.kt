@@ -273,11 +273,11 @@ private fun WidgetContent(
         if (!controls) return@Column
         Spacer(GlanceModifier.height(6.dp))
         Row(modifier = GlanceModifier.fillMaxWidth().height(48.dp)) {
-            ModeButton(R.drawable.ic_mode_nc, "Noise cancelling", "ANC", AudioMode.NC, currentMode, pendingMode, wide, palette, GlanceModifier.defaultWeight())
+            ModeButton(R.drawable.ic_mode_nc, "Noise Cancelling", "Cancelling", AudioMode.NC, currentMode, pendingMode, wide, palette, GlanceModifier.defaultWeight())
             Spacer(GlanceModifier.width(6.dp))
-            ModeButton(R.drawable.ic_mode_ambient, "Ambient sound", "Ambient", AudioMode.AMBIENT, currentMode, pendingMode, wide, palette, GlanceModifier.defaultWeight())
+            ModeButton(R.drawable.ic_mode_ambient, "Ambient Sound", "Ambient", AudioMode.AMBIENT, currentMode, pendingMode, wide, palette, GlanceModifier.defaultWeight())
             Spacer(GlanceModifier.width(6.dp))
-            ModeButton(R.drawable.ic_mode_off, "Noise control off", "Off", AudioMode.OFF, currentMode, pendingMode, wide, palette, GlanceModifier.defaultWeight())
+            ModeButton(R.drawable.ic_mode_off, "Noise Control Off", "Off", AudioMode.OFF, currentMode, pendingMode, wide, palette, GlanceModifier.defaultWeight())
         }
         if (currentMode == AudioMode.AMBIENT && tall) {
             Spacer(GlanceModifier.height(6.dp))
@@ -311,7 +311,7 @@ private fun NotConnectedBody(last: BatterySample?, palette: WidgetPalette, modif
                 LastLevel("Case", usable(last.case), palette, GlanceModifier.defaultWeight())
             }
             Spacer(GlanceModifier.height(6.dp))
-            Text("Last reading ${agoShort(last.time)}", style = smallText.copy(color = colors.onSurfaceVariant), maxLines = 1)
+            Text("Updated ${agoShort(last.time)}", style = smallText.copy(color = colors.onSurfaceVariant), maxLines = 1)
         }
     }
 }
@@ -321,7 +321,7 @@ private fun LastLevel(label: String, level: Int?, palette: WidgetPalette, modifi
     val colors = GlanceTheme.colors
     Column(modifier = modifier) {
         Text(
-            "$label ${level?.let { "$it%" } ?: "--"}",
+            "$label ${level?.let { "$it%" } ?: "Unknown"}",
             style = smallText.copy(color = colors.onSurfaceVariant),
             maxLines = 1
         )
@@ -367,7 +367,7 @@ private fun Header(state: BatteryState, context: Context, refreshing: Boolean, c
             Text(
                 text = when {
                     refreshing -> "Updating"
-                    !connected -> "Not connected"
+                    !connected -> "Not Connected"
                     timestamp != 0L -> DateFormat.getTimeFormat(context).format(Date(timestamp))
                     else -> ""
                 },
@@ -379,7 +379,7 @@ private fun Header(state: BatteryState, context: Context, refreshing: Boolean, c
                 } else {
                     Image(
                         provider = ImageProvider(R.drawable.ic_refresh),
-                        contentDescription = "Refresh battery",
+                        contentDescription = "Refresh battery levels",
                         colorFilter = ColorFilter.tint(colors.onSurfaceVariant),
                         modifier = GlanceModifier.size(20.dp)
                     )
@@ -403,8 +403,8 @@ private fun BatteryTile(label: String, level: Int?, charging: Boolean, palette: 
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = level?.let { "$it" } ?: "--",
-                style = numberText.copy(color = if (low) colors.error else colors.onSurface),
+                text = level?.let { "$it" } ?: if (label == "Case") "Unknown" else "In Case",
+                style = if (level == null) smallText.copy(color = colors.onSurfaceVariant) else numberText.copy(color = if (low) colors.error else colors.onSurface),
                 maxLines = 1
             )
             if (level != null) {
@@ -492,7 +492,7 @@ private fun AmbientStepper(ambientLevel: Int, palette: WidgetPalette) {
     ) {
         StepButton("−", -1)
         Column(modifier = GlanceModifier.defaultWeight(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Ambient $ambientLevel", style = smallText.copy(color = colors.onSurface))
+            Text("Ambient Sound $ambientLevel", style = smallText.copy(color = colors.onSurface))
             Spacer(GlanceModifier.height(4.dp))
             LinearProgressIndicator(
                 progress = ambientLevel.coerceIn(1, 20) / 20f,

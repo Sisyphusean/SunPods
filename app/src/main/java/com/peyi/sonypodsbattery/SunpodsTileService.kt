@@ -40,16 +40,16 @@ class SunpodsTileService : TileService() {
         val tile = qsTile ?: return
         val mode = state.listeningMode
         tile.label = when (mode) {
-            ListeningMode.NOISE_CANCELLING -> "Noise cancelling"
-            ListeningMode.AMBIENT -> "Ambient sound"
-            ListeningMode.OFF -> "Noise control off"
+            ListeningMode.NOISE_CANCELLING -> "Noise Cancelling"
+            ListeningMode.AMBIENT -> "Ambient Sound"
+            ListeningMode.OFF -> "Noise Control Off"
             null -> "SunPods"
         }
         val levels = listOfNotNull(
             state.left?.let { "L $it%" },
             state.right?.let { "R $it%" }
         ).joinToString("  ")
-        tile.subtitle = levels.ifEmpty { "Tap to change mode" }
+        tile.subtitle = levels.ifEmpty { "Tap to change noise control" }
         tile.state = if (mode == ListeningMode.OFF || mode == null) Tile.STATE_INACTIVE else Tile.STATE_ACTIVE
         tile.icon = Icon.createWithResource(
             this,

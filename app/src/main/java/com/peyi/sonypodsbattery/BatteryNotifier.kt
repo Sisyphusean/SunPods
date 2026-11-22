@@ -17,8 +17,8 @@ object BatteryNotifier {
         BatteryNudges.check(context, state)
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Battery updates", NotificationManager.IMPORTANCE_LOW).apply {
-            description = "Live battery levels while your earbuds are connected"
+        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Battery Updates", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "Live battery levels while your earbuds are connected."
         })
         val content = listOfNotNull(
             state.left?.let { "L $it%" }, state.right?.let { "R $it%" }, state.case?.let { "Case $it%" }

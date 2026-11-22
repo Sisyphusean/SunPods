@@ -79,7 +79,7 @@ internal fun KeepRunningCard(check: Int) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RowIcon(Icons.Rounded.BatteryAlert, active = true)
                 Spacer(Modifier.width(16.dp))
-                Text("Keep SunPods running", style = MaterialTheme.typography.titleMedium)
+                Text("Keep SunPods Running", style = MaterialTheme.typography.titleMedium)
             }
             Spacer(Modifier.height(10.dp))
             Text(
@@ -89,7 +89,7 @@ internal fun KeepRunningCard(check: Int) {
             )
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { BackgroundAccess.snooze(context); hidden = true }) { Text("Not now") }
+                TextButton(onClick = { BackgroundAccess.snooze(context); hidden = true }) { Text("Not Now") }
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = { BackgroundAccess.request(context) }) { Text("Allow") }
             }
