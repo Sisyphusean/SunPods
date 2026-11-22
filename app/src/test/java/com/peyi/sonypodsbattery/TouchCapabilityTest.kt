@@ -26,4 +26,17 @@ class TouchCapabilityTest {
     @Test fun badReplyGivesNull() {
         assertEquals(null, TouchCapability.parse(byteArrayOf(0xf1.toByte(), 0x03, 0x02, 0x00)))
     }
+
+    // The same earbuds on Classic: Noise Control carries the two Quick Access slots.
+    @Test fun classicNoiseControlHasQuickAccess() {
+        val classic = ("f1 03 02 00 00 35 03 35 04 01 01 43 02 44 22 10 03 24 00 02 04 01 02 03 04 20 04 00 00 20 01 21 02 22 03 24 ff 01 00 00 00 " +
+            "01 00 20 03 35 04 01 01 43 02 44 22 10 03 23 00 02 04 01 02 03 04 20 04 00 00 20 01 21 02 22 03 23 ff 01 00 00 00")
+            .split(" ").map { it.toInt(16).toByte() }.toByteArray()
+        val left = TouchCapability.parse(classic)!![0]!!
+        assertEquals(listOf(TouchFunction.AMBIENT_SOUND_CONTROL, TouchFunction.PLAYBACK_CONTROL, TouchFunction.NONE), left.map { it.function })
+        assertEquals(
+            "Tap: change noise mode. Double-tap: Quick Access (set up in Spotify or Endel). Triple-tap: Quick Access (set up in Spotify or Endel). Tap repeatedly: volume down. Hold: Quick Attention.",
+            TouchCapability.describe(left[0])
+        )
+    }
 }
