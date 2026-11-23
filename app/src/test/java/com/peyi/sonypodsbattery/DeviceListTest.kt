@@ -13,7 +13,7 @@ class DeviceListTest {
 
     @Test fun groupsBySeriesInDeclaredOrder() {
         val g = groupBySeries()
-        assertEquals(listOf("1000X", "WF-C"), g.map { it.series })
+        assertEquals(listOf("1000X", "C"), g.map { it.series })
         assertEquals(listOf(EarbudModel.WF_1000XM5, EarbudModel.WH_1000XM5), g.first().models)
         assertEquals(EarbudModel.entries.toSet(), g.flatMap { it.models }.toSet())
     }

@@ -18,12 +18,12 @@ enum class EarbudModel(
     val caseCharges: Double,
     /** Over-ear headphones: one battery, no charging case, buttons and a touch panel instead of per-side touch. */
     val headphones: Boolean = false,
-    /** The product line it belongs to, for grouping in the device picker: "1000X", "WF-C", "LinkBuds", "ULT"... */
+    /** The product line it belongs to, for grouping in the device picker: "1000X", "C", "LinkBuds", "ULT"... */
     val series: String = "",
 ) {
     WF_1000XM5("xm5", "WF-1000XM5", Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE), 8.0, 12.0, 2.0, series = "1000X"),
     // Sony: 8.5 h NC on / 12 h off, about 30 h in total with the case (21.5 h in the case).
-    WF_C710N("c710n", "WF-C710N", Regex("WF[- ]?C710N", RegexOption.IGNORE_CASE), 8.5, 12.0, 2.5, series = "WF-C"),
+    WF_C710N("c710n", "WF-C710N", Regex("WF[- ]?C710N", RegexOption.IGNORE_CASE), 8.5, 12.0, 2.5, series = "C"),
     // Sony: 30 h with noise cancelling, 40 h without; no charging case.
     WH_1000XM5("wh1000xm5", "WH-1000XM5", Regex("WH[- ]?1000XM5", RegexOption.IGNORE_CASE), 30.0, 40.0, 0.0, headphones = true, series = "1000X");
 
@@ -31,6 +31,8 @@ enum class EarbudModel(
     val noun: String get() = if (headphones) "headphones" else "earbuds"
     /** "Earbuds" or "Headphones", for titles. */
     val titleNoun: String get() = if (headphones) "Headphones" else "Earbuds"
+    /** The series as shown in lists: "1000X Series", "C Series". */
+    val seriesName: String get() = "$series Series"
     /** How to get them to connect: "Open the case near your phone" or "Turn them on near your phone". */
     val wakeHint: String get() = if (headphones) "Turn them on near your phone" else "Open the case near your phone"
 
@@ -135,7 +137,9 @@ private val EARBUD_BUDS = listOf(BatteryPart.LEFT, BatteryPart.RIGHT)
 private val HEADPHONE_BATTERIES = listOf(BatteryPart.MAIN)
 
 /** One series in the device picker's full list. */
-internal data class SeriesGroup(val series: String, val models: List<EarbudModel>)
+internal data class SeriesGroup(val series: String, val models: List<EarbudModel>) {
+    val title: String get() = models.first().seriesName
+}
 
 /** Whether [model] matches what was typed: name, series or kind, ignoring case, spaces and dashes ("xm4", "wf c7", "headphones"). */
 internal fun EarbudModel.matchesQuery(query: String): Boolean {

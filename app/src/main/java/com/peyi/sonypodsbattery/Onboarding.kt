@@ -54,6 +54,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -84,7 +85,6 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -465,22 +465,19 @@ private fun DeviceStep(onNext: () -> Unit) {
             maxLines = 1, modifier = Modifier.fillMaxWidth().semantics { heading() }
         )
         Spacer(Modifier.height(16.dp))
-        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            listOf(false to "Earbuds", true to "Headphones").forEachIndexed { i, (hp, label) ->
-                SegmentedButton(
-                    selected = headphones == hp,
-                    onClick = { if (headphones != hp) { headphones = hp; scope.launch { pager.scrollToPage(0) } } },
-                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, 2),
-                    modifier = Modifier.height(48.dp)
-                ) { Text(label, maxLines = 1) }
-            }
-        }
+        FamilySwitch(
+            labels = listOf("Earbuds", "Headphones"), selected = if (headphones) 1 else 0, reduceMotion = reduceMotion,
+            onSelect = { i -> val hp = i == 1; if (headphones != hp) { headphones = hp; scope.launch { pager.scrollToPage(0) } } }
+        )
         androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
           val heroH = minOf(320.dp, maxHeight - 120.dp).coerceAtLeast(200.dp)
+          // Wide enough to be big, narrow enough that the earbuds keep a clear margin from the screen edges.
+          val screenW = maxWidth + 48.dp
+          val heroW = minOf(heroH * 1.4f, screenW * 1.077f, (screenW - 64.dp) / 0.65f)
           Box(Modifier.fillMaxWidth().height(heroH + 100.dp)) {
             // The hero stays put (wider than the screen, so it is big) and the pager lays over it, so a
             // swipe anywhere changes the device. The name sits right under the picture.
-            Box(Modifier.align(Alignment.TopCenter).requiredWidth(heroH * 1.4f).height(heroH)) {
+            Box(Modifier.align(Alignment.TopCenter).requiredWidth(heroW).height(heroH)) {
                 Hero3D(
                     device = model.id, color = "black", softSwap = true, preload = warm,
                     modifier = Modifier.fillMaxSize()
@@ -544,6 +541,38 @@ private fun DeviceStep(onNext: () -> Unit) {
     )
 }
 
+/** A One UI style two-way switch: a pill track with a tonal pill that slides under the chosen label. */
+@Composable
+private fun FamilySwitch(labels: List<String>, selected: Int, reduceMotion: Boolean, onSelect: (Int) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    androidx.compose.foundation.layout.BoxWithConstraints(
+        Modifier.fillMaxWidth().height(56.dp).clip(CircleShape).background(colors.surfaceContainerHigh).padding(4.dp)
+    ) {
+        val seg = maxWidth / labels.size
+        val x by androidx.compose.animation.core.animateDpAsState(
+            seg * selected,
+            if (reduceMotion) androidx.compose.animation.core.snap()
+            else androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow),
+            label = "switch"
+        )
+        Box(Modifier.offset(x = x).width(seg).fillMaxHeight().clip(CircleShape).background(colors.secondaryContainer))
+        Row(Modifier.fillMaxSize().selectableGroup()) {
+            labels.forEachIndexed { i, label ->
+                val on = i == selected
+                Box(
+                    Modifier.weight(1f).fillMaxHeight().clip(CircleShape).selectable(selected = on, role = Role.Tab, onClick = { onSelect(i) }),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium, maxLines = 1,
+                        color = if (on) colors.onSecondaryContainer else colors.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** Every supported model by series, with search. Everything comes from [EarbudModel.entries]. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -575,25 +604,25 @@ private fun AllDevicesSheet(onPick: (EarbudModel) -> Unit, onDismiss: () -> Unit
                 groups.forEach { g ->
                     item(key = "series-" + g.series) {
                         Text(
-                            g.series, style = MaterialTheme.typography.titleSmall, color = colors.primary,
+                            g.title, style = MaterialTheme.typography.titleSmall, color = colors.primary,
                             modifier = Modifier.padding(top = 20.dp, bottom = 4.dp).semantics { heading() }
                         )
                     }
                     items(g.models.size, key = { g.models[it].id }) { i ->
                         val m = g.models[i]
                         Row(
-                            Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp)).clickable(role = Role.Button) { onPick(m) }
+                            Modifier.fillMaxWidth().heightIn(min = 76.dp).clip(RoundedCornerShape(16.dp)).clickable(role = Role.Button) { onPick(m) }
                                 .semantics(mergeDescendants = true) { contentDescription = "${m.displayName}, ${m.noun}" },
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // The model's own black picture on the same tonal cookie as every other icon.
                             Box(
-                                Modifier.size(56.dp).clip(CookieShape()).background(colors.secondaryContainer),
+                                Modifier.size(64.dp).clip(CookieShape()).background(colors.surfaceContainerHighest),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Image(
                                     painterResource(budArt(0x01, m).pair), contentDescription = null,
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.size(42.dp)
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.size(60.dp)
                                 )
                             }
                             Spacer(Modifier.width(14.dp))
