@@ -23,7 +23,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = 97
-        versionName = "2.29.0"
+        versionName = "3.0.0"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
 

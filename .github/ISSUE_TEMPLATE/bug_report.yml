@@ -18,7 +18,7 @@ body:
     attributes:
       label: SunPods version
       description: Settings > Updates shows it.
-      placeholder: "2.29.0"
+      placeholder: "3.0.0"
     validations:
       required: true
   - type: input
