@@ -520,12 +520,17 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         else if (device.createBond()) Buds.Pairing else Buds.Failed("Pairing didn't start. Make sure the case light is flashing blue, then try again.")
     }
 
+    val leScope = rememberCoroutineScope()
     if (state is Buds.Pairing) {
         DisposableEffect(Unit) {
             val receiver = object : BroadcastReceiver() {
                 override fun onReceive(c: Context, i: Intent) {
                     when (i.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)) {
-                        BluetoothDevice.BOND_BONDED -> state = Buds.Waiting
+                        BluetoothDevice.BOND_BONDED -> {
+                            state = Buds.Waiting
+                            // Same press, both sides: the LE Audio side too, if Shizuku is set up.
+                            leScope.launch { LePairing.alsoPairLe(context.applicationContext) { DiagnosticsStore.add(context, "Setup: $it") } }
+                        }
                         BluetoothDevice.BOND_NONE -> state = Buds.Failed("Pairing didn't finish. Put the earbuds back in pairing mode and try again.")
                     }
                 }

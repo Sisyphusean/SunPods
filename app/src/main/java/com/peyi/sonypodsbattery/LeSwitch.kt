@@ -587,3 +587,30 @@ private fun Step(n: Int, text: String) {
 private fun classicConnected(context: Context): Boolean = runCatching {
     context.getSystemService(BluetoothManager::class.java)?.adapter?.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED
 }.getOrDefault(false)
+
+/**
+ * One case-button press pairs both sides. Right after SunPods pairs the earbuds, while they're
+ * still in pairing mode, it also pairs their LE Audio side through Shizuku if Android didn't. Then
+ * every later switch between Classic and LE Audio is a plain reconnect, with no button. It only
+ * ever adds a pairing; it never removes one.
+ */
+internal object LePairing {
+    suspend fun alsoPairLe(context: Context, log: (String) -> Unit): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (ShizukuBluetooth.state() != ShizukuBluetooth.State.READY) return@withContext false
+        if (LeAudio.support(context) == LeAudio.Support.NOT_SUPPORTED) return@withContext false
+        val le = EarbudAddresses.le(context).filter { EarbudAddresses.isRandom(it) }
+        if (le.isEmpty()) return@withContext false
+        ShizukuBluetooth.use(context) { sh ->
+            val missing = le.filter { sh.bondState(it) != BluetoothDevice.BOND_BONDED }
+            if (missing.isEmpty()) return@use true
+            missing.all { address ->
+                // Only while the earbuds still advertise for pairing; otherwise leave it.
+                if (!sh.waitForAdvert(address, 15_000)) { log("LE side not in pairing mode, left for later"); return@all false }
+                log("pair LE side $address: ${sh.bondLe(address)}")
+                var waited = 0
+                while (waited < 20_000 && sh.bondState(address) != BluetoothDevice.BOND_BONDED) { Thread.sleep(500); waited += 500 }
+                (sh.bondState(address) == BluetoothDevice.BOND_BONDED).also { log("LE side ${if (it) "paired" else "not paired"}") }
+            }
+        } == true
+    }
+}

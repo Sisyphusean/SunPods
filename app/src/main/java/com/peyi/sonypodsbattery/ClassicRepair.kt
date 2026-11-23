@@ -106,6 +106,8 @@ internal object ClassicRepair {
                     while (w < 15_000 && sh.bondState(classic) != BluetoothDevice.BOND_BONDED) { Thread.sleep(1_000); w += 1_000 }
                 }
                 val ok = sh.bondState(classic) == BluetoothDevice.BOND_BONDED
+                // Same press, both sides: pair the LE Audio side too while they're still in pairing mode.
+                if (ok) kotlinx.coroutines.runBlocking { LePairing.alsoPairLe(app) { log(app, it) } }
                 if (ok) { status("Connecting"); log(app, "connect $classic: ${sh.connectClassic(classic)}") }
                 ok
             }
