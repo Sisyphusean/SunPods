@@ -137,11 +137,11 @@ enum class SpeakToChatSensitivity(val code: Int, val label: String) {
     }
 }
 
-enum class SpeakToChatTimeout(val code: Int, val label: String) {
-    SHORT(0x00, "Short (about 5 seconds)"),
-    STANDARD(0x01, "Standard (about 15 seconds)"),
-    LONG(0x02, "Long (about 30 seconds)"),
-    NEVER(0x03, "Never");
+enum class SpeakToChatTimeout(val code: Int, val label: String, val short: String) {
+    SHORT(0x00, "Short (about 5 seconds)", "5 sec"),
+    STANDARD(0x01, "Standard (about 15 seconds)", "15 sec"),
+    LONG(0x02, "Long (about 30 seconds)", "30 sec"),
+    NEVER(0x03, "Never", "Never");
 
     companion object {
         fun from(code: Int?): SpeakToChatTimeout? = entries.firstOrNull { it.code == code }
@@ -277,7 +277,9 @@ internal object SonyFeatures {
         var r = previous
         r = r.copy(modelName = readString(s, INFO_MODEL) ?: r.modelName)
         r = r.copy(firmware = readString(s, INFO_FIRMWARE) ?: r.firmware)
-        if (r.colorCode == null) r = r.copy(colorCode = readColor(s))
+        // Read every time (it's one short request), so it's right from the first connection in
+        // setup and follows a different pair of earbuds. The app shows black until it's known.
+        r = r.copy(colorCode = readColor(s) ?: r.colorCode)
         r = readCodec(s, r)
         r = readEq(s, r)
         r = readDsee(s, r)

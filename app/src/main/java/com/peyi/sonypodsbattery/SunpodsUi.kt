@@ -1924,7 +1924,7 @@ private fun SpeakToChatPage(settings: DeviceSettings, vm: SunpodsViewModel) {
                 }
                 add {
                     var open by remember { mutableStateOf(false) }
-                    NavRow(Icons.Rounded.Timer, "End Chat Mode", settings.speakToChatTimeout?.label ?: "—") { open = true }
+                    NavRow(Icons.Rounded.Timer, "End Chat Mode", settings.speakToChatTimeout?.short ?: "—") { open = true }
                     if (open) {
                         ChoiceSheet("End Chat Mode After", SpeakToChatTimeout.entries.toList(), settings.speakToChatTimeout,
                             label = { it.label }, onDismiss = { open = false }) { vm.setSpeakToChatConfig(sensitivity, it) }
