@@ -161,6 +161,10 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
             ShizukuWatch.start(context)
             // Checked again right before the earbuds change: the phone may have closed Shizuku.
             if (ShizukuBluetooth.state() != ShizukuBluetooth.State.READY) { pendingLe = true; state = Switch.PrepareShizuku; return@launch }
+            if (!lePairingExists() && classicConnected(context)) {
+                state = Switch.Working("Getting LE Audio ready…")
+                LePairing.pairOverClassic(context) { log(it) }
+            }
             SonyControlSessionManager.setClassicOnly(context, false)
             if (!switchEarbuds(true)) {
                 state = Switch.Failed("Couldn't switch. If Sony Sound Connect is open, close it and try again.")
@@ -281,6 +285,10 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
             val classic = EarbudAddresses.classic(context)
             log("pairing LE ${le.joinToString()} with Shizuku")
             val ok = ShizukuBluetooth.use(context) { sh ->
+                // Wait for the earbuds to show up in pairing mode before touching any pairing, so
+                // nothing that works today is removed for a pairing that never happens.
+                pairStatus = "Waiting for the light to flash blue"
+                if (!sh.waitForAdvert(le.first(), 5 * 60_000L)) return@use false
                 // Old pairings stop the LE side pairing cleanly. Remove them and wait until they're gone.
                 val old = sh.bonded().lines().map { it.split("|") }
                     .filter { it.size >= 2 && (it[0].startsWith("LE_WF-1000XM5") || it[1].equals(classic, true) || le.any { a -> a.equals(it[1], true) }) }
@@ -583,3 +591,34 @@ private fun Step(n: Int, text: String) {
 private fun classicConnected(context: Context): Boolean = runCatching {
     context.getSystemService(BluetoothManager::class.java)?.adapter?.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED
 }.getOrDefault(false)
+
+/**
+ * The LE Audio pairing, made while the earbuds are still on Classic and without the case button:
+ * SunPods asks the earbuds to enter pairing mode over the control channel (the same request as
+ * "Pair a New Device"), pairs their LE side through Shizuku, then ends pairing mode. With the LE
+ * pairing in place, the switch itself is just a reconnect.
+ */
+internal object LePairing {
+    suspend fun pairOverClassic(context: Context, log: (String) -> Unit): Boolean {
+        val le = EarbudAddresses.le(context)
+        if (le.isEmpty()) { log("LE pairing: no LE addresses yet"); return false }
+        val on = RefreshCoordinator.awaitSession(context, "Pairing mode on") { Multipoint.setPairingMode(it, true) }.getOrDefault(false)
+        log("LE pairing: pairing mode ${if (on) "on" else "refused"}")
+        if (!on) return false
+        try {
+            val ok = ShizukuBluetooth.use(context) { sh ->
+                le.all { address ->
+                    if (sh.bondState(address) == BluetoothDevice.BOND_BONDED) return@all true
+                    log("LE pairing: pair $address: ${sh.bondLe(address)}")
+                    var waited = 0
+                    while (waited < 20_000 && sh.bondState(address) != BluetoothDevice.BOND_BONDED) { Thread.sleep(500); waited += 500 }
+                    (sh.bondState(address) == BluetoothDevice.BOND_BONDED).also { log("LE pairing: $address ${if (it) "paired" else "not paired"}") }
+                }
+            } == true
+            log("LE pairing without the case: ${if (ok) "done" else "didn't finish"}")
+            return ok
+        } finally {
+            RefreshCoordinator.awaitSession(context, "Pairing mode off") { Multipoint.setPairingMode(it, false) }
+        }
+    }
+}
