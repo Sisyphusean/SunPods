@@ -531,17 +531,23 @@ function applyFinish(f) {
 
 // ---------------------------------------------------------------------------------------------
 // Models
+// Devices besides the WF-1000XM5, each modelled in code in its own module and lit by this same scene
+// and shaders. A module's create(ctx) returns { buds: { root }, kase: { root }, FINISHES, KEYS,
+// finishCopy, applyFinish, applyPose(state, active), ready, warm }; 'buds' is the hero model (earbuds,
+// or headphones) and 'kase' the case. Adding a model is a module plus one line here.
+const DEVICES = {
+  c710n: { url: './c710n.js', create: 'createC710N', colors: ['black', 'white', 'pink', 'blue'] },
+};
 const state = {
   color: FINISHES[params.get('color')] ? params.get('color') : 'black',
   model: params.get('model') === 'case' ? 'case' : 'buds',
   angle: 0,
   lid: clamp01(parseFloat(params.get('lid') || '0') || 0),
   ready: false,
-  device: params.get('device') === 'c710n' ? 'c710n' : 'xm5',
+  device: DEVICES[params.get('device')] ? params.get('device') : 'xm5',
 };
-// WF-C710N finishes (c710n.js holds their values); the colour from the URL is checked against them
-const C7_COLORS = ['black', 'white', 'pink', 'blue'];
-if (state.device === 'c710n') state.color = C7_COLORS.includes(params.get('color')) ? params.get('color') : 'black';
+// a device's colour from the URL is checked against its finishes
+if (state.device !== 'xm5') state.color = DEVICES[state.device].colors.includes(params.get('color')) ? params.get('color') : 'black';
 const buds = { root: new THREE.Group(), pivotL: null, pivotR: null, loaded: false };
 const kase = { root: new THREE.Group(), spin: new THREE.Group(), lid: null, anchors: [], loaded: false };
 buds.root.name = 'buds'; kase.root.name = 'case';
@@ -622,7 +628,7 @@ function applyPose() {
   }
   buds.root.visible = state.model === 'buds' && state.device === 'xm5';
   kase.root.visible = state.model === 'case' && state.device === 'xm5';
-  if (C7) C7.applyPose(state, state.device === 'c710n');
+  for (const [id, slot] of Object.entries(mods)) if (slot.m) slot.m.applyPose(state, state.device === id);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -643,7 +649,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) requ
 // colour crossfade
 let colorAnim = null;
 function setColor(name, instant) {
-  if (deviceTarget === 'c710n') { setColorC7(name, instant); return; }
+  if (deviceTarget !== 'xm5') { setColorMod(deviceTarget, name, instant); return; }
   if (!FINISHES[name]) return;
   state.color = name;
   if (!MATS) return;
@@ -684,7 +690,7 @@ let modelToken = 0;
 function setModel(m) {
   const want = m === 'case' ? 'case' : 'buds';
   const token = ++modelToken;
-  const ready = deviceTarget === 'c710n' ? loadC7() : want === 'case' ? loadCase() : loadBuds();
+  const ready = deviceTarget !== 'xm5' ? loadMod(deviceTarget) : want === 'case' ? loadCase() : loadBuds();
   ready.then(() => {
     if (token !== modelToken) return;
     if (state.model === want) { requestRender(); return; }
@@ -699,15 +705,13 @@ function setModel(m) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// WF-C710N: a second device, modelled in code (c710n.js) and lit by this same scene and shaders.
-// The XM5 above is unchanged; setDevice() swaps which earbuds and case are shown, with the same
-// short fade as a model switch. Each device keeps its own colour.
-let C7 = null, c7Promise = null;
+// The other devices (DEVICES). The XM5 above is unchanged; setDevice() swaps which model is shown,
+// with the same short fade as a model switch. Each device keeps its own colour.
+const mods = {};   // id -> { m: the built model, promise, finish, colorAnim }
 let deviceTarget = state.device;   // the device asked for last; state.device follows once it has loaded
-const colorFor = { xm5: 'black', c710n: 'black' };
+const colorFor = Object.fromEntries(['xm5', ...Object.keys(DEVICES)].map((d) => [d, 'black']));
 colorFor[state.device] = state.color;
-let finishC7 = null;
-// compile() builds a program for every material under what it's given, shown or not. A WF-C710N start
+// compile() builds a program for every material under what it's given, shown or not. A device's start
 // compiles only what is drawn (stand-in meshes sharing the geometry and materials, lit by the real
 // scene), so its first frame doesn't wait for the case or the other finishes; the rest follows idle.
 function compileShown(root) {
@@ -720,54 +724,60 @@ function compileShown(root) {
   walk(root);
   return renderer.compileAsync(ws, camera, scene);
 }
-// The glass programs, off screen, for switching finishes by hand (tools and demo); real earbuds keep
-// their own colour, so a normal start never needs them.
-function c7Warm() {
-  if (!C7 || !C7.warm) return;
-  const ws = new THREE.Scene(); ws.add(C7.warm);
-  renderer.compileAsync(ws, camera, scene).then(() => mark('glass programs ready')).catch(() => {});
+// The other finishes' programs, off screen, for switching finishes by hand (tools and demo); real
+// earbuds keep their own colour, so a normal start never needs them.
+function modWarm(id) {
+  const m = mods[id] && mods[id].m;
+  if (!m || !m.warm) return;
+  const ws = new THREE.Scene(); ws.add(m.warm);
+  renderer.compileAsync(ws, camera, scene).then(() => mark('other finishes ready')).catch(() => {});
 }
-function loadC7() {
-  c7Promise = c7Promise || import('./c710n.js').then((mod) => {
-    C7 = mod.createC710N({ THREE, patched, lin, DEBUG, caseRest: blenderMatrixToThree(CASE_REST) });
-    scene.add(C7.buds.root, C7.kase.root);
-    finishC7 = C7.finishCopy(colorFor.c710n);
-    C7.applyFinish(finishC7);
-    return C7.ready;
-  });
-  return c7Promise;
+function buildMod(id, mod, overrides) {
+  const slot = mods[id];
+  if (slot.m) scene.remove(slot.m.buds.root, slot.m.kase.root);
+  const m = slot.m = mod[DEVICES[id].create]({ THREE, patched, lin, DEBUG, overrides, caseRest: blenderMatrixToThree(CASE_REST) });
+  scene.add(m.buds.root, m.kase.root);
+  slot.finish = m.finishCopy(colorFor[id]);
+  m.applyFinish(slot.finish);
+  return m.ready;
 }
-let colorAnimC7 = null;
-function setColorC7(name, instant) {
-  if (!C7_COLORS.includes(name) && !(DEBUG && C7 && C7.FINISHES[name])) return;
-  colorFor.c710n = name;
+function loadMod(id) {
+  const slot = mods[id] || (mods[id] = { m: null, promise: null, finish: null, colorAnim: null });
+  slot.promise = slot.promise || import(DEVICES[id].url).then((mod) => buildMod(id, mod));
+  return slot.promise;
+}
+function setColorMod(id, name, instant) {
+  const slot = mods[id];
+  if (!DEVICES[id].colors.includes(name) && !(DEBUG && slot && slot.m && slot.m.FINISHES[name])) return;
+  colorFor[id] = name;
   state.color = name;
-  if (!C7) { loadC7().then(() => { if (colorFor.c710n === name) setColorC7(name, true); }); return; }
-  if (colorAnimC7) anims.delete(colorAnimC7);
-  const from = C7.finishCopy(null, finishC7), to = C7.FINISHES[name];
-  if (instant || state.device !== 'c710n') {
-    finishC7 = C7.finishCopy(name);
-    C7.applyFinish(finishC7); requestRender(); return;
+  if (!slot || !slot.m) { loadMod(id).then(() => { if (colorFor[id] === name) setColorMod(id, name, true); }); return; }
+  const m = slot.m;
+  if (slot.colorAnim) anims.delete(slot.colorAnim);
+  const from = m.finishCopy(null, slot.finish), to = m.FINISHES[name];
+  if (instant || state.device !== id) {
+    slot.finish = m.finishCopy(name);
+    m.applyFinish(slot.finish); requestRender(); return;
   }
   const t0 = performance.now(), dur = 380;
-  colorAnimC7 = (now) => {
+  slot.colorAnim = (now) => {
     const t = smooth(clamp01((now - t0) / dur));
-    for (const k of C7.KEYS) for (let i = 0; i < 3; i++) finishC7[k][i] = from[k][i] + (to[k][i] - from[k][i]) * t;
-    C7.applyFinish(finishC7);
+    for (const k of m.KEYS) for (let i = 0; i < 3; i++) slot.finish[k][i] = from[k][i] + (to[k][i] - from[k][i]) * t;
+    m.applyFinish(slot.finish);
     return t < 1;
   };
-  anims.add(colorAnimC7); requestRender();
+  anims.add(slot.colorAnim); requestRender();
 }
 let deviceToken = 0;
 function setDevice(d) {
-  const want = d === 'c710n' ? 'c710n' : 'xm5';
+  const want = DEVICES[d] ? d : 'xm5';
   if (want !== deviceTarget) {
     colorFor[deviceTarget] = state.color;
     deviceTarget = want;
     state.color = colorFor[want];
   }
   const token = ++deviceToken;
-  const ready = want === 'c710n' ? loadC7() : state.model === 'case' ? loadCase() : loadBuds();
+  const ready = want !== 'xm5' ? loadMod(want) : state.model === 'case' ? loadCase() : loadBuds();
   ready.then(() => {
     if (token !== deviceToken) return;
     if (state.device === want) { requestRender(); return; }
@@ -913,9 +923,9 @@ async function start() {
   maskTex.anisotropy = 4;
   updateRim();
   MATS = buildMaterials(maskTex);
-  if (state.device === 'c710n') applyFinish(finish);   // the XM5 materials keep their black finish ready
+  if (state.device !== 'xm5') applyFinish(finish);   // the XM5 materials keep their black finish ready
   setColor(state.color, true);
-  const first = state.device === 'c710n' ? loadC7()
+  const first = state.device !== 'xm5' ? loadMod(state.device)
     : state.model === 'case' ? loadCase() : loadBuds();   // decodes in the worker meanwhile
   scene.environment = buildEnvironment();
   mark('environment');
@@ -927,7 +937,8 @@ async function start() {
   window.addEventListener('resize', resize);
   resize();
   applyPose();
-  await (state.device === 'c710n' && C7 ? compileShown(state.model === 'case' ? C7.kase.root : C7.buds.root) : renderer.compileAsync(scene, camera));
+  const M = state.device !== 'xm5' && mods[state.device] ? mods[state.device].m : null;
+  await (M ? compileShown(state.model === 'case' ? M.kase.root : M.buds.root) : renderer.compileAsync(scene, camera));
   mark('shaders');
   renderer.render(scene, camera);
   mark('first frame, ' + (renderer.info.programs || []).length + ' programs' + (DEBUG ? ': ' + (renderer.info.programs || []).map((p) => p.name).join(' ') : ''));
@@ -935,11 +946,12 @@ async function start() {
   host('ready');
   window.dispatchEvent(new Event('sunpods-ready'));
   // the other model loads once the first frame is up, then the decoder worker is released
-  // (a WF-C710N start loads the XM5 files only if setDevice('xm5') asks for them)
-  if (state.device === 'c710n') {
+  // (another device's start loads the XM5 files only if setDevice('xm5') asks for them)
+  if (M) {
+    const id = state.device;
     setTimeout(() => {
-      compileShown(state.model === 'case' ? C7.buds.root : C7.kase.root).then(() => mark('other model ready')).catch(() => {});
-      if (DEBUG) c7Warm();
+      compileShown(state.model === 'case' ? M.buds.root : M.kase.root).then(() => mark('other model ready')).catch(() => {});
+      if (DEBUG) modWarm(id);
     }, 600);
     return;
   }
@@ -966,9 +978,10 @@ api.snapshot = () => {
 // Preview captures for branding/render/hero3d_preview (only with ?debug).
 if (DEBUG) {
   api.debugShot = async ({ color = 'black', model = 'buds', angle = 0, lid = 0, w = 1000, h = 712, device = state.device } = {}) => {
-    await (device === 'c710n' ? loadC7() : model === 'case' ? loadCase() : loadBuds());
+    const dev = DEVICES[device] ? device : 'xm5';
+    await (dev !== 'xm5' ? loadMod(dev) : model === 'case' ? loadCase() : loadBuds());
     stopMotion(); anims.clear();
-    deviceToken++; deviceTarget = state.device = device === 'c710n' ? 'c710n' : 'xm5';
+    deviceToken++; deviceTarget = state.device = dev;
     setColor(color, true);
     state.model = model; state.angle = angle; state.lid = lid;
     renderer.setPixelRatio(1);
@@ -981,23 +994,21 @@ if (DEBUG) {
     return url;
   };
   api.debugFinish = (name, f) => { FINISHES[name] = f; };
-  // WF-C710N tools (branding/render/c710n/tools): scene access for fitted-camera boards and clips
-  api.debugC7 = async (load = true) => {
-    if (load) await loadC7();
-    return { THREE, scene, camera, renderer, canvas, C7, state, applyPose, fitCamera, resize, stopMotion, anims, setColor,
+  // Model tools (branding/render/<device>/tools): scene access for fitted-camera boards and clips.
+  // debugMod(id) for any device; debugC7 and friends are the WF-C710N tools' names for the same.
+  api.debugMod = async (id, load = true) => {
+    if (load) await loadMod(id);
+    return { THREE, scene, camera, renderer, canvas, M: mods[id] && mods[id].m, C7: mods[id] && mods[id].m, state, applyPose, fitCamera, resize, stopMotion, anims, setColor,
       setDeviceNow: (d) => { deviceToken++; deviceTarget = state.device = d; } };
   };
-  api.debugFinishC7 = (name, f) => { if (C7) C7.FINISHES[name] = f; };
-  // rebuild the WF-C710N with trial shape values (tools only)
-  api.debugRebuildC7 = async (overrides) => {
-    await loadC7();
-    const mod = await import('./c710n.js');
-    scene.remove(C7.buds.root, C7.kase.root);
-    C7 = mod.createC710N({ THREE, patched, lin, DEBUG, overrides, caseRest: blenderMatrixToThree(CASE_REST) });
-    scene.add(C7.buds.root, C7.kase.root);
-    finishC7 = C7.finishCopy(colorFor.c710n);
-    C7.applyFinish(finishC7);
-    await C7.ready;
+  api.debugFinishMod = (id, name, f) => { if (mods[id] && mods[id].m) mods[id].m.FINISHES[name] = f; };
+  // rebuild a device with trial shape values (tools only)
+  api.debugRebuildMod = async (id, overrides) => {
+    await loadMod(id);
+    await buildMod(id, await import(DEVICES[id].url), overrides);
     return true;
   };
+  api.debugC7 = (load = true) => api.debugMod('c710n', load);
+  api.debugFinishC7 = (name, f) => api.debugFinishMod('c710n', name, f);
+  api.debugRebuildC7 = (overrides) => api.debugRebuildMod('c710n', overrides);
 }
