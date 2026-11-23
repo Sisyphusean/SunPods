@@ -363,13 +363,14 @@ internal object SonyFeatures {
     }
 
     fun setPrompts(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
-        VoicePrompts.setOn(s, on)
-        return readPrompts(s, r)
+        val sent = VoicePrompts.setOn(s, on)
+        // If the read-back doesn't come, the earbuds acknowledged the change: show what was set.
+        return readPrompts(s, if (sent) r.copy(promptsOn = on) else r)
     }
 
     fun setPromptVolume(s: SonyBatteryClient.SonySession, r: DeviceSettings, volume: Int): DeviceSettings {
-        VoicePrompts.setVolume(s, volume, r.promptTail)
-        return readPrompts(s, r)
+        val ok = VoicePrompts.setVolume(s, volume, r.promptTail)
+        return readPrompts(s, if (ok) r.copy(promptVolume = volume) else r)
     }
 
     /**
@@ -515,24 +516,24 @@ internal object SonyFeatures {
 
     // Head gestures for calls: [f7, 0f, 0 on / 1 off]
     private fun readHeadGestures(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
-        val p = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_HEAD_GESTURE), timeoutMs = 700) ?: return r
+        val p = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_HEAD_GESTURE), timeoutMs = 2_000) ?: return r
         return if (p.size >= 3) r.copy(headGestures = u(p[2]) == 0x00) else r
     }
 
     fun setHeadGestures(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
-        s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_HEAD_GESTURE, if (on) 0x00 else 0x01))
-        return readHeadGestures(s, r)
+        val ok = s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_HEAD_GESTURE, if (on) 0x00 else 0x01))
+        return readHeadGestures(s, if (ok) r.copy(headGestures = on) else r)
     }
 
     // Automatic device switching, table 2: GET f6 0a -> [f7, 0a, 0 on / 1 off, 0, 0, address text]
     private fun readAutoSwitch(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
-        val p = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_T2_AUTO_SWITCH), timeoutMs = 700, type = SonyProtocol.DATA_MDR_NO2) ?: return r
+        val p = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_T2_AUTO_SWITCH), timeoutMs = 2_000, type = SonyProtocol.DATA_MDR_NO2) ?: return r
         return if (p.size >= 3) r.copy(autoSwitch = u(p[2]) == 0x00) else r
     }
 
     fun setAutoSwitch(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
-        s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_T2_AUTO_SWITCH, if (on) 0x00 else 0x01, 0x00, 0x00), type = SonyProtocol.DATA_MDR_NO2)
-        return readAutoSwitch(s, r)
+        val ok = s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_T2_AUTO_SWITCH, if (on) 0x00 else 0x01, 0x00, 0x00), type = SonyProtocol.DATA_MDR_NO2)
+        return readAutoSwitch(s, if (ok) r.copy(autoSwitch = on) else r)
     }
 
     /** Turns the earbuds off, like holding both sensors: POWER_SET_STATUS [03 power off, 01 by the user]. */
@@ -554,34 +555,34 @@ internal object SonyFeatures {
     }
 
     fun setNoiseCycle(s: SonyBatteryClient.SonySession, r: DeviceSettings, cycle: NoiseCycle): DeviceSettings {
-        s.command(bytes(SYSTEM_GET_EXT_PARAM + 2, SYSTEM_ASSIGNABLE, 0x01, TouchFunction.AMBIENT_SOUND_CONTROL.code, 0x01, 0x00, cycle.code))
-        return readNoiseCycle(s, r)
+        val ok = s.command(bytes(SYSTEM_GET_EXT_PARAM + 2, SYSTEM_ASSIGNABLE, 0x01, TouchFunction.AMBIENT_SOUND_CONTROL.code, 0x01, 0x00, cycle.code))
+        return readNoiseCycle(s, if (ok) r.copy(noiseCycle = cycle) else r)
     }
 
     // ---- writers (each returns settings re-read from the earbuds) ----
 
     fun setEqPreset(s: SonyBatteryClient.SonySession, r: DeviceSettings, preset: EqPreset): DeviceSettings {
-        s.command(bytes(EQEBB_GET_PARAM + 2, EQ_PRESET, preset.code, 0x00))
-        return readEq(s, r)
+        val ok = s.command(bytes(EQEBB_GET_PARAM + 2, EQ_PRESET, preset.code, 0x00))
+        return readEq(s, if (ok) r.copy(eqPresetCode = preset.code) else r)
     }
 
     fun setEqBands(s: SonyBatteryClient.SonySession, r: DeviceSettings, clearBass: Int, bands: List<Int>): DeviceSettings {
         require(bands.size == 5) { "WF-1000XM5 has five EQ bands" }
         val target = r.eqPreset?.takeIf { it.isCustomisable } ?: EqPreset.MANUAL
         val values = (listOf(clearBass) + bands).map { it.coerceIn(-10, 10) + EQ_OFFSET }
-        s.command(byteArrayOf(
+        val ok = s.command(byteArrayOf(
             (EQEBB_GET_PARAM + 2).toByte(), EQ_PRESET.toByte(), target.code.toByte(), EQ_BAND_COUNT.toByte()
         ) + values.map { it.toByte() }.toByteArray())
-        return readEq(s, r)
+        return readEq(s, if (ok) r.copy(eqPresetCode = target.code, clearBass = clearBass, bands = bands) else r)
     }
 
     fun setDsee(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
         val value = if (on) 1 else 0
-        s.command(
+        val ok = s.command(
             if (r.dseeType == DSEE_SHORT_LAYOUT) bytes(AUDIO_GET_PARAM + 2, AUDIO_UPSCALING, value)
             else bytes(AUDIO_GET_PARAM + 2, AUDIO_UPSCALING, r.dseeType, value)
         )
-        return readDsee(s, r)
+        return readDsee(s, if (ok) r.copy(dseeOn = on) else r)
     }
 
     fun setPriority(s: SonyBatteryClient.SonySession, r: DeviceSettings, priority: ConnectionPriority): DeviceSettings {
@@ -591,8 +592,8 @@ internal object SonyFeatures {
     }
 
     fun setSpeakToChat(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
-        s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_SPEAK_TO_CHAT, if (on) 0x00 else 0x01, 0x01))
-        return readSpeakToChat(s, r)
+        val ok = s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_SPEAK_TO_CHAT, if (on) 0x00 else 0x01, 0x01))
+        return readSpeakToChat(s, if (ok) r.copy(speakToChat = on) else r)
     }
 
     fun setSpeakToChatConfig(
@@ -608,21 +609,21 @@ internal object SonyFeatures {
             it[it.size - 2] = sensitivity.code.toByte()
             it[it.size - 1] = timeout.code.toByte()
         } else bytes(SYSTEM_GET_EXT_PARAM + 2, SYSTEM_SPEAK_TO_CHAT, sensitivity.code, timeout.code)
-        s.command(payload)
-        return readSpeakToChat(s, r)
+        val ok = s.command(payload)
+        return readSpeakToChat(s, if (ok) r.copy(speakToChatSensitivity = sensitivity, speakToChatTimeout = timeout) else r)
     }
 
     fun setPauseWhenRemoved(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
-        s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_PLAYBACK_BY_WEARING, if (on) 0x00 else 0x01))
-        return readPause(s, r)
+        val ok = s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_PLAYBACK_BY_WEARING, if (on) 0x00 else 0x01))
+        return readPause(s, if (ok) r.copy(pauseWhenRemoved = on) else r)
     }
 
     fun setAutoOff(s: SonyBatteryClient.SonySession, r: DeviceSettings, whenRemoved: Boolean): DeviceSettings {
-        s.command(bytes(
+        val ok = s.command(bytes(
             POWER_GET_PARAM + 2, POWER_AUTO_OFF_WEARING,
             if (whenRemoved) AUTO_OFF_WHEN_REMOVED else AUTO_OFF_DISABLED, 0x00
         ))
-        return readAutoOff(s, r)
+        return readAutoOff(s, if (ok) r.copy(autoOffWhenRemoved = whenRemoved) else r)
     }
 
     /**

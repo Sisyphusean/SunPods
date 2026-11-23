@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Only for the daily check for a new version on GitHub (Settings > Updates). -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- SunPods can install its own updates from GitHub, after the user allows it once. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
@@ -134,5 +136,6 @@
             android:name=".BatteryPollingService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+        <receiver android:name=".InstallResultReceiver" android:exported="false" />
     </application>
 </manifest>

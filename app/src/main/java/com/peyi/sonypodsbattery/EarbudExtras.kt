@@ -14,7 +14,7 @@ object VoiceAssistantSetting {
     /** The current choice and the choices the earbuds offer, or null if they don't have one. */
     internal fun read(s: SonyBatteryClient.SonySession): Pair<Int?, List<Int>>? {
         val options = s.request(bytes(GET_CAPABILITY, TYPE), timeoutMs = 700)?.let(::options) ?: return null
-        val now = s.request(bytes(GET_PARAM, TYPE), timeoutMs = 700)?.takeIf { it.size >= 3 }?.let { u(it[2]) }
+        val now = s.request(bytes(GET_PARAM, TYPE), timeoutMs = 2_000)?.takeIf { it.size >= 3 }?.let { u(it[2]) }
         return now to options
     }
 
@@ -36,6 +36,16 @@ object VoiceAssistantSetting {
         0x34 -> "Sony Voice Assistant"
         0xff -> "None"
         else -> "Option ${"%02x".format(value)}"
+    }
+
+    /** For a row's value: short enough that the title never wraps. */
+    fun short(value: Int): String = when (value) {
+        0x30 -> "Phone Default"
+        0x31 -> "Google"
+        0x32 -> "Alexa"
+        0x34 -> "Sony"
+        0xff -> "Off"
+        else -> label(value)
     }
 
     fun detail(value: Int): String? = when (value) {
@@ -130,7 +140,10 @@ object EarbudReset {
  * loud and how long you listen. Volume protection (type 0x04) limits loudness to the WHO guideline
  * for adults or for sensitive listeners. The earbuds don't report either setting back, so the last
  * choice is kept here, as Sound Connect does.
- *   switch      58 03 [on/off, on/off]   0 on, 1 off
+ *   switch      58 03 [logging, live meter]   0 on, 1 off. Sony never turns both on: the live
+ *               meter ("preview") runs only while a meter is on screen, then logging comes back.
+ *   live level  5a 03 -> 5b 03 [dB] [cause]: dB ff = no reading, cause 0 not playing, 1 on a call,
+ *               2 earbud out, 3 none
  *   protection  54 04 [0 standard / 1 sensitive]
  */
 object SafeListening {
@@ -141,10 +154,39 @@ object SafeListening {
     fun sensitive(context: android.content.Context) = context.getSharedPreferences(PREFS, 0).getBoolean("sensitive", false)
 
     internal fun setOn(context: android.content.Context, s: SonyBatteryClient.SonySession, on: Boolean): Boolean {
-        val v = (if (on) 0x00 else 0x01).toByte()
-        val ok = s.command(byteArrayOf(0x58, 0x03, v, v), type = T2)
+        // Logging on or off; the live meter stays off (Sony's app never runs both).
+        val ok = s.command(byteArrayOf(0x58, 0x03, if (on) 0x00 else 0x01, 0x01), type = T2)
         if (ok) context.getSharedPreferences(PREFS, 0).edit().putBoolean("on", on).apply()
         return ok
+    }
+
+    /** What the earbuds hear right now. */
+    sealed interface Level {
+        data class Db(val db: Int) : Level
+        data object NotPlaying : Level
+        data object OnCall : Level
+        data object NotWorn : Level
+    }
+
+    /** Starts the earbuds' live measurement; logging pauses while it runs. */
+    internal fun startMeter(s: SonyBatteryClient.SonySession): Boolean =
+        s.command(byteArrayOf(0x58, 0x03, 0x01, 0x00), type = T2)
+
+    /** Puts the earbuds back to Safe Listening logging on or off. */
+    internal fun stopMeter(s: SonyBatteryClient.SonySession, loggingOn: Boolean): Boolean =
+        s.command(byteArrayOf(0x58, 0x03, if (loggingOn) 0x00 else 0x01, 0x01), type = T2)
+
+    internal fun readLevel(s: SonyBatteryClient.SonySession): Level? {
+        s.send(byteArrayOf(0x5a, 0x03), T2)
+        val p = s.waitFor(1_500) { f ->
+            f.type == T2 && f.payload.size >= 4 && (f.payload[0].toInt() and 0xff) == 0x5b && f.payload[1].toInt() == 0x03
+        }?.payload ?: return null
+        val db = p[2].toInt() and 0xff
+        return when {
+            db == 0xff -> when (p[3].toInt()) { 1 -> Level.OnCall; 2 -> Level.NotWorn; else -> Level.NotPlaying }
+            db == 0 -> Level.NotPlaying
+            else -> Level.Db(db)
+        }
     }
 
     internal fun setSensitive(context: android.content.Context, s: SonyBatteryClient.SonySession, sensitive: Boolean): Boolean {

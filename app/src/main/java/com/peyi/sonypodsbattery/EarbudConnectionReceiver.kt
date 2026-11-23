@@ -171,6 +171,7 @@ class EarbudConnectionReceiver : BroadcastReceiver() {
         val target = device ?: return
         if (a2dpState == A2dpConnectionState.CONNECTED) {
             EarbudConnectionStateStore.markA2dp(app, a2dpState, target)
+            BatteryStore.markCaseFresh(app)
             RefreshCoordinator.handleA2dpConnected(app, target)
             AutoPlay.onConnected(app)
         } else {

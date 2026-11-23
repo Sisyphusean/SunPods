@@ -127,6 +127,7 @@ import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.SettingsInputAntenna
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.TouchApp
@@ -712,7 +713,10 @@ internal fun SettingRow(
             Spacer(Modifier.width(14.dp))
         }
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, color = if (enabled) colors.onSurface else colors.onSurface.copy(alpha = 0.38f))
+            Text(
+                title, style = MaterialTheme.typography.bodyLarge, color = if (enabled) colors.onSurface else colors.onSurface.copy(alpha = 0.38f),
+                maxLines = 1, overflow = TextOverflow.Ellipsis
+            )
             if (note != null) Text(note, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
         }
         Spacer(Modifier.width(12.dp))
@@ -885,6 +889,17 @@ private fun signed(v: Int) = if (v > 0) "+$v" else "$v"
  */
 @Composable
 private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: SunpodsViewModel, busy: Boolean) {
+    val update by vm.update.collectAsState()
+    androidx.compose.animation.AnimatedVisibility(update != null, enter = revealIn(), exit = revealOut()) {
+        update?.let { UpdateCard(it, vm) }
+    }
+    val homeContext = LocalContext.current
+    var justUpdated by rememberSaveable { mutableStateOf(WhatsNew.shouldShow(homeContext)) }
+    if (justUpdated) {
+        WhatsNew.notes(homeContext, SunpodsInfo.VERSION)?.let { notes ->
+            WhatsNewSheet(SunpodsInfo.VERSION, notes) { justUpdated = false }
+        }
+    }
     val context = LocalContext.current
     var resumes by remember { mutableIntStateOf(0) }
     @Suppress("DEPRECATION")
@@ -950,6 +965,128 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
     }
 }
 
+/**
+ * A new SunPods is out. After Apple's Software Update: the app's mark, the version and its size,
+ * one line on what's new, and one button that downloads, checks and installs, filling with
+ * progress as it goes. "What's New" reads the full notes; the cross hides it until the next one.
+ */
+@Composable
+private fun UpdateCard(release: Updates.Release, vm: SunpodsViewModel) {
+    val state by vm.updateState.collectAsState()
+    val context = LocalContext.current
+    val colors = MaterialTheme.colorScheme
+    // Back from Android's "install unknown apps" setting: carry on if it's now allowed.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(lifecycle, state) {
+        val o = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME && state == SelfUpdate.State.NeedsPermission && SelfUpdate.canInstall(context)) vm.installUpdate()
+        }
+        lifecycle.addObserver(o)
+        onDispose { lifecycle.removeObserver(o) }
+    }
+    var reading by remember { mutableStateOf(false) }
+    val notes = release.notes ?: WhatsNew.notes(context, release.version)
+    val headline = Updates.headline(notes) ?: "Improvements and fixes for your earbuds."
+    val size = release.size?.let { android.text.format.Formatter.formatShortFileSize(context, it) }
+    val ink = colors.onPrimaryContainer
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    listOf(colors.primaryContainer, colors.tertiaryContainer.copy(alpha = 0.85f))
+                )
+            )
+    ) {
+        Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 18.dp, bottom = 18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(52.dp).clip(RoundedCornerShape(15.dp)).background(colors.primary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(painterResource(R.drawable.ic_sunpods_mark), contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(30.dp))
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "UPDATE AVAILABLE",
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = androidx.compose.ui.unit.TextUnit(1.2f, androidx.compose.ui.unit.TextUnitType.Sp)),
+                        color = ink.copy(alpha = 0.7f)
+                    )
+                    Text("SunPods ${release.version}", style = MaterialTheme.typography.titleLarge, color = ink, maxLines = 1)
+                    Text(listOfNotNull(size, "Free, from GitHub").joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.7f))
+                }
+                IconButton(onClick = { vm.dismissUpdate() }) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Remind me with the next version", tint = ink.copy(alpha = 0.6f))
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(headline, style = MaterialTheme.typography.bodyMedium, color = ink, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(end = 8.dp))
+            androidx.compose.animation.AnimatedVisibility(state is SelfUpdate.State.Failed || state == SelfUpdate.State.NeedsPermission, enter = revealIn(), exit = revealOut()) {
+                Text(
+                    when (val st = state) {
+                        is SelfUpdate.State.Failed -> st.message
+                        else -> "Allow SunPods to install updates in the next screen, then come back."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (state is SelfUpdate.State.Failed) colors.error else ink.copy(alpha = 0.75f),
+                    modifier = Modifier.padding(top = 6.dp, end = 8.dp)
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 8.dp)) {
+                UpdateButton(state, Modifier.weight(1f)) { vm.installUpdate() }
+                if (notes != null) {
+                    Spacer(Modifier.width(4.dp))
+                    TextButton(onClick = { reading = true }) { Text("What's New", color = ink) }
+                }
+            }
+        }
+    }
+    if (reading && notes != null) WhatsNewSheet(release.version, notes, action = "Update Now", onAction = { vm.installUpdate() }) { reading = false }
+}
+
+/** One pill that is the whole update: tap it, watch it fill, then Android takes over. */
+@Composable
+private fun UpdateButton(state: SelfUpdate.State, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val busy = state is SelfUpdate.State.Downloading || state == SelfUpdate.State.Installing
+    val target = when (state) {
+        is SelfUpdate.State.Downloading -> state.fraction ?: 0.05f
+        SelfUpdate.State.Installing -> 1f
+        else -> 0f
+    }
+    val fill by animateFloatAsState(target, tween(300, easing = Motion.Arrive), label = "fill")
+    val label = when (state) {
+        SelfUpdate.State.Idle -> "Update Now"
+        is SelfUpdate.State.Downloading -> state.fraction?.let { "Downloading ${(it * 100).roundToInt()}%" } ?: "Downloading…"
+        SelfUpdate.State.Installing -> "Installing…"
+        SelfUpdate.State.NeedsPermission -> "Allow and Update"
+        is SelfUpdate.State.Failed -> "Try Again"
+    }
+    Box(
+        modifier
+            .height(48.dp)
+            .clip(CircleShape)
+            .background(if (busy) colors.primary.copy(alpha = 0.35f) else colors.primary)
+            .then(if (busy) Modifier else Modifier.clickable(onClick = onClick))
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center
+    ) {
+        if (busy) Box(Modifier.fillMaxSize().drawBehind { drawRect(colors.primary, size = Size(size.width * fill, size.height)) })
+        androidx.compose.animation.AnimatedContent(
+            label,
+            transitionSpec = {
+                (fadeIn(tween(180, delayMillis = 60)) + androidx.compose.animation.slideInVertically(tween(240, easing = Motion.Arrive)) { it / 2 })
+                    .togetherWith(fadeOut(tween(100)) + androidx.compose.animation.slideOutVertically(tween(160)) { -it / 2 })
+            },
+            contentKey = { it.substringBefore(' ') },
+            label = "updateLabel"
+        ) { text -> Text(text, style = MaterialTheme.typography.labelLarge, color = colors.onPrimary) }
+    }
+}
+
 /** What's playing, with playback controls through the earbuds and the media volume. */
 @Composable
 private fun NowPlayingCard(vm: SunpodsViewModel) {
@@ -1012,6 +1149,8 @@ private fun NowPlayingCard(vm: SunpodsViewModel) {
 private fun BatteryCard(battery: BatteryState, busy: Boolean, liveAt: Long = 0L) {
     val heard = maxOf(battery.updatedAt, liveAt)
     val context = LocalContext.current
+    val caseAt = remember(battery.updatedAt) { BatteryStore.caseAt(context) }
+    val caseStale = battery.case != null && !battery.caseCharging && caseAt > 0 && System.currentTimeMillis() - caseAt > 20 * 60_000L
     val outlook = remember(battery.updatedAt) {
         BatteryInsights.outlook(BatteryHistory.load(context, System.currentTimeMillis() - 7L * 86_400_000), battery)
     }
@@ -1020,7 +1159,12 @@ private fun BatteryCard(battery: BatteryState, busy: Boolean, liveAt: Long = 0L)
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 24.dp)) {
                 BatteryRing("Left", battery.left?.takeIf { it in 1..100 }, battery.leftCharging, R.drawable.bud_left, Modifier.weight(1f))
                 BatteryRing("Right", battery.right?.takeIf { it in 1..100 }, battery.rightCharging, R.drawable.bud_right, Modifier.weight(1f))
-                BatteryRing("Case", battery.case?.takeIf { it in 1..100 }, battery.caseCharging, R.drawable.bud_case, Modifier.weight(1f))
+                // The case reports its level only when the earbuds come out of it. An old reading
+                // greys out and the status line says how old, like Sony's app explains it.
+                BatteryRing(
+                    "Case", battery.case?.takeIf { it in 1..100 }, battery.caseCharging, R.drawable.bud_case, Modifier.weight(1f),
+                    muted = caseStale
+                )
             }
         }
         RollingFooter(
@@ -1028,6 +1172,7 @@ private fun BatteryCard(battery: BatteryState, busy: Boolean, liveAt: Long = 0L)
                 busy -> "Checking your earbuds…"
                 battery.updatedAt == 0L -> "Pull down to refresh."
                 outlook.caseNeedsCharge -> "Case battery is low. Charge it tonight."
+                caseStale -> "Updated ${relative(heard)}. Case level from ${relative(caseAt)}."
                 else -> "Updated ${relative(heard)}."
             }
         )
@@ -1035,7 +1180,7 @@ private fun BatteryCard(battery: BatteryState, busy: Boolean, liveAt: Long = 0L)
 }
 
 @Composable
-private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int, modifier: Modifier = Modifier) {
+private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int, modifier: Modifier = Modifier, note: String? = null, onClick: (() -> Unit)? = null, muted: Boolean = false) {
     val colors = MaterialTheme.colorScheme
     val low = level != null && level <= 20 && !charging
     // The reading is there the moment the screen is: no fill-up to wait through. A new reading
@@ -1057,7 +1202,7 @@ private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int,
             label = "breathe"
         ).value
     } else 1f
-    val ring = (if (low) colors.error else colors.primary).copy(alpha = breathe)
+    val ring = (if (low) colors.error else if (muted) colors.outline else colors.primary).copy(alpha = breathe)
     val track = colors.surfaceContainerHighest
     val description = when {
         level == null -> "$label battery unknown"
@@ -1065,7 +1210,9 @@ private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int,
         else -> "$label battery $level percent"
     }
     Column(
-        modifier.semantics(mergeDescendants = true) { contentDescription = description },
+        modifier
+            .then(if (onClick != null) Modifier.clip(RoundedCornerShape(20.dp)).clickable(onClick = onClick) else Modifier)
+            .semantics(mergeDescendants = true) { contentDescription = description + (note?.let { ", $it" } ?: "") },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
@@ -1093,7 +1240,7 @@ private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int,
                 Text(
                     (sweep * 100).roundToInt().toString(),
                     style = MaterialTheme.typography.titleLarge,
-                    color = if (low) colors.error else colors.onSurface
+                    color = if (low) colors.error else if (muted) colors.onSurfaceVariant else colors.onSurface
                 )
             }
             if (level != null) {
@@ -1106,6 +1253,7 @@ private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int,
             }
             Text(label, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
         }
+        if (note != null) Text(note, style = MaterialTheme.typography.labelSmall, color = colors.outline)
     }
 }
 
@@ -1494,25 +1642,104 @@ private fun SoundScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
 private fun SafeListeningGroup(vm: SunpodsViewModel) {
     val safe by vm.safe.collectAsState()
     var choosing by remember { mutableStateOf(false) }
+    // The switch leads; everything else on the page belongs to it. Off stops the live meter.
     Group(
         null,
         footer = "Your earbuds keep track of how loud and how long you listen, following the World Health Organization's guidelines.",
-        rows = listOf(
-            { ToggleRow(Icons.Rounded.HealthAndSafety, "Safe Listening", "Your earbuds keep track of how loud and how long you listen", safe.first, vm::setSafeListening) },
-            {
-                NavRow(Icons.Rounded.VolumeUp, "Volume Protection", if (safe.second) "Sensitive" else "Standard") { choosing = true }
-                if (choosing) {
-                    ChoiceSheet(
-                        "Volume Protection", listOf(false, true), safe.second,
-                        label = { if (it) "Sensitive" else "Standard" },
-                        detail = { if (it) "A lower limit, for children and sensitive ears" else "The guideline for adults" },
-                        onDismiss = { choosing = false },
-                        onPick = { vm.setVolumeProtection(it) }
+        rows = listOf({ ToggleRow(Icons.Rounded.HealthAndSafety, "Safe Listening", "", safe.first, vm::setSafeListening) })
+    )
+    androidx.compose.animation.AnimatedVisibility(safe.first, enter = revealIn(), exit = revealOut()) {
+        Column(verticalArrangement = Arrangement.spacedBy(GroupGap)) {
+            LevelMeter(vm, sensitive = safe.second)
+            Group(
+                null,
+                rows = listOf({
+                    NavRow(Icons.Rounded.VolumeUp, "Volume Protection", if (safe.second) "Sensitive" else "Standard") { choosing = true }
+                    if (choosing) {
+                        ChoiceSheet(
+                            "Volume Protection", listOf(false, true), safe.second,
+                            label = { if (it) "Sensitive" else "Standard" },
+                            detail = { if (it) "A lower limit, for children and sensitive ears" else "The guideline for adults" },
+                            onDismiss = { choosing = false },
+                            onPick = { vm.setVolumeProtection(it) }
+                        )
+                    }
+                })
+            )
+        }
+    }
+}
+
+/**
+ * How loud it is in your ears right now, measured by the earbuds. Runs only while it's on screen;
+ * the earbuds go back to normal Safe Listening logging when you leave.
+ */
+@Composable
+private fun LevelMeter(vm: SunpodsViewModel, sensitive: Boolean) {
+    val colors = MaterialTheme.colorScheme
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        vm.startMeter()
+        onDispose { vm.stopMeter() }
+    }
+    val level by vm.level.collectAsState()
+    val db = (level as? SafeListening.Level.Db)?.db
+    // Sony's loudness guide for each Volume Protection level (from the WHO guidelines).
+    val limit = if (sensitive) 76 else 81
+    val shown by animateFloatAsState((db ?: 0).toFloat(), spring(dampingRatio = 0.9f, stiffness = 600f), label = "db")
+    val loud = db != null && db >= limit
+    val accent by animateColorAsState(
+        when {
+            db == null -> colors.outline
+            loud -> colors.error
+            db >= limit - 10 -> colors.tertiary
+            else -> colors.primary
+        },
+        label = "accent"
+    )
+    Column {
+        SunCard {
+            Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                Text("LISTENING LEVEL", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        if (db != null) shown.roundToInt().toString() else "–",
+                        style = MaterialTheme.typography.displayMedium,
+                        color = accent
                     )
+                    Text(" dB", style = MaterialTheme.typography.titleLarge, color = colors.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                }
+                Text(
+                    when (level) {
+                        null -> "Listening…"
+                        SafeListening.Level.NotPlaying -> "Play something to see the level"
+                        SafeListening.Level.OnCall -> "Paused during calls"
+                        SafeListening.Level.NotWorn -> "Put both earbuds in"
+                        is SafeListening.Level.Db -> when {
+                            loud -> "Loud. Turn it down for long listens"
+                            db!! >= limit - 10 -> "Moderate"
+                            else -> "Comfortable"
+                        }
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurfaceVariant
+                )
+                Spacer(Modifier.height(16.dp))
+                // 30 to 100 dB, with a mark at the guideline.
+                val track = colors.surfaceContainerHighest
+                val mark = colors.onSurfaceVariant
+                Canvas(Modifier.fillMaxWidth().height(10.dp).semantics { contentDescription = if (db != null) "$db decibels" else "No reading" }) {
+                    val r = size.height / 2
+                    drawRoundRect(track, cornerRadius = androidx.compose.ui.geometry.CornerRadius(r))
+                    val f = ((shown - 30f) / 70f).coerceIn(0f, 1f)
+                    if (db != null && f > 0f) drawRoundRect(accent, size = Size(size.width * f, size.height), cornerRadius = androidx.compose.ui.geometry.CornerRadius(r))
+                    val x = size.width * (limit - 30f) / 70f
+                    drawLine(mark, Offset(x, -3.dp.toPx()), Offset(x, size.height + 3.dp.toPx()), strokeWidth = 2.dp.toPx())
                 }
             }
-        )
-    )
+        }
+        Footer("Measured live by your earbuds. Try to keep long listens under $limit dB.")
+    }
 }
 
 /** The sound as a live curve, with sliders under it when the preset can be edited. */
@@ -1790,7 +2017,7 @@ private fun PageContent(
         Page.FIND -> LastSeenSettings()
         Page.APPEARANCE -> AppearancePage(dynamicColor, onDynamicColorChange)
         Page.DATA -> YourDataGroup()
-        Page.UPDATES -> UpdatesGroup()
+        Page.UPDATES -> UpdatesGroup(vm)
         Page.HELP -> HelpPage(onShareDiagnostics, onOpenBluetoothSettings)
         Page.BATTERY_HEALTH -> BatteryHealthCard(vm.battery.collectAsState().value.updatedAt)
         Page.BATTERY_WEEK -> BatteryWeekPage(vm.battery.collectAsState().value)
@@ -1973,7 +2200,12 @@ private fun HelpPage(onShareDiagnostics: () -> Unit, onOpenBluetoothSettings: ()
         null,
         rows = listOf(
             { InfoRow("Version", SunpodsInfo.VERSION) },
-            { NavRow(null, "Source Code", "GitHub") { Updates.open(context, "https://github.com/${Updates.REPO}") } }
+            { NavRow(null, "Source Code", "GitHub") { Updates.open(context, "https://github.com/${Updates.REPO}") } },
+            {
+                var reading by remember { mutableStateOf(false) }
+                NavRow(null, "What's New", SunpodsInfo.VERSION) { reading = true }
+                if (reading) WhatsNew.notes(context, SunpodsInfo.VERSION)?.let { WhatsNewSheet(SunpodsInfo.VERSION, it) { reading = false } }
+            }
         ),
         inset = 16.dp,
         footer = "Free and open source under the GPL-3.0. No account, and nothing leaves your phone except the update check."
@@ -1995,7 +2227,7 @@ private fun EarbudsGroup(settings: DeviceSettings) {
     val rows = mutableListOf<@Composable () -> Unit>()
     val a = assistant
     if (a != null) rows += {
-        NavRow(Icons.Rounded.RecordVoiceOver, "Voice Assistant", if (le) LE_OFF_NOTE else a.first?.let(VoiceAssistantSetting::label) ?: "—") {
+        NavRow(Icons.Rounded.RecordVoiceOver, "Voice Assistant", if (le) LE_OFF_NOTE else a.first?.let(VoiceAssistantSetting::short) ?: "—") {
             if (!le) choosing = true
         }
         if (choosing) {
@@ -2101,7 +2333,7 @@ private fun FitTestSheet(vm: SunpodsViewModel, onDone: () -> Unit) {
 }
 
 @Composable
-private fun UpdatesGroup() {
+private fun UpdatesGroup(updateVm: SunpodsViewModel? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var on by remember { mutableStateOf(Updates.enabled(context)) }
@@ -2125,11 +2357,12 @@ private fun UpdatesGroup() {
                     if (checking) "Checking" else result ?: SunpodsInfo.VERSION
                 ) {
                     if (release != null) {
-                        Updates.open(context, release.url)
+                        // Same as the card on Home: download, check, install.
+                        updateVm?.let { it.setAvailableUpdate(release); it.installUpdate() } ?: Updates.open(context, release.url)
                     } else if (!checking) {
                         checking = true
                         scope.launch {
-                            val latest = Updates.latest()
+                            val latest = Updates.check(context, notify = false)?.let { it } ?: Updates.latest()
                             found = latest?.takeIf { Updates.isNewer(it.version, SunpodsInfo.VERSION) }
                             result = when {
                                 latest == null -> "Couldn't reach GitHub"

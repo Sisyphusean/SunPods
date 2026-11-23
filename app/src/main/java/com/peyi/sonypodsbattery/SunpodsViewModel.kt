@@ -226,13 +226,92 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     /** Safe listening on, and volume protection set to sensitive. */
     val safe: StateFlow<Pair<Boolean, Boolean>> = _safe.asStateFlow()
 
+    private val _update = MutableStateFlow(Updates.available(application)?.takeUnless { Updates.dismissed(application, it.version) })
+    /** A newer SunPods on GitHub, if there is one. */
+    internal val update: StateFlow<Updates.Release?> = _update.asStateFlow()
+    private val _updateState = MutableStateFlow<SelfUpdate.State>(SelfUpdate.State.Idle)
+    internal val updateState: StateFlow<SelfUpdate.State> = _updateState.asStateFlow()
+
+    init {
+        viewModelScope.launch { _update.value = Updates.checkIfDue(app)?.takeUnless { Updates.dismissed(app, it.version) } }
+    }
+
+    internal fun setAvailableUpdate(release: Updates.Release?) { _update.value = release }
+
+    /** "Later": hide the card until a newer version than this one. */
+    fun dismissUpdate() {
+        _update.value?.let { Updates.dismiss(app, it.version) }
+        _update.value = null
+    }
+
+    /** Downloads the new version and hands it to Android's installer. */
+    fun installUpdate() {
+        val release = _update.value ?: return
+        val apk = release.apk
+        if (apk == null) { Updates.open(app, release.url); return }
+        if (!SelfUpdate.canInstall(app)) {
+            _updateState.value = SelfUpdate.State.NeedsPermission
+            SelfUpdate.openInstallPermission(app)
+            return
+        }
+        if (_updateState.value is SelfUpdate.State.Downloading || _updateState.value == SelfUpdate.State.Installing) return
+        viewModelScope.launch {
+            _updateState.value = SelfUpdate.State.Downloading(null)
+            val file = runCatching { SelfUpdate.download(app, apk) { f -> _updateState.value = SelfUpdate.State.Downloading(f) } }.getOrNull()
+            if (file == null) { _updateState.value = SelfUpdate.State.Failed("Couldn't download it. Check your connection and try again."); return@launch }
+            if (!SelfUpdate.isGenuine(app, file)) {
+                file.delete()
+                _updateState.value = SelfUpdate.State.Failed("That download isn't a genuine SunPods update, so it wasn't installed.")
+                return@launch
+            }
+            _updateState.value = SelfUpdate.State.Installing
+            runCatching { SelfUpdate.install(app, file) }
+                .onFailure { _updateState.value = SelfUpdate.State.Failed("Couldn't start the install. Try again.") }
+        }
+    }
+
+    private var safeJob: kotlinx.coroutines.Job? = null
+
     fun setSafeListening(on: Boolean) {
         val before = _safe.value
         _safe.value = before.copy(first = on)
-        viewModelScope.launch {
+        safeJob = viewModelScope.launch {
             val ok = RefreshCoordinator.awaitSession(app, "Safe Listening", bothEarbuds = true) { SafeListening.setOn(app, it, on) }.getOrDefault(false)
             if (!ok) { _safe.value = before; _message.value = "Couldn't change Safe Listening. Make sure your earbuds are connected and try again." }
         }
+    }
+
+    private val _level = MutableStateFlow<SafeListening.Level?>(null)
+    /** The live listening level while a meter is on screen; null before the first reading. */
+    val level: StateFlow<SafeListening.Level?> = _level.asStateFlow()
+    private var meterJob: kotlinx.coroutines.Job? = null
+
+    /** Reads the listening level ten times a second until [stopMeter], then restores the user's setting. */
+    fun startMeter() {
+        meterJob?.cancel()
+        meterJob = viewModelScope.launch {
+            try {
+                // Turning Safe Listening on writes the setting too; let that land first so it
+                // doesn't switch the meter straight back off.
+                safeJob?.join()
+                RefreshCoordinator.awaitSession(app, "Level meter on") { SafeListening.startMeter(it) }
+                while (true) {
+                    RefreshCoordinator.awaitSession(app, "Level") { SafeListening.readLevel(it) }
+                        .onSuccess { if (it != null) _level.value = it }
+                    delay(100)
+                }
+            } finally {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    RefreshCoordinator.awaitSession(app, "Level meter off") { SafeListening.stopMeter(it, _safe.value.first) }
+                }
+                _level.value = null
+            }
+        }
+    }
+
+    fun stopMeter() {
+        meterJob?.cancel()
+        meterJob = null
     }
 
     fun setVolumeProtection(sensitive: Boolean) {
@@ -296,7 +375,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
             RefreshCoordinator.awaitSession(app, "Voice Assistant", bothEarbuds = true) { s ->
                 VoiceAssistantSetting.set(s, value)
                 VoiceAssistantSetting.read(s)
-            }.onSuccess { _assistant.value = it ?: before }
+            }.onSuccess { _assistant.value = it ?: before?.copy(first = value) }
                 .onFailure { _assistant.value = before; _message.value = "Couldn't change your voice assistant. Make sure your earbuds are connected and try again." }
         }
     }

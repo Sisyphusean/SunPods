@@ -80,6 +80,8 @@ dependencies {
     implementation("androidx.glance:glance-appwidget:1.1.1")
     implementation("androidx.glance:glance-material3:1.1.1")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    // Serves the offline three.js Home hero (assets/hero3d) to a WebView over a virtual https origin.
+    implementation("androidx.webkit:webkit:1.12.1")
     // Optional: lets SunPods do the pairing steps for LE Audio that need adb-level access.
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
@@ -87,3 +89,11 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     testImplementation("junit:junit:4.13.2")
 }
+
+// The changelog ships inside the app, so "What's New" works offline and after any kind of update.
+val copyChangelog by tasks.registering(Copy::class) {
+    from(rootProject.file("CHANGELOG.md"))
+    into(layout.buildDirectory.dir("generated/changelog"))
+}
+android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/changelog").get().asFile)
+tasks.named("preBuild") { dependsOn(copyChangelog) }

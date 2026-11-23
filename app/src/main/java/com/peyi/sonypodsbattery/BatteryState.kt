@@ -60,6 +60,12 @@ object BatteryStore {
         BatteryHistory.record(context, state)
     }
 
+    /** The case reports its level only when the earbuds come out of it, so note when that was. */
+    fun markCaseFresh(context: Context, at: Long = System.currentTimeMillis()) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong("case_at", at).apply()
+
+    fun caseAt(context: Context): Long = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong("case_at", 0L)
+
     fun clearBatteryValues(context: Context, status: String = "Earbuds disconnected") {
         save(
             context,

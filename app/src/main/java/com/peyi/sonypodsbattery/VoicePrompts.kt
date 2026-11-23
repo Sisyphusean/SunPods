@@ -8,8 +8,8 @@ import java.util.Calendar
  * MDR v2 table 2, sent as frame type 0x0e. The WF-1000XM5 lists function 0x42
  * (voice guidance with language switch and volume adjustment).
  *
- *   GET_PARAM 0x46 [0x01]            -> RET 0x47 [0x01, on/off]          on = 0, off = 1
- *   SET_PARAM 0x48 [0x01, on/off]
+ *   GET_PARAM 0x46 [0x01]            -> RET 0x47 [0x01, on/off, language] on = 0, off = 1
+ *   SET_PARAM 0x48 [0x01, on/off, language] (the language must be sent back, or it's ignored)
  *   GET_PARAM 0x46 [0x20]            -> RET 0x47 [0x20, volume, x]       volume -2..+2 (signed)
  *   SET_PARAM 0x48 [0x20, volume, x] (x is echoed back as the earbuds reported it)
  */
@@ -23,14 +23,27 @@ internal object VoicePrompts {
     data class State(val on: Boolean?, val volume: Int?, val tail: Int?)
 
     fun read(s: SonyBatteryClient.SonySession): State {
-        val onOff = s.request(byteArrayOf(GET.toByte(), SETTING.toByte()), 800, T2)
-            ?.takeIf { it.size >= 3 }?.let { it[2].toInt() == 0 }
-        val vol = s.request(byteArrayOf(GET.toByte(), VOLUME.toByte()), 800, T2)?.takeIf { it.size >= 3 }
+        // Right after a change the earbuds can take over a second to answer, so wait longer and
+        // ask once more before giving up.
+        val raw = s.request(byteArrayOf(GET.toByte(), SETTING.toByte()), 2_000, T2)
+            ?: s.request(byteArrayOf(GET.toByte(), SETTING.toByte()), 2_000, T2)
+        val onOff = raw?.takeIf { it.size >= 3 }?.let { it[2].toInt() == 0 }
+        val vol = s.request(byteArrayOf(GET.toByte(), VOLUME.toByte()), 2_000, T2)?.takeIf { it.size >= 3 }
         return State(onOff, vol?.get(2)?.toInt()?.coerceIn(-2, 2), vol?.getOrNull(3)?.toInt()?.and(0xff))
     }
 
-    fun setOn(s: SonyBatteryClient.SonySession, on: Boolean): Boolean =
-        s.command(byteArrayOf(SET.toByte(), SETTING.toByte(), if (on) 0x00 else 0x01), type = T2)
+    /**
+     * On earbuds that can switch the prompt language (the WF-1000XM5), the switch carries the
+     * language too: SET 0x48 [0x01, on/off, language]. Without it the earbuds ignore the change,
+     * so read the current language first and send it back unchanged.
+     */
+    fun setOn(s: SonyBatteryClient.SonySession, on: Boolean): Boolean {
+        val language = s.request(byteArrayOf(GET.toByte(), SETTING.toByte()), 800, T2)?.getOrNull(3)
+        val v: Byte = if (on) 0x00 else 0x01
+        val payload = if (language != null) byteArrayOf(SET.toByte(), SETTING.toByte(), v, language)
+        else byteArrayOf(SET.toByte(), SETTING.toByte(), v)
+        return s.command(payload, type = T2)
+    }
 
     fun setVolume(s: SonyBatteryClient.SonySession, volume: Int, tail: Int?): Boolean {
         val x = tail ?: read(s).tail ?: 0x00
