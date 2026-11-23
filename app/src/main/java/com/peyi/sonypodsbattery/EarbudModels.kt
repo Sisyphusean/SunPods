@@ -32,6 +32,24 @@ enum class EarbudModel(
     /** How to get them to connect: "Open the case near your phone" or "Turn them on near your phone". */
     val wakeHint: String get() = if (headphones) "Turn them on near your phone" else "Open the case near your phone"
 
+    /** The numbered steps for putting them in pairing mode. */
+    val pairSteps: List<String> get() = if (headphones) listOf(
+        "Turn the headphones off.",
+        "Press and hold the power button for about 5 seconds, until the light flashes blue."
+    ) else listOf(
+        "Put both earbuds in the case and keep the lid open.",
+        "Hold the button on the back for 5 seconds, until the light flashes blue."
+    )
+    /** What the pairing clip shows, for screen readers. */
+    val pairClipDescription: String get() = if (headphones) "The power button is held down, then the light flashes blue."
+        else "The case turns round, the button on the back is held down, then the light on the front flashes blue."
+    /** What to check when searching or pairing doesn't work. */
+    val lightHint: String get() = if (headphones) "the light is flashing blue" else "the case light is flashing blue"
+
+    /** Only this model, for Android's device picker. */
+    val namePattern: java.util.regex.Pattern get() =
+        java.util.regex.Pattern.compile(".*(" + pattern.pattern + ").*", java.util.regex.Pattern.CASE_INSENSITIVE)
+
     /** The batteries these report, in the order they're shown: left, right and case, or one for headphones. */
     val batteries: List<BatteryPart> get() = if (headphones) HEADPHONE_BATTERIES else EARBUD_BATTERIES
     /** The batteries you listen on (no case). */
@@ -63,8 +81,32 @@ enum class EarbudModel(
         }
 
         fun current(context: Context): EarbudModel {
-            fromName(SettingsStore.modelName(context))?.let { active = it }
+            val reported = fromName(SettingsStore.modelName(context))
+            if (reported != null) active = reported else chosen(context)?.let { active = it }
             return active
+        }
+
+        private const val PREFS = "sunpods_ui"
+        private const val CHOSEN = "chosen_model"
+
+        /** The model picked in setup, if any. */
+        fun chosen(context: Context): EarbudModel? =
+            fromId(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(CHOSEN, null))
+
+        /** Remember the pick from setup; until a device reports its own model, everything follows it. */
+        fun choose(context: Context, model: EarbudModel) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(CHOSEN, model.id).apply()
+            active = model
+        }
+
+        /** The outcome of weighing what someone picked against what a connected device says it is. */
+        data class Resolution(val model: EarbudModel, val switchedFrom: EarbudModel?)
+
+        /** The device knows best: a different detected model wins, and says what it replaced. */
+        fun resolve(chosen: EarbudModel?, detected: EarbudModel?): Resolution = when {
+            detected == null -> Resolution(chosen ?: WF_1000XM5, null)
+            chosen == null || chosen == detected -> Resolution(detected, null)
+            else -> Resolution(detected, chosen)
         }
 
         /** Names to look for when scanning for or picking earbuds to set up. */
