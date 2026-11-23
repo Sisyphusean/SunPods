@@ -438,7 +438,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 }
                 Switch.PairLe -> {
                     RenderClip(
-                        R.raw.anim_pair,
+                        budArt(settings.colorCode).pairClip,
                         "The case turns round, the button on the back is held down, then the light on the front flashes blue.",
                         Modifier.fillMaxWidth().height(200.dp)
                     )
@@ -473,7 +473,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 }
                 Switch.PairClassic -> {
                     RenderClip(
-                        R.raw.anim_pair,
+                        budArt(settings.colorCode).pairClip,
                         "The case turns round, the button on the back is held down, then the light on the front flashes blue.",
                         Modifier.fillMaxWidth().height(200.dp)
                     )

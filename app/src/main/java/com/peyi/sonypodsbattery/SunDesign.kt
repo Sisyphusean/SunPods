@@ -137,13 +137,17 @@ internal fun rememberBuzz(): (Buzz) -> Unit {
 }
 
 /** The earbud and case pictures in the colour of the user's own earbuds (Sony's colour codes). */
-internal data class BudArt(val left: Int, val right: Int, val case: Int, val pair: Int, val hero3d: String)
+internal data class BudArt(
+    val left: Int, val right: Int, val case: Int, val pair: Int, val hero3d: String,
+    /** Setup clips: the case button held until the light flashes blue, and the case opening. */
+    val pairClip: Int, val openClip: Int
+)
 
 /** Sony's colour codes: 0x01 Black, 0x03 Platinum Silver, 0x06 Smoky Pink. Anything else shows black. */
 internal fun budArt(colorCode: Int?): BudArt = when (colorCode) {
-    0x03 -> BudArt(R.drawable.bud_left_silver, R.drawable.bud_right_silver, R.drawable.bud_case_silver, R.drawable.buds_pair_silver, "silver")
-    0x06 -> BudArt(R.drawable.bud_left_pink, R.drawable.bud_right_pink, R.drawable.bud_case_pink, R.drawable.buds_pair_pink, "pink")
-    else -> BudArt(R.drawable.bud_left, R.drawable.bud_right, R.drawable.bud_case, R.drawable.buds_pair, "black")
+    0x03 -> BudArt(R.drawable.bud_left_silver, R.drawable.bud_right_silver, R.drawable.bud_case_silver, R.drawable.buds_pair_silver, "silver", R.raw.anim_pair_silver, R.raw.anim_open_silver)
+    0x06 -> BudArt(R.drawable.bud_left_pink, R.drawable.bud_right_pink, R.drawable.bud_case_pink, R.drawable.buds_pair_pink, "pink", R.raw.anim_pair_pink, R.raw.anim_open_pink)
+    else -> BudArt(R.drawable.bud_left, R.drawable.bud_right, R.drawable.bud_case, R.drawable.buds_pair, "black", R.raw.anim_pair, R.raw.anim_open)
 }
 
 /** The current earbuds' pictures; provided by the app shell from the colour the earbuds report. */

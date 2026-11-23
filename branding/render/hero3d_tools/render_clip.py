@@ -8,6 +8,17 @@ color, clip, out_dir = args[0], args[1], os.path.abspath(args[2])
 rng = (int(args[3]), int(args[4])) if len(args) > 4 else None
 exec(open(os.path.join(HERE, "finish_blender.py"), encoding="utf-8").read())
 apply(color)
+if os.environ.get("HERO3D_HIDE_INTERNALS") == "1":
+    # The approved case has no tray (its exact boolean evaluates empty), so once the earbuds lift
+    # out the USB-C cavity and button well show inside the case. On black they vanish into the
+    # black interior; on a light finish they read as black blocks, so here they take the interior
+    # colour (object-level slots, the meshes are untouched). The front light keeps its dark core.
+    inner = bpy.data.materials["MAT_Case_Inner"].copy(); inner.name = "MAT_Case_Inner_Port"
+    for nm in ("SM_Case_USB", "SM_Case_USBTongue", "SM_Case_ButtonWell"):
+        o = bpy.data.objects[nm]
+        for slot in o.material_slots:
+            slot.link = "OBJECT"; slot.material = inner
+    print("INTERNALS recoloured")
 src_path = os.path.join(HERE, "..", "anim", "anim_render.py")
 src = open(src_path, encoding="utf-8").read()
 key = 'OUT = os.path.join(ANIM, CLIP + ("_preview" if PREVIEW else ""))'

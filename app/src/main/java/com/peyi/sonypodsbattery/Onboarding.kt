@@ -592,7 +592,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         Buds.NotPaired -> Page(
             progress, art = {
                 RenderClip(
-                    R.raw.anim_pair,
+                    remember { budArt(SettingsStore.load(context).colorCode).pairClip },
                     "The case turns round, the button on the back is held down, then the light on the front flashes blue.",
                     Modifier.fillMaxWidth().height(260.dp)
                 )
@@ -620,7 +620,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         }
         Buds.Waiting -> Page(
             progress, art = {
-                RenderClip(R.raw.anim_open, "The case opens and both earbuds lift out.", Modifier.fillMaxWidth().height(260.dp))
+                RenderClip(remember { budArt(SettingsStore.load(context).colorCode).openClip }, "The case opens and both earbuds lift out.", Modifier.fillMaxWidth().height(260.dp))
             },
             title = "Open the Case Near Your Phone",
             body = "Your earbuds are paired. Open the lid or take them out, and they'll connect.",
