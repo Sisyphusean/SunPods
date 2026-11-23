@@ -923,7 +923,8 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
                 mode = battery.listeningMode,
                 ambientLevel = battery.ambientLevel,
                 connected = connected,
-                model = settings.modelName ?: "WF-1000XM5"
+                model = settings.modelName ?: "WF-1000XM5",
+                color = hero3dColorFor(settings.colorCode ?: 0x01)
             ) {
                 val next = when (battery.listeningMode) {
                     ListeningMode.NOISE_CANCELLING -> ListeningMode.AMBIENT
@@ -966,9 +967,9 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
 }
 
 /**
- * A new SunPods is out. After Apple's Software Update: the app's mark, the version and its size,
- * one line on what's new, and one button that downloads, checks and installs, filling with
- * progress as it goes. "What's New" reads the full notes; the cross hides it until the next one.
+ * A new SunPods is out. Plain One UI card in the app's own Material You language: the icon tile,
+ * version and size, one line on what's new, then Later and Update on the right. While it works,
+ * the buttons give way to a progress bar.
  */
 @Composable
 private fun UpdateCard(release: Updates.Release, vm: SunpodsViewModel) {
@@ -986,105 +987,78 @@ private fun UpdateCard(release: Updates.Release, vm: SunpodsViewModel) {
     }
     var reading by remember { mutableStateOf(false) }
     val notes = release.notes ?: WhatsNew.notes(context, release.version)
-    val headline = Updates.headline(notes) ?: "Improvements and fixes for your earbuds."
+    val headline = Updates.headline(notes) ?: "Improvements and fixes."
     val size = release.size?.let { android.text.format.Formatter.formatShortFileSize(context, it) }
-    val ink = colors.onPrimaryContainer
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(
-                androidx.compose.ui.graphics.Brush.linearGradient(
-                    listOf(colors.primaryContainer, colors.tertiaryContainer.copy(alpha = 0.85f))
-                )
-            )
-    ) {
-        Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 18.dp, bottom = 18.dp)) {
+    val busy = state is SelfUpdate.State.Downloading || state == SelfUpdate.State.Installing
+    SunCard {
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(52.dp).clip(RoundedCornerShape(15.dp)).background(colors.primary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(painterResource(R.drawable.ic_sunpods_mark), contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(30.dp))
-                }
+                IconTile(Icons.Rounded.SystemUpdate)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
+                    Text("SunPods ${release.version}", style = MaterialTheme.typography.titleMedium, maxLines = 1)
                     Text(
-                        "UPDATE AVAILABLE",
-                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = androidx.compose.ui.unit.TextUnit(1.2f, androidx.compose.ui.unit.TextUnitType.Sp)),
-                        color = ink.copy(alpha = 0.7f)
+                        listOfNotNull("Update available", size).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant
                     )
-                    Text("SunPods ${release.version}", style = MaterialTheme.typography.titleLarge, color = ink, maxLines = 1)
-                    Text(listOfNotNull(size, "Free, from GitHub").joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = ink.copy(alpha = 0.7f))
-                }
-                IconButton(onClick = { vm.dismissUpdate() }) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Remind me with the next version", tint = ink.copy(alpha = 0.6f))
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            Text(headline, style = MaterialTheme.typography.bodyMedium, color = ink, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(end = 8.dp))
-            androidx.compose.animation.AnimatedVisibility(state is SelfUpdate.State.Failed || state == SelfUpdate.State.NeedsPermission, enter = revealIn(), exit = revealOut()) {
+            Spacer(Modifier.height(10.dp))
+            Text(headline, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (notes != null) {
                 Text(
-                    when (val st = state) {
-                        is SelfUpdate.State.Failed -> st.message
-                        else -> "Allow SunPods to install updates in the next screen, then come back."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (state is SelfUpdate.State.Failed) colors.error else ink.copy(alpha = 0.75f),
-                    modifier = Modifier.padding(top = 6.dp, end = 8.dp)
+                    "What's new",
+                    style = MaterialTheme.typography.bodyMedium, color = colors.primary,
+                    modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(6.dp)).clickable { reading = true }.padding(vertical = 4.dp)
                 )
             }
-            Spacer(Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 8.dp)) {
-                UpdateButton(state, Modifier.weight(1f)) { vm.installUpdate() }
-                if (notes != null) {
-                    Spacer(Modifier.width(4.dp))
-                    TextButton(onClick = { reading = true }) { Text("What's New", color = ink) }
+            val problem = when (val st = state) {
+                is SelfUpdate.State.Failed -> st.message
+                SelfUpdate.State.NeedsPermission -> "Allow SunPods to install updates, then come back."
+                else -> null
+            }
+            if (problem != null) Text(
+                problem, style = MaterialTheme.typography.bodySmall,
+                color = if (state is SelfUpdate.State.Failed) colors.error else colors.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            Spacer(Modifier.height(6.dp))
+            androidx.compose.animation.AnimatedContent(busy, transitionSpec = { fadeThrough() }, label = "updateActions") { working ->
+                if (working) {
+                    val fraction = (state as? SelfUpdate.State.Downloading)?.fraction
+                    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+                        if (fraction != null) {
+                            val shown by animateFloatAsState(fraction, tween(300), label = "update")
+                            LinearProgressIndicator(
+                                progress = { shown },
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                                trackColor = colors.surfaceContainerHighest
+                            )
+                        } else {
+                            LinearProgressIndicator(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape), trackColor = colors.surfaceContainerHighest)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            when (val st = state) {
+                                is SelfUpdate.State.Downloading -> st.fraction?.let { "Downloading · ${(it * 100).roundToInt()}%" } ?: "Downloading"
+                                else -> "Installing"
+                            },
+                            style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { vm.dismissUpdate() }) { Text("Later") }
+                        Spacer(Modifier.width(4.dp))
+                        Button(onClick = { vm.installUpdate() }) {
+                            Text(if (state is SelfUpdate.State.Failed) "Try Again" else "Update")
+                        }
+                    }
                 }
             }
         }
     }
-    if (reading && notes != null) WhatsNewSheet(release.version, notes, action = "Update Now", onAction = { vm.installUpdate() }) { reading = false }
-}
-
-/** One pill that is the whole update: tap it, watch it fill, then Android takes over. */
-@Composable
-private fun UpdateButton(state: SelfUpdate.State, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val colors = MaterialTheme.colorScheme
-    val busy = state is SelfUpdate.State.Downloading || state == SelfUpdate.State.Installing
-    val target = when (state) {
-        is SelfUpdate.State.Downloading -> state.fraction ?: 0.05f
-        SelfUpdate.State.Installing -> 1f
-        else -> 0f
-    }
-    val fill by animateFloatAsState(target, tween(300, easing = Motion.Arrive), label = "fill")
-    val label = when (state) {
-        SelfUpdate.State.Idle -> "Update Now"
-        is SelfUpdate.State.Downloading -> state.fraction?.let { "Downloading ${(it * 100).roundToInt()}%" } ?: "Downloading…"
-        SelfUpdate.State.Installing -> "Installing…"
-        SelfUpdate.State.NeedsPermission -> "Allow and Update"
-        is SelfUpdate.State.Failed -> "Try Again"
-    }
-    Box(
-        modifier
-            .height(48.dp)
-            .clip(CircleShape)
-            .background(if (busy) colors.primary.copy(alpha = 0.35f) else colors.primary)
-            .then(if (busy) Modifier else Modifier.clickable(onClick = onClick))
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center
-    ) {
-        if (busy) Box(Modifier.fillMaxSize().drawBehind { drawRect(colors.primary, size = Size(size.width * fill, size.height)) })
-        androidx.compose.animation.AnimatedContent(
-            label,
-            transitionSpec = {
-                (fadeIn(tween(180, delayMillis = 60)) + androidx.compose.animation.slideInVertically(tween(240, easing = Motion.Arrive)) { it / 2 })
-                    .togetherWith(fadeOut(tween(100)) + androidx.compose.animation.slideOutVertically(tween(160)) { -it / 2 })
-            },
-            contentKey = { it.substringBefore(' ') },
-            label = "updateLabel"
-        ) { text -> Text(text, style = MaterialTheme.typography.labelLarge, color = colors.onPrimary) }
-    }
+    if (reading && notes != null) WhatsNewSheet(release.version, notes, action = "Update", onAction = { vm.installUpdate() }) { reading = false }
 }
 
 /** What's playing, with playback controls through the earbuds and the media volume. */

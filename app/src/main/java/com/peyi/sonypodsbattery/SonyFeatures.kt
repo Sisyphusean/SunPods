@@ -216,6 +216,8 @@ data class DeviceSettings(
     /** null until the slots have been probed once; empty means the earbuds offer none. */
     val general: List<GeneralSetting>? = null,
     val promptsOn: Boolean? = null,
+    /** Sony's colour code: 0x01 Black, 0x03 Platinum Silver, 0x06 Smoky Pink. */
+    val colorCode: Int? = null,
     /** The earbuds can switch between Classic and LE Audio. */
     val leModeSupported: Boolean? = null,
     /** The earbuds' own LE Audio setting is on. */
@@ -275,6 +277,7 @@ internal object SonyFeatures {
         var r = previous
         r = r.copy(modelName = readString(s, INFO_MODEL) ?: r.modelName)
         r = r.copy(firmware = readString(s, INFO_FIRMWARE) ?: r.firmware)
+        if (r.colorCode == null) r = r.copy(colorCode = readColor(s))
         r = readCodec(s, r)
         r = readEq(s, r)
         r = readDsee(s, r)
@@ -406,6 +409,11 @@ internal object SonyFeatures {
     }
 
     // ---- readers ----
+
+    private fun readColor(s: SonyBatteryClient.SonySession): Int? {
+        val p = s.request(bytes(CONNECT_GET_DEVICE_INFO, 0x03)) ?: return null
+        return if (p.size >= 4) u(p[3]) else null
+    }
 
     private fun readString(s: SonyBatteryClient.SonySession, type: Int): String? {
         val p = s.request(bytes(CONNECT_GET_DEVICE_INFO, type)) ?: return null
@@ -687,7 +695,7 @@ object SettingsStore {
                         GeneralSetting(g.getInt("slot"), g.getString("key"), if (g.has("on")) g.getBoolean("on") else null)
                     }
                 } else null,
-                promptsOn = bool("vg"), promptVolume = int("vgVol"), promptTail = int("vgTail"),
+                promptsOn = bool("vg"), promptVolume = int("vgVol"), promptTail = int("vgTail"), colorCode = int("color"),
                 leModeSupported = bool("leSup"), leOn = bool("leOn"),
                 readAt = if (o.has("at")) o.getLong("at") else 0L
             )
@@ -728,6 +736,7 @@ object SettingsStore {
             })
         }
         s.promptsOn?.let { o.put("vg", it) }
+        s.colorCode?.let { o.put("color", it) }
         s.leModeSupported?.let { o.put("leSup", it) }
         s.leOn?.let { o.put("leOn", it) }
         s.promptVolume?.let { o.put("vgVol", it) }

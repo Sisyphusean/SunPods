@@ -1,0 +1,14 @@
+[
+ {"name": "buds_black_front",  "color": "black",  "model": "buds", "angle": 0,   "w": 1400, "h": 997},
+ {"name": "buds_black_34",     "color": "black",  "model": "buds", "angle": 45,  "w": 1400, "h": 997},
+ {"name": "buds_silver_front", "color": "silver", "model": "buds", "angle": 0,   "w": 1400, "h": 997},
+ {"name": "buds_silver_34",    "color": "silver", "model": "buds", "angle": 45,  "w": 1400, "h": 997},
+ {"name": "buds_pink_front",   "color": "pink",   "model": "buds", "angle": 0,   "w": 1400, "h": 997},
+ {"name": "buds_pink_34",      "color": "pink",   "model": "buds", "angle": 45,  "w": 1400, "h": 997},
+ {"name": "case_black_closed",  "color": "black",  "model": "case", "angle": 0,   "lid": 0, "w": 1400, "h": 997},
+ {"name": "case_black_open",    "color": "black",  "model": "case", "angle": -20, "lid": 1, "w": 1400, "h": 997},
+ {"name": "case_silver_closed", "color": "silver", "model": "case", "angle": 0,   "lid": 0, "w": 1400, "h": 997},
+ {"name": "case_silver_open",   "color": "silver", "model": "case", "angle": -20, "lid": 1, "w": 1400, "h": 997},
+ {"name": "case_pink_closed",   "color": "pink",   "model": "case", "angle": 0,   "lid": 0, "w": 1400, "h": 997},
+ {"name": "case_pink_open",     "color": "pink",   "model": "case", "angle": -20, "lid": 1, "w": 1400, "h": 997}
+]

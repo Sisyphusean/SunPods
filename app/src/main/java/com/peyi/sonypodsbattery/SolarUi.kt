@@ -68,6 +68,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -199,6 +200,7 @@ internal fun SolarHero(
     ambientLevel: Int,
     connected: Boolean,
     model: String,
+    color: String = "black",
     onCycle: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
@@ -329,6 +331,7 @@ internal fun SolarHero(
                     }
                 }
                 .pointerInput(Unit) {
+                    if (true) return@pointerInput // the live 3D view spins itself
                     val tracker = VelocityTracker()
                     detectHorizontalDragGestures(
                         onDragStart = {
@@ -349,13 +352,9 @@ internal fun SolarHero(
                         onDragCancel = { if (!showCase) settleHome(0f) }
                     )
                 }
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    enabled = connected,
-                    onClickLabel = "Change Noise Control",
-                    onClick = onCycle
-                )
+                .semantics {
+                    if (connected) onClick(label = "Change Noise Control") { onCycle(); true }
+                }
                 .semantics {
                     contentDescription = "$model. $title"
                     customActions = listOf(CustomAccessibilityAction("Spin earbuds") {
@@ -381,20 +380,20 @@ internal fun SolarHero(
                     scaleY = bump.value
                     alpha = heroAlpha
                 }
-            if (showCase) RenderClipOnce(
-                if (phase == HeroPhase.CLOSING) R.raw.anim_hero_close else R.raw.anim_hero,
-                play = phase == HeroPhase.OPENING || phase == HeroPhase.CLOSING,
-                onEnd = {
-                    phase = when (phase) {
-                        HeroPhase.OPENING -> HeroPhase.BUDS
-                        HeroPhase.CLOSING -> HeroPhase.CASE
-                        else -> phase
-                    }
-                },
-                modifier = heroLayer
-            ) else Image(
-                bitmap = shown ?: frames.loadNow(0) ?: ImageBitmap(1, 1),
-                contentDescription = null,
+            val lid = remember { Animatable(if (phase == HeroPhase.CASE) 0f else 1f) }
+            LaunchedEffect(phase) {
+                when (phase) {
+                    HeroPhase.OPENING -> { lid.animateTo(1f, tween(900, easing = FastOutSlowInEasing)); delay(150); phase = HeroPhase.BUDS }
+                    HeroPhase.CLOSING -> { lid.snapTo(1f); lid.animateTo(0f, tween(800, easing = FastOutSlowInEasing)); phase = HeroPhase.CASE }
+                    HeroPhase.CASE -> lid.snapTo(0f)
+                    HeroPhase.BUDS -> lid.snapTo(1f)
+                }
+            }
+            Hero3D(
+                color = color,
+                model = if (showCase) "case" else "buds",
+                lid = lid.value,
+                onTap = if (connected && !showCase) onCycle else null,
                 modifier = heroLayer
             )
         }

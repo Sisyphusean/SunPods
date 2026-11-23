@@ -19,8 +19,12 @@ object A2dpConnectionHelper {
 
     @SuppressLint("MissingPermission")
     suspend fun isConnected(context: Context, device: BluetoothDevice): Boolean? {
-        // In LE Audio mode the earbuds aren't on A2DP at all.
-        if (LeAudio.anyConnected(context) && LeAudio.connectedEarbuds(context).isNotEmpty()) return true
+        // In LE Audio mode the earbuds aren't on A2DP at all. Look them up off the main thread:
+        // binding the LE Audio profile waits for a callback that's delivered on the main thread.
+        if (LeAudio.anyConnected(context)) {
+            val le = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { LeAudio.connectedEarbuds(context) }
+            if (le.isNotEmpty()) return true
+        }
         val service = proxy ?: bind(context) ?: return null
         return try {
             service.connectedDevices.any { it.address == device.address }
