@@ -396,6 +396,7 @@ class SonyBatteryClient(private val context: Context) {
     companion object {
         private val MODEL = Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE)
         @Volatile private var lastPick: String? = null
+        @Volatile private var lastPickAt = 0L
 
         fun isTargetModel(name: String): Boolean = MODEL.containsMatchIn(name)
     }
@@ -431,8 +432,16 @@ class SonyBatteryClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun findEarbuds(): BluetoothDevice? {
         val adapter = BluetoothAdapter.getDefaultAdapter() ?: return null
+        lastPick?.let { addr ->
+            if (System.currentTimeMillis() - lastPickAt < 30_000) {
+                runCatching { adapter.getRemoteDevice(addr) }.getOrNull()?.takeIf { it.bondState == BluetoothDevice.BOND_BONDED }?.let { return it }
+            }
+        }
         val bonded = adapter.bondedDevices.filter { device -> MODEL.containsMatchIn(device.name.orEmpty()) }
-        if (bonded.size <= 1) return bonded.firstOrNull()
+        if (bonded.size <= 1) return bonded.firstOrNull().also { lastPick = it?.address; lastPickAt = System.currentTimeMillis() }
+        EarbudAddresses.classic(context)?.let { saved ->
+            bonded.firstOrNull { it.address.equals(saved, true) }?.let { lastPick = it.address; lastPickAt = System.currentTimeMillis(); return it }
+        }
         // Phones that also paired the LE Audio side list the earbuds more than once. Taking the
         // first entry could pick an LE-only one, which never shows on A2DP and has no Classic
         // control channel, so every refresh was skipped. Prefer the one playing audio now, then
@@ -446,6 +455,7 @@ class SonyBatteryClient(private val context: Context) {
             "Earbuds: ${bonded.size} paired entries, using ${if (pick.address in live) "the one playing" else if (EarbudAddresses.isRandom(pick.address)) "an LE entry" else "the Classic entry"} (…${pick.address.takeLast(5)})"
         )
         lastPick = pick.address
+        lastPickAt = System.currentTimeMillis()
         return pick
     }
 

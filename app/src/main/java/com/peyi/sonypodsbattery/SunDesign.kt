@@ -3,7 +3,6 @@ package com.peyi.sonypodsbattery
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -11,7 +10,6 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -19,47 +17,10 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.VisibilityThreshold
 
 /*
- * SunPods' visual language, after Apple's Human Interface Guidelines for settings:
- * each row leads with a small rounded tile whose colour says what kind of setting it is, rows
- * carry a title and their value, never a paragraph, and anything secondary lives one tap deeper
- * on its own page.
+ * SunPods' visual language: each row leads with a small tonal icon tile in the theme's colours,
+ * rows carry a title and their value, never a paragraph, and anything secondary lives one tap
+ * deeper on its own page.
  */
-
-/** What a setting is about; each kind has its own tile colour, the same everywhere in the app. */
-internal enum class Kind(val light: Long, val dark: Long) {
-    SOUND(0xFFFF2D55, 0xFFFF375F),      // pink: what you hear
-    NOISE(0xFF5856D6, 0xFF5E5CE6),      // indigo: noise control and modes
-    CONNECTION(0xFF007AFF, 0xFF0A84FF), // blue: Bluetooth, devices
-    CALLS(0xFF34C759, 0xFF30D158),      // green: calls and the mic
-    VOICE(0xFFAF52DE, 0xFFBF5AF2),      // purple: voice, prompts, quiet hours
-    SAFETY(0xFFFF3B30, 0xFFFF453A),     // red: hearing and safety
-    AUTO(0xFFFF9500, 0xFFFF9F0A),       // orange: automations
-    PLACE(0xFF32ADE6, 0xFF64D2FF),      // teal: location and sensors
-    POWER(0xFF30B0C7, 0xFF40C8E0),      // cyan: power and battery
-    STYLE(0xFFFFCC00, 0xFFFFD60A),      // yellow: appearance
-    SYSTEM(0xFF8E8E93, 0xFF98989D);     // grey: data, updates, help
-
-    @Composable
-    fun color(): Color = Color(if (MaterialTheme.colorScheme.isLight) light else dark)
-}
-
-/** The kind of setting an icon stands for, so every existing row gets its colour without changes. */
-internal fun kindOf(icon: ImageVector): Kind {
-    val n = icon.name.substringAfterLast('.')
-    return when (n) {
-        "AutoAwesome", "GraphicEq", "Equalizer", "Tune", "VolumeUp", "VolumeDown" -> Kind.SOUND
-        "NoiseAware", "NoiseControlOff", "Headphones", "TouchApp" -> Kind.NOISE
-        "Bluetooth", "BluetoothAudio", "BluetoothSearching", "Devices", "SwapHoriz", "Earbuds", "Smartphone", "Laptop", "Tablet", "Tv", "Watch", "PhoneAndroid" -> Kind.CONNECTION
-        "Call", "Mic", "Gesture" -> Kind.CALLS
-        "RecordVoiceOver", "Campaign", "Bedtime", "NightsStay", "WbSunny" -> Kind.VOICE
-        "HealthAndSafety", "Hearing" -> Kind.SAFETY
-        "AutoMode", "DirectionsWalk", "DirectionsRun", "DoNotDisturbOn", "Wifi", "PlayCircle", "Timer" -> Kind.AUTO
-        "LocationOn", "LocationOff", "Sensors", "Directions" -> Kind.PLACE
-        "PowerSettingsNew", "BatteryStd", "BatteryChargingFull", "BatteryAlert", "Bolt" -> Kind.POWER
-        "Palette", "Widgets" -> Kind.STYLE
-        else -> Kind.SYSTEM
-    }
-}
 
 internal val TileSize: Dp = 38.dp
 
@@ -98,7 +59,7 @@ private val IconShape = CookieShape()
  * setting can't be used.
  */
 @Composable
-internal fun IconTile(icon: ImageVector, @Suppress("UNUSED_PARAMETER") kind: Kind = kindOf(icon), enabled: Boolean = true, modifier: Modifier = Modifier) {
+internal fun IconTile(icon: ImageVector, enabled: Boolean = true, modifier: Modifier = Modifier) {
     val scheme = MaterialTheme.colorScheme
     Box(
         contentAlignment = Alignment.Center,
@@ -176,12 +137,13 @@ internal fun rememberBuzz(): (Buzz) -> Unit {
 }
 
 /** The earbud and case pictures in the colour of the user's own earbuds (Sony's colour codes). */
-internal data class BudArt(val left: Int, val right: Int, val case: Int, val pair: Int)
+internal data class BudArt(val left: Int, val right: Int, val case: Int, val pair: Int, val hero3d: String)
 
+/** Sony's colour codes: 0x01 Black, 0x03 Platinum Silver, 0x06 Smoky Pink. Anything else shows black. */
 internal fun budArt(colorCode: Int?): BudArt = when (colorCode) {
-    0x03 -> BudArt(R.drawable.bud_left_silver, R.drawable.bud_right_silver, R.drawable.bud_case_silver, R.drawable.buds_pair_silver)
-    0x06 -> BudArt(R.drawable.bud_left_pink, R.drawable.bud_right_pink, R.drawable.bud_case_pink, R.drawable.buds_pair_pink)
-    else -> BudArt(R.drawable.bud_left, R.drawable.bud_right, R.drawable.bud_case, R.drawable.buds_pair)
+    0x03 -> BudArt(R.drawable.bud_left_silver, R.drawable.bud_right_silver, R.drawable.bud_case_silver, R.drawable.buds_pair_silver, "silver")
+    0x06 -> BudArt(R.drawable.bud_left_pink, R.drawable.bud_right_pink, R.drawable.bud_case_pink, R.drawable.buds_pair_pink, "pink")
+    else -> BudArt(R.drawable.bud_left, R.drawable.bud_right, R.drawable.bud_case, R.drawable.buds_pair, "black")
 }
 
 /** The current earbuds' pictures; provided by the app shell from the colour the earbuds report. */

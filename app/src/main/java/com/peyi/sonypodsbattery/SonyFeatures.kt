@@ -298,8 +298,8 @@ internal object SonyFeatures {
         return r.copy(readAt = System.currentTimeMillis())
     }
 
-    private fun readPrompts(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
-        val v = VoicePrompts.read(s)
+    private fun readPrompts(s: SonyBatteryClient.SonySession, r: DeviceSettings, patient: Boolean = false): DeviceSettings {
+        val v = VoicePrompts.read(s, patient)
         return r.copy(promptsOn = v.on ?: r.promptsOn, promptVolume = v.volume ?: r.promptVolume, promptTail = v.tail ?: r.promptTail)
     }
 
@@ -370,12 +370,12 @@ internal object SonyFeatures {
     fun setPrompts(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
         val sent = VoicePrompts.setOn(s, on)
         // If the read-back doesn't come, the earbuds acknowledged the change: show what was set.
-        return readPrompts(s, if (sent) r.copy(promptsOn = on) else r)
+        return readPrompts(s, if (sent) r.copy(promptsOn = on) else r, patient = true)
     }
 
     fun setPromptVolume(s: SonyBatteryClient.SonySession, r: DeviceSettings, volume: Int): DeviceSettings {
         val ok = VoicePrompts.setVolume(s, volume, r.promptTail)
-        return readPrompts(s, if (ok) r.copy(promptVolume = volume) else r)
+        return readPrompts(s, if (ok) r.copy(promptVolume = volume) else r, patient = true)
     }
 
     /**
@@ -413,7 +413,7 @@ internal object SonyFeatures {
     // ---- readers ----
 
     private fun readColor(s: SonyBatteryClient.SonySession): Int? {
-        val p = s.request(bytes(CONNECT_GET_DEVICE_INFO, 0x03)) ?: return null
+        val p = s.request(bytes(CONNECT_GET_DEVICE_INFO, 0x03), timeoutMs = 700) ?: return null
         return if (p.size >= 4) u(p[3]) else null
     }
 
@@ -525,25 +525,25 @@ internal object SonyFeatures {
     }
 
     // Head gestures for calls: [f7, 0f, 0 on / 1 off]
-    private fun readHeadGestures(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
-        val p = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_HEAD_GESTURE), timeoutMs = 2_000) ?: return r
+    private fun readHeadGestures(s: SonyBatteryClient.SonySession, r: DeviceSettings, patient: Boolean = false): DeviceSettings {
+        val p = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_HEAD_GESTURE), timeoutMs = if (patient) 2_000 else 700) ?: return r
         return if (p.size >= 3) r.copy(headGestures = u(p[2]) == 0x00) else r
     }
 
     fun setHeadGestures(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
         val ok = s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_HEAD_GESTURE, if (on) 0x00 else 0x01))
-        return readHeadGestures(s, if (ok) r.copy(headGestures = on) else r)
+        return readHeadGestures(s, if (ok) r.copy(headGestures = on) else r, patient = true)
     }
 
     // Automatic device switching, table 2: GET f6 0a -> [f7, 0a, 0 on / 1 off, 0, 0, address text]
-    private fun readAutoSwitch(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
-        val p = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_T2_AUTO_SWITCH), timeoutMs = 2_000, type = SonyProtocol.DATA_MDR_NO2) ?: return r
+    private fun readAutoSwitch(s: SonyBatteryClient.SonySession, r: DeviceSettings, patient: Boolean = false): DeviceSettings {
+        val p = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_T2_AUTO_SWITCH), timeoutMs = if (patient) 2_000 else 700, type = SonyProtocol.DATA_MDR_NO2) ?: return r
         return if (p.size >= 3) r.copy(autoSwitch = u(p[2]) == 0x00) else r
     }
 
     fun setAutoSwitch(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
         val ok = s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_T2_AUTO_SWITCH, if (on) 0x00 else 0x01, 0x00, 0x00), type = SonyProtocol.DATA_MDR_NO2)
-        return readAutoSwitch(s, if (ok) r.copy(autoSwitch = on) else r)
+        return readAutoSwitch(s, if (ok) r.copy(autoSwitch = on) else r, patient = true)
     }
 
     /** Turns the earbuds off, like holding both sensors: POWER_SET_STATUS [03 power off, 01 by the user]. */

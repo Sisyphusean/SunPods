@@ -3,7 +3,6 @@
 package com.peyi.sonypodsbattery
 
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.animation.core.animateDp
 import android.os.Build
 import android.text.format.DateUtils
 import androidx.compose.material3.Button
@@ -22,7 +21,6 @@ import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.AutoMode
 import androidx.compose.material.icons.rounded.HealthAndSafety
 import androidx.compose.material.icons.rounded.Gesture
-import androidx.compose.material.icons.rounded.PowerOff
 import androidx.compose.material.icons.rounded.VolumeDown
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
@@ -62,15 +60,10 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -116,7 +109,6 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Hearing
 import androidx.compose.material.icons.rounded.Info
@@ -127,15 +119,12 @@ import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.SettingsInputAntenna
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
@@ -143,14 +132,9 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.Shapes
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHost
@@ -160,10 +144,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -174,6 +156,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.BatteryStd
@@ -183,7 +166,6 @@ import androidx.compose.material.icons.rounded.BatteryFull
 import androidx.compose.material.icons.rounded.Equalizer
 import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.foundation.layout.offset
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.heightIn
@@ -194,7 +176,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -206,7 +187,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
@@ -320,7 +300,7 @@ internal val TabBarGap = 12.dp
 @Composable
 private fun SunTabBar(selected: Tab, modifier: Modifier = Modifier, onSelect: (Tab) -> Unit) {
     val colors = MaterialTheme.colorScheme
-    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val buzz = rememberBuzz()
     androidx.compose.material3.Surface(
         modifier = modifier.padding(horizontal = 16.dp).widthIn(max = 520.dp).fillMaxWidth().height(TabBarHeight),
         shape = CircleShape,
@@ -360,7 +340,7 @@ private fun SunTabBar(selected: Tab, modifier: Modifier = Modifier, onSelect: (T
                                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                                 indication = null
                             ) {
-                                if (!on) haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                if (!on) buzz(Buzz.TICK)
                                 onSelect(t)
                             },
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -635,7 +615,7 @@ fun SunpodsApp(
                                 Tab.SOUND -> SoundScreen(settings, vm)
                                 Tab.CONTROLS -> ControlsScreen(settings, vm)
                                 Tab.BATTERY -> BatteryInsightsScreen(battery)
-                                Tab.DEVICE -> DeviceScreen(battery, settings, vm.liveAt.collectAsState().value)
+                                Tab.DEVICE -> DeviceScreen(settings)
                             }
                         }
                     }
@@ -927,7 +907,7 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
                 ambientLevel = battery.ambientLevel,
                 connected = connected,
                 model = settings.modelName ?: "WF-1000XM5",
-                color = hero3dColorFor(settings.colorCode ?: 0x01)
+                color = LocalBudArt.current.hero3d
             ) {
                 val next = when (battery.listeningMode) {
                     ListeningMode.NOISE_CANCELLING -> ListeningMode.AMBIENT
@@ -981,9 +961,10 @@ private fun UpdateCard(release: Updates.Release, vm: SunpodsViewModel) {
     val colors = MaterialTheme.colorScheme
     // Back from Android's "install unknown apps" setting: carry on if it's now allowed.
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-    androidx.compose.runtime.DisposableEffect(lifecycle, state) {
+    val latestState by androidx.compose.runtime.rememberUpdatedState(state)
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
         val o = androidx.lifecycle.LifecycleEventObserver { _, e ->
-            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME && state == SelfUpdate.State.NeedsPermission && SelfUpdate.canInstall(context)) vm.installUpdate()
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME && latestState == SelfUpdate.State.NeedsPermission && SelfUpdate.canInstall(context)) vm.installUpdate()
         }
         lifecycle.addObserver(o)
         onDispose { lifecycle.removeObserver(o) }
@@ -1070,11 +1051,14 @@ private fun NowPlayingCard(vm: SunpodsViewModel) {
     val context = LocalContext.current
     val now by vm.nowPlaying.collectAsState()
     var volume by remember { mutableStateOf(Playback.volume(context)) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            vm.refreshNowPlaying()
-            volume = Playback.volume(context)
-            delay(3_000)
+    val playLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(playLifecycle) {
+        playLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            while (true) {
+                vm.refreshNowPlaying()
+                volume = Playback.volume(context)
+                delay(3_000)
+            }
         }
     }
     Column {
@@ -1158,7 +1142,7 @@ private fun BatteryCard(battery: BatteryState, busy: Boolean, liveAt: Long = 0L)
 }
 
 @Composable
-private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int, modifier: Modifier = Modifier, note: String? = null, onClick: (() -> Unit)? = null, muted: Boolean = false) {
+private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int, modifier: Modifier = Modifier, muted: Boolean = false) {
     val colors = MaterialTheme.colorScheme
     val low = level != null && level <= 20 && !charging
     // The reading is there the moment the screen is: no fill-up to wait through. A new reading
@@ -1189,8 +1173,7 @@ private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int,
     }
     Column(
         modifier
-            .then(if (onClick != null) Modifier.clip(RoundedCornerShape(20.dp)).clickable(onClick = onClick) else Modifier)
-            .semantics(mergeDescendants = true) { contentDescription = description + (note?.let { ", $it" } ?: "") },
+            .semantics(mergeDescendants = true) { contentDescription = description },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
@@ -1231,7 +1214,6 @@ private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int,
             }
             Text(label, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
         }
-        if (note != null) Text(note, style = MaterialTheme.typography.labelSmall, color = colors.outline)
     }
 }
 
@@ -1573,7 +1555,6 @@ private fun ModeButton(icon: ImageVector, label: String, selected: Boolean, modi
 }
 
 /** A time shown on its own, such as a row value: "Just now", "5 minutes ago". */
-private fun relativeValue(time: Long): String = relative(time).replaceFirstChar { it.uppercase() }
 
 private fun relative(time: Long): String =
     if (System.currentTimeMillis() - time < 60_000) "just now"
@@ -1655,9 +1636,14 @@ private fun SafeListeningGroup(vm: SunpodsViewModel) {
 @Composable
 private fun LevelMeter(vm: SunpodsViewModel, sensitive: Boolean) {
     val colors = MaterialTheme.colorScheme
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        vm.startMeter()
-        onDispose { vm.stopMeter() }
+    val meterLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(meterLifecycle) {
+        val o = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_START) vm.startMeter()
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_STOP) vm.stopMeter()
+        }
+        meterLifecycle.addObserver(o)   // replays ON_START if the screen is already visible
+        onDispose { meterLifecycle.removeObserver(o); vm.stopMeter() }
     }
     val level by vm.level.collectAsState()
     val db = (level as? SafeListening.Level.Db)?.db
@@ -2093,11 +2079,7 @@ private fun touchHint(function: TouchFunction): String = when (function) {
 // ======================================================================
 
 @Composable
-private fun DeviceScreen(
-    battery: BatteryState,
-    settings: DeviceSettings,
-    liveAt: Long = 0L
-) {
+private fun DeviceScreen(settings: DeviceSettings) {
     val colors = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Image(
@@ -2340,8 +2322,9 @@ private fun UpdatesGroup(updateVm: SunpodsViewModel? = null) {
                     } else if (!checking) {
                         checking = true
                         scope.launch {
-                            val latest = Updates.check(context, notify = false)?.let { it } ?: Updates.latest()
+                            val latest = Updates.refresh(context)
                             found = latest?.takeIf { Updates.isNewer(it.version, SunpodsInfo.VERSION) }
+                            updateVm?.setAvailableUpdate(found)
                             result = when {
                                 latest == null -> "Couldn't reach GitHub"
                                 found != null -> "${latest.version} is out"

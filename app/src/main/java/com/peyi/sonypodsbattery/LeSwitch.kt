@@ -1,6 +1,5 @@
 package com.peyi.sonypodsbattery
 
-import androidx.compose.animation.animateContentSize
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager

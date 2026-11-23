@@ -14,15 +14,12 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -61,26 +58,13 @@ internal fun Hero3D(
     state.model = model
     state.lid = lid.coerceIn(0f, 1f)
 
-    DisposableEffect(lifecycle) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> state.view?.onResume()
-                Lifecycle.Event.ON_PAUSE -> state.view?.onPause()
-                Lifecycle.Event.ON_DESTROY -> HeroCache.release(lifecycle)
-                else -> Unit
-            }
-        }
-        lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
-    }
-
     // push changes after every recomposition (each is a no-op unless a value changed)
     SideEffect { state.sync() }
 
     // Until the 3D page has drawn, show the picture it left last time (same size, same pose), then
     // fade across. Opening the app shows the earbuds at once instead of them popping in.
     val context = androidx.compose.ui.platform.LocalContext.current
-    val placeholder = remember(color, model) { HeroSnapshots.load(context, color, model) }
+    val placeholder = if (state.drawn) null else remember(color, model) { HeroSnapshots.load(context, color, model) }
     val cover by androidx.compose.animation.core.animateFloatAsState(
         if (state.drawn) 0f else 1f, androidx.compose.animation.core.tween(240), label = "heroCover"
     )
@@ -140,6 +124,14 @@ private object HeroCache {
             state?.view?.destroy()
             owner = lifecycle
             state = Hero3DState()
+            lifecycle.addObserver(LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_RESUME -> state?.view?.onResume()
+                    Lifecycle.Event.ON_PAUSE -> state?.view?.onPause()
+                    Lifecycle.Event.ON_DESTROY -> release(lifecycle)
+                    else -> Unit
+                }
+            })
         }
         return state!!
     }
@@ -153,12 +145,6 @@ private object HeroCache {
     }
 }
 
-/** Sony's colour codes from the earbuds: 0x01 Black, 0x03 Platinum Silver, 0x06 Smoky Pink. */
-internal fun hero3dColorFor(code: Int): String = when (code) {
-    0x03 -> "silver"
-    0x06 -> "pink"
-    else -> "black"
-}
 
 private const val HERO3D_HOST = "appassets.androidplatform.net"
 private const val HERO3D_PAGE = "https://$HERO3D_HOST/assets/hero3d/index.html"
@@ -251,7 +237,7 @@ private fun createHeroWebView(context: Context, state: Hero3DState, onTap: () ->
         }
 
         @JavascriptInterface
-        fun settled() = web.post { web.performHapticFeedback(HapticFeedbackConstants.TEXT_HANDLE_MOVE) }
+        fun settled() = web.post { web.performHapticFeedback(if (android.os.Build.VERSION.SDK_INT >= 34) HapticFeedbackConstants.SEGMENT_TICK else HapticFeedbackConstants.CLOCK_TICK) }
 
         @JavascriptInterface
         fun tap() = web.post { onTap() }

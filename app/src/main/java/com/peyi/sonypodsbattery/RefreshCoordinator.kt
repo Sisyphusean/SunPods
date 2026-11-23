@@ -699,11 +699,7 @@ private object SonyCommandCoordinator {
                 }
                 false -> {
                     // Say which way the earbuds are (or aren't) connected, for reports from other phones.
-                    DiagnosticsStore.add(
-                        app,
-                        "A2DP disconnected; refresh skipped (LE Audio ${if (LeAudio.anyConnected(app)) "connected" else "not connected"}, " +
-                            "Android ${android.os.Build.VERSION.SDK_INT}, phone LE ${LeAudio.support(app)})"
-                    )
+                    DiagnosticsStore.add(app, "A2DP disconnected; refresh skipped (LE Audio ${if (LeAudio.anyConnected(app)) "connected" else "not connected"})")
                     handleA2dpDisconnected(app, target)
                     command.onComplete?.invoke()
                     return persistCheckedState(BatteryStore.load(app))

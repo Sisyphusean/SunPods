@@ -89,7 +89,14 @@ object DiagnosticsStore {
     fun add(context: Context, message: String) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val current = prefs.getString(KEY, "").orEmpty().lineSequence().filter { it.isNotBlank() }.toMutableList()
-        current += "${System.currentTimeMillis()}: $message"
+        val last = current.lastOrNull()?.substringAfter(": ", "")
+        val repeat = Regex("^(.*) \\(x(\\d+)\\)$").matchEntire(last.orEmpty())
+        when {
+            last == message -> current[current.lastIndex] = "${System.currentTimeMillis()}: $message (x2)"
+            repeat != null && repeat.groupValues[1] == message ->
+                current[current.lastIndex] = "${System.currentTimeMillis()}: $message (x${repeat.groupValues[2].toInt() + 1})"
+            else -> current += "${System.currentTimeMillis()}: $message"
+        }
         android.util.Log.i("SunPods", message)
         prefs.edit().putString(KEY, current.takeLast(40).joinToString("\n")).apply()
     }
@@ -98,6 +105,7 @@ object DiagnosticsStore {
         appendLine("SunPods diagnostics")
         appendLine("Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
         appendLine("App ${SunpodsInfo.VERSION}")
+        appendLine("Phone LE Audio: ${LeAudio.support(context)}")
         append(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "No events yet"))
     }
 }

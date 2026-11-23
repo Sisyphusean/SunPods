@@ -272,12 +272,21 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
 
     private var safeJob: kotlinx.coroutines.Job? = null
 
+    /** Runs a write with the saving bar showing, and the reject buzz and [failMessage] if it fails. */
+    private fun applying(failMessage: String, revert: () -> Unit, write: suspend () -> Boolean) = viewModelScope.launch {
+        _applying.value++
+        try {
+            if (!write()) { revert(); _rejected.value++; _message.value = failMessage }
+        } finally {
+            _applying.value--
+        }
+    }
+
     fun setSafeListening(on: Boolean) {
         val before = _safe.value
         _safe.value = before.copy(first = on)
-        safeJob = viewModelScope.launch {
-            val ok = RefreshCoordinator.awaitSession(app, "Safe Listening", bothEarbuds = true) { SafeListening.setOn(app, it, on) }.getOrDefault(false)
-            if (!ok) { _safe.value = before; _message.value = "Couldn't change Safe Listening. Make sure your earbuds are connected and try again." }
+        safeJob = applying("Couldn't change Safe Listening. Make sure your earbuds are connected and try again.", { _safe.value = before }) {
+            RefreshCoordinator.awaitSession(app, "Safe Listening", bothEarbuds = true) { SafeListening.setOn(app, it, on) }.getOrDefault(false)
         }
     }
 
@@ -295,10 +304,13 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
                 // doesn't switch the meter straight back off.
                 safeJob?.join()
                 RefreshCoordinator.awaitSession(app, "Level meter on") { SafeListening.startMeter(it) }
+                var misses = 0
                 while (true) {
-                    RefreshCoordinator.awaitSession(app, "Level") { SafeListening.readLevel(it) }
-                        .onSuccess { if (it != null) _level.value = it }
-                    delay(100)
+                    if (!audioLinkUp(app)) { delay(1_000); continue }
+                    val got = RefreshCoordinator.awaitSession(app, "Level") { SafeListening.readLevel(it) }.getOrNull()
+                    if (got != null) { _level.value = got; misses = 0 } else misses++
+                    // Smooth while it answers; ease off when it doesn't, so a dropped link isn't hammered.
+                    delay(if (misses < 5) 100 else 2_000)
                 }
             } finally {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
@@ -317,9 +329,8 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     fun setVolumeProtection(sensitive: Boolean) {
         val before = _safe.value
         _safe.value = before.copy(second = sensitive)
-        viewModelScope.launch {
-            val ok = RefreshCoordinator.awaitSession(app, "Volume Protection", bothEarbuds = true) { SafeListening.setSensitive(app, it, sensitive) }.getOrDefault(false)
-            if (!ok) { _safe.value = before; _message.value = "Couldn't change Volume Protection. Make sure your earbuds are connected and try again." }
+        applying("Couldn't change Volume Protection. Make sure your earbuds are connected and try again.", { _safe.value = before }) {
+            RefreshCoordinator.awaitSession(app, "Volume Protection", bothEarbuds = true) { SafeListening.setSensitive(app, it, sensitive) }.getOrDefault(false)
         }
     }
 
@@ -332,6 +343,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
 
     /** Reads what's playing, if the link is free; skips quietly otherwise. */
     fun refreshNowPlaying() {
+        if (!audioLinkUp(app) || SonyControlSessionManager.currentState() == SonySessionState.RECONNECT_WAIT) return
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val target = SonyBatteryClient(app).findEarbuds() ?: return@runCatching
@@ -371,12 +383,11 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     fun setAssistant(value: Int) {
         val before = _assistant.value
         _assistant.value = before?.copy(first = value)
-        viewModelScope.launch {
+        applying("Couldn't change your voice assistant. Make sure your earbuds are connected and try again.", { _assistant.value = before }) {
             RefreshCoordinator.awaitSession(app, "Voice Assistant", bothEarbuds = true) { s ->
                 VoiceAssistantSetting.set(s, value)
                 VoiceAssistantSetting.read(s)
-            }.onSuccess { _assistant.value = it ?: before?.copy(first = value) }
-                .onFailure { _assistant.value = before; _message.value = "Couldn't change your voice assistant. Make sure your earbuds are connected and try again." }
+            }.onSuccess { _assistant.value = it ?: before?.copy(first = value) }.isSuccess
         }
     }
 

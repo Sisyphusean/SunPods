@@ -40,33 +40,3 @@ internal fun RenderClip(@RawRes clip: Int, description: String, modifier: Modifi
     )
 }
 
-/**
- * Shows the first frame of a clip, and plays it through once when [play] turns true, holding the
- * last frame and then calling [onEnd]. Used by the Home hero for the case opening on connect.
- */
-@Composable
-internal fun RenderClipOnce(@RawRes clip: Int, play: Boolean, onEnd: () -> Unit, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val drawable = remember(clip) {
-        runCatching { ImageDecoder.decodeDrawable(ImageDecoder.createSource(context.resources, clip)) }.getOrNull()
-    }
-    val end = androidx.compose.runtime.rememberUpdatedState(onEnd)
-    DisposableEffect(drawable, play) {
-        val anim = drawable as? AnimatedImageDrawable
-        if (anim == null) {
-            if (play) end.value()
-            return@DisposableEffect onDispose { }
-        }
-        anim.repeatCount = 0
-        val callback = object : android.graphics.drawable.Animatable2.AnimationCallback() {
-            override fun onAnimationEnd(d: android.graphics.drawable.Drawable?) { end.value() }
-        }
-        if (play) { anim.registerAnimationCallback(callback); anim.start() }
-        onDispose { anim.unregisterAnimationCallback(callback); anim.stop() }
-    }
-    AndroidView(
-        factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.FIT_CENTER; importantForAccessibility = ImageView.IMPORTANT_FOR_ACCESSIBILITY_NO } },
-        update = { it.setImageDrawable(drawable) },
-        modifier = modifier
-    )
-}

@@ -22,13 +22,14 @@ internal object VoicePrompts {
 
     data class State(val on: Boolean?, val volume: Int?, val tail: Int?)
 
-    fun read(s: SonyBatteryClient.SonySession): State {
-        // Right after a change the earbuds can take over a second to answer, so wait longer and
-        // ask once more before giving up.
-        val raw = s.request(byteArrayOf(GET.toByte(), SETTING.toByte()), 2_000, T2)
-            ?: s.request(byteArrayOf(GET.toByte(), SETTING.toByte()), 2_000, T2)
+    fun read(s: SonyBatteryClient.SonySession, patient: Boolean = false): State {
+        // Right after a change the earbuds can take over a second to answer: then wait longer and
+        // ask once more. A routine refresh keeps it short.
+        val wait = if (patient) 2_000L else 800L
+        val raw = s.request(byteArrayOf(GET.toByte(), SETTING.toByte()), wait, T2)
+            ?: if (patient) s.request(byteArrayOf(GET.toByte(), SETTING.toByte()), wait, T2) else null
         val onOff = raw?.takeIf { it.size >= 3 }?.let { it[2].toInt() == 0 }
-        val vol = s.request(byteArrayOf(GET.toByte(), VOLUME.toByte()), 2_000, T2)?.takeIf { it.size >= 3 }
+        val vol = s.request(byteArrayOf(GET.toByte(), VOLUME.toByte()), wait, T2)?.takeIf { it.size >= 3 }
         return State(onOff, vol?.get(2)?.toInt()?.coerceIn(-2, 2), vol?.getOrNull(3)?.toInt()?.and(0xff))
     }
 

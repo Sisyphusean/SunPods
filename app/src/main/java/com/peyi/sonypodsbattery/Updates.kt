@@ -110,7 +110,8 @@ internal object Updates {
      * Asks GitHub. Returns the release when it's newer than this app, else null. With [notify], a
      * newer release is announced once per version.
      */
-    suspend fun check(context: Context, notify: Boolean): Release? {
+    /** Asks GitHub once and remembers the answer; returns the newest release, newer or not. */
+    suspend fun refresh(context: Context): Release? {
         val release = latest() ?: return null
         prefs(context).edit()
             .putLong("checked_at", System.currentTimeMillis())
@@ -120,6 +121,11 @@ internal object Updates {
             .putString("latest_notes", release.notes)
             .putLong("latest_size", release.size ?: 0L)
             .apply()
+        return release
+    }
+
+    suspend fun check(context: Context, notify: Boolean): Release? {
+        val release = refresh(context) ?: return null
         if (!isNewer(release.version, BuildConfig.VERSION_NAME)) return null
         if (notify && prefs(context).getString("notified", null) != release.version) {
             prefs(context).edit().putString("notified", release.version).apply()
