@@ -245,6 +245,7 @@ internal fun Onboarding(vm: SunpodsViewModel, onDone: () -> Unit) {
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    Box(Modifier.fillMaxSize()) {
       Column(Modifier.fillMaxSize().systemBarsPadding()) {
         // One bar for the whole setup, so it fills smoothly from step to step.
         val fraction by androidx.compose.animation.core.animateFloatAsState(
@@ -283,17 +284,26 @@ internal fun Onboarding(vm: SunpodsViewModel, onDone: () -> Unit) {
           ) {
             when (s) {
                 Step.WELCOME -> WelcomeStep(onStart = ::next)
-                Step.DEVICE -> DeviceStep(onNext = ::next)
+                Step.DEVICE -> DeviceStep(vm, onNext = ::next)
                 Step.NEARBY -> NearbyStep(tick, onNext = ::next)
                 Step.EARBUDS -> EarbudsStep(vm, tick, onNext = ::next)
                 Step.LEAUDIO -> LeAudioStep(vm, onNext = ::next)
                 Step.UPDATES -> UpdatesStep(tick, onNext = ::next)
                 Step.EXTRAS -> ExtrasStep(tick, onNext = ::next)
-                Step.DONE -> DoneStep(vm, onDone = onDone)
+                Step.DONE -> DoneStep(vm, onDone = onDone, onAnother = {
+                    SimMode.stopDemo(context); vm.reloadCached(); OnboardingStore.setDone(context, false); step = Step.DEVICE
+                })
             }
           }
         }
       }
+      // Debug builds only: so this is never taken for real pairing.
+      if (BuildConfig.TOOLS) Text(
+          "Demo", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer,
+          modifier = Modifier.align(Alignment.TopEnd).systemBarsPadding().padding(end = 12.dp)
+              .clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer).padding(horizontal = 8.dp, vertical = 1.dp)
+      )
+    }
     }
 }
 
@@ -438,7 +448,7 @@ private fun Feature(icon: ImageVector, title: String, body: String) {
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun DeviceStep(onNext: () -> Unit) {
+private fun DeviceStep(vm: SunpodsViewModel, onNext: () -> Unit) {
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
@@ -527,7 +537,12 @@ private fun DeviceStep(onNext: () -> Unit) {
           }
         }
         Button(
-            onClick = { EarbudModel.choose(context, model); onNext() },
+            onClick = {
+                EarbudModel.choose(context, model)
+                // Debug builds only: the pick also starts the simulated earbuds, right now, so setup can be clicked through for any model.
+                if (BuildConfig.TOOLS) { SimMode.startDemo(context, model); vm.reloadCached() }
+                onNext()
+            },
             modifier = Modifier.fillMaxWidth().height(56.dp)
         ) { Text("Continue") }
         TextButton(onClick = { showAll = true }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("See All") }
@@ -700,7 +715,9 @@ private fun bluetoothOn(context: Context) =
 @Composable
 private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
     val context = LocalContext.current
-    var state by remember { mutableStateOf<Buds>(Buds.Checking) }
+    // Debug demo (a simulated model was picked): no real pairing; every page is shown for every model.
+    val demo = remember { BuildConfig.TOOLS && SimMode.active(context) }
+    var state by remember { mutableStateOf<Buds>(if (demo) Buds.NotPaired else Buds.Checking) }
     var refreshed by remember { mutableStateOf(false) }
     /** "Pair different earbuds": stay on the pairing page even though some earbuds are paired. */
     var pairNew by remember { mutableStateOf(false) }
@@ -723,6 +740,11 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
     // Watch Bluetooth, pairing and the audio link while this page is open.
     LaunchedEffect(tick) {
         while (true) {
+            if (demo) {
+                if (state is Buds.Connected && !refreshed) { refreshed = true; vm.refreshAll() }
+                delay(1_500)
+                continue
+            }
             val s = state
             val found = bondedEarbuds(context)
             val live = found != null && audioLinkUp(context)
@@ -752,7 +774,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
     // pairing mode without needing location or scan permissions; then we bond with them.
     // Once the device reports its own model, trust that over the pick.
     LaunchedEffect(saved.modelName) {
-        if (state is Buds.Connected) adopt(EarbudModel.fromName(saved.modelName))
+        if (!demo && state is Buds.Connected) adopt(EarbudModel.fromName(saved.modelName))
     }
 
     val chooser = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
@@ -804,6 +826,12 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
     }
 
     fun search() {
+        if (demo) {
+            note = null
+            state = Buds.Pairing
+            leScope.launch { delay(1_500); state = Buds.Connected }
+            return
+        }
         note = null
         val cdm = context.getSystemService(CompanionDeviceManager::class.java)
         if (cdm == null) { state = Buds.Failed("SunPods can't search for ${model.noun} on this phone. Pair them in Bluetooth settings instead."); return }
@@ -1176,7 +1204,7 @@ private fun HowToRow(n: Int, text: String) {
 // -------------------------------------------------------------------------------- 6 done
 
 @Composable
-private fun DoneStep(vm: SunpodsViewModel, onDone: () -> Unit) {
+private fun DoneStep(vm: SunpodsViewModel, onDone: () -> Unit, onAnother: () -> Unit) {
     val context = LocalContext.current
     val battery by vm.battery.collectAsState()
     val connected = battery.left != null || battery.right != null
@@ -1187,7 +1215,8 @@ private fun DoneStep(vm: SunpodsViewModel, onDone: () -> Unit) {
         title = "You're All Set",
         body = if (connected) "Your ${EarbudModel.active.noun} are ready." else "SunPods connects as soon as your ${EarbudModel.active.noun} do.",
         primary = "Start Using SunPods",
-        onPrimary = { OnboardingStore.setDone(context, true); onDone() }
+        onPrimary = { OnboardingStore.setDone(context, true); onDone() },
+        secondary = if (BuildConfig.TOOLS) "Set Up Another Device" else null, onSecondary = onAnother
     ) {
         if (connected) { Levels(battery, EarbudModel.active); Spacer(Modifier.height(24.dp)) }
         SunCard {

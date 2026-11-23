@@ -220,6 +220,8 @@ object SonyControlSessionManager {
         close(context, "A2DP disconnect")
     }
 
+    fun closeForDemo(context: Context) = close(context, "demo: another simulated model")
+
     fun closeForCommandRetry(context: Context) {
         close(context, "stale session command retry")
     }
