@@ -45,3 +45,6 @@ branding/render/anim/colours/
 # WF-C710N: the boards and previews contain Sony's photos and the frames are huge; keep only the tools
 branding/render/c710n/*
 !branding/render/c710n/tools/
+# WH-1000XM5 headphones: the boards and references contain Sony's photos; keep only the tools
+branding/render/wh1000xm5/*
+!branding/render/wh1000xm5/tools/

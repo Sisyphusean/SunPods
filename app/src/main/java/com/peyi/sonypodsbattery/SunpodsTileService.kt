@@ -45,10 +45,7 @@ class SunpodsTileService : TileService() {
             ListeningMode.OFF -> "Noise Control Off"
             null -> "SunPods"
         }
-        val levels = listOfNotNull(
-            state.left?.let { "L $it%" },
-            state.right?.let { "R $it%" }
-        ).joinToString("  ")
+        val levels = EarbudModel.current(this).buds.mapNotNull { part -> part.level(state)?.let { "${part.short} $it%" } }.joinToString("  ")
         tile.subtitle = levels.ifEmpty { "Tap to change noise control" }
         tile.state = if (mode == ListeningMode.OFF || mode == null) Tile.STATE_INACTIVE else Tile.STATE_ACTIVE
         tile.icon = Icon.createWithResource(

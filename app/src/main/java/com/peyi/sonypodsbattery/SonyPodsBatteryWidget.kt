@@ -260,18 +260,13 @@ private fun WidgetContent(
     ) {
         Header(state, context, refreshing, snapshot.connected)
         if (!snapshot.connected) {
-            NotConnectedBody(snapshot.last, palette, GlanceModifier.fillMaxWidth().defaultWeight(), snapshot.headphones)
+            NotConnectedBody(snapshot.last, snapshot.model, palette, GlanceModifier.fillMaxWidth().defaultWeight())
             return@Column
         }
         Row(modifier = GlanceModifier.fillMaxWidth().defaultWeight()) {
-            if (snapshot.headphones) {
-                BatteryTile("Battery", usable(state.left), state.leftCharging, palette, GlanceModifier.defaultWeight())
-            } else {
-                BatteryTile("Left", usable(state.left), state.leftCharging, palette, GlanceModifier.defaultWeight())
-                Spacer(GlanceModifier.width(6.dp))
-                BatteryTile("Right", usable(state.right), state.rightCharging, palette, GlanceModifier.defaultWeight())
-                Spacer(GlanceModifier.width(6.dp))
-                BatteryTile("Case", usable(state.case), state.caseCharging, palette, GlanceModifier.defaultWeight())
+            snapshot.model.batteries.forEachIndexed { i, part ->
+                if (i > 0) Spacer(GlanceModifier.width(6.dp))
+                BatteryTile(part, usable(part.level(state)), part.charging(state), palette, GlanceModifier.defaultWeight())
             }
         }
         if (!controls) return@Column
@@ -292,7 +287,7 @@ private fun WidgetContent(
 
 /** Shown when the earbuds are away: the last reading, quietly, and how to reconnect. */
 @Composable
-private fun NotConnectedBody(last: BatterySample?, palette: WidgetPalette, modifier: GlanceModifier, headphones: Boolean = false) {
+private fun NotConnectedBody(last: BatterySample?, model: EarbudModel, palette: WidgetPalette, modifier: GlanceModifier) {
     val colors = GlanceTheme.colors
     Column(
         modifier = modifier
@@ -302,20 +297,15 @@ private fun NotConnectedBody(last: BatterySample?, palette: WidgetPalette, modif
             .clickable(actionStartActivity<MainActivity>()),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(if (headphones) "Headphones not connected" else "Earbuds not connected", style = titleText.copy(color = colors.onSurface), maxLines = 1)
+        Text("${model.titleNoun} not connected", style = titleText.copy(color = colors.onSurface), maxLines = 1)
         Spacer(GlanceModifier.height(2.dp))
-        Text(if (headphones) "Turn them on near your phone" else "Open the case near your phone", style = smallText.copy(color = colors.onSurfaceVariant), maxLines = 1)
+        Text(model.wakeHint, style = smallText.copy(color = colors.onSurfaceVariant), maxLines = 1)
         if (last != null) {
             Spacer(GlanceModifier.height(10.dp))
             Row(modifier = GlanceModifier.fillMaxWidth()) {
-                if (headphones) {
-                    LastLevel("Battery", usable(last.left), palette, GlanceModifier.defaultWeight())
-                } else {
-                    LastLevel("L", usable(last.left), palette, GlanceModifier.defaultWeight())
-                    Spacer(GlanceModifier.width(10.dp))
-                    LastLevel("R", usable(last.right), palette, GlanceModifier.defaultWeight())
-                    Spacer(GlanceModifier.width(10.dp))
-                    LastLevel("Case", usable(last.case), palette, GlanceModifier.defaultWeight())
+                model.batteries.forEachIndexed { i, part ->
+                    if (i > 0) Spacer(GlanceModifier.width(10.dp))
+                    LastLevel(part.short, usable(part.level(last)), palette, GlanceModifier.defaultWeight())
                 }
             }
             Spacer(GlanceModifier.height(6.dp))
@@ -398,7 +388,8 @@ private fun Header(state: BatteryState, context: Context, refreshing: Boolean, c
 }
 
 @Composable
-private fun BatteryTile(label: String, level: Int?, charging: Boolean, palette: WidgetPalette, modifier: GlanceModifier) {
+private fun BatteryTile(part: BatteryPart, level: Int?, charging: Boolean, palette: WidgetPalette, modifier: GlanceModifier) {
+    val label = part.label
     val colors = GlanceTheme.colors
     val low = level != null && level <= 20 && !charging
     Column(
@@ -411,7 +402,7 @@ private fun BatteryTile(label: String, level: Int?, charging: Boolean, palette: 
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = level?.let { "$it" } ?: if (label == "Case") "Unknown" else "In Case",
+                text = level?.let { "$it" } ?: part.missing,
                 style = if (level == null) smallText.copy(color = colors.onSurfaceVariant) else numberText.copy(color = if (low) colors.error else colors.onSurface),
                 maxLines = 1
             )

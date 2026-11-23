@@ -537,6 +537,7 @@ function applyFinish(f) {
 // or headphones) and 'kase' the case. Adding a model is a module plus one line here.
 const DEVICES = {
   c710n: { url: './c710n.js', create: 'createC710N', colors: ['black', 'white', 'pink', 'blue'] },
+  wh1000xm5: { url: './wh1000xm5.js', create: 'createWH1000XM5', colors: ['black', 'silver', 'blue', 'pink'] },
 };
 const state = {
   color: FINISHES[params.get('color')] ? params.get('color') : 'black',

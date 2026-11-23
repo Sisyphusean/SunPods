@@ -258,10 +258,11 @@ object BatteryNudges {
         val outlook = BatteryInsights.outlook(BatteryHistory.load(context, System.currentTimeMillis() - 7L * 86_400_000), state)
 
         val threshold = budThreshold(context)
-        for ((side, level, charging) in listOf(
-            Triple("Left", state.left, state.leftCharging),
-            Triple("Right", state.right, state.rightCharging)
-        )) {
+        val model = EarbudModel.current(context)
+        for (part in model.buds) {
+            val side = part.label
+            val level = part.level(state)
+            val charging = part.charging(state)
             val key = "low_${side.lowercase()}"
             if (level == null || charging || level > threshold + 15) {
                 prefs.edit().remove(key).apply()
@@ -271,8 +272,8 @@ object BatteryNudges {
                 val left = (level / outlook.drainPerHour * 60).roundToInt()
                 notify(
                     context, 3001 + side.length,
-                    "$side Earbud at $level%",
-                    "About ${BatteryInsights.formatMinutes(left)} of listening left. Put it in the case to charge."
+                    if (part == BatteryPart.MAIN) "${model.titleNoun} at $level%" else "$side Earbud at $level%",
+                    "About ${BatteryInsights.formatMinutes(left)} of listening left. " + if (part == BatteryPart.MAIN) "Charge them soon." else "Put it in the case to charge."
                 )
                 prefs.edit().putBoolean(key, true).apply()
             }

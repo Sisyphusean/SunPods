@@ -629,15 +629,11 @@ class SonyBatteryClient(private val context: Context) {
             // Headphones: one battery and no case (22 00, or 22 08 with a threshold), reported as "left".
             if (f != null && !f.has1(Fn.LR_BATTERY, Fn.LR_BATTERY_THRESHOLD) && f.has1(Fn.BATTERY, Fn.BATTERY_THRESHOLD)) {
                 val t: Byte = if (f.has1(Fn.BATTERY_THRESHOLD)) 0x08 else 0x00
-                send(byteArrayOf(0x22, t))
-                val one = waitFor(3_000) { frame ->
-                    frame.type == SonyProtocol.DATA_MDR && frame.payload.size >= 4 &&
-                        frame.payload[0] == 0x23.toByte() && frame.payload[1] == t
-                } ?: throw IOException("Battery was not reported")
+                val one = request(byteArrayOf(0x22, t), 3_000)?.takeIf { it.size >= 4 } ?: throw IOException("Battery was not reported")
                 return Result(
-                    left = percent(one.payload[2]), right = null, case = null,
-                    leftCharging = charging(one.payload[3]), rightCharging = false, caseCharging = false,
-                    raw = "battery=${hex(one.payload)}"
+                    left = percent(one[2]), right = null, case = null,
+                    leftCharging = charging(one[3]), rightCharging = false, caseCharging = false,
+                    raw = "battery=${hex(one)}"
                 )
             }
             val budsType: Byte = if (f != null && !f.has1(Fn.LR_BATTERY_THRESHOLD) && f.has1(Fn.LR_BATTERY)) 0x01 else 0x09

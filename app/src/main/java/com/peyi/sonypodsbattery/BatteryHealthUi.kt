@@ -62,14 +62,14 @@ internal fun BatteryHealthCard(refreshKey: Long) {
                 if (r == null || (left == null && right == null)) {
                     Text("Still Learning", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(4.dp))
-                    Text("Your results appear after about 2½ hours of listening on each earbud. Short listens count.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                    Text(if (EarbudModel.active.headphones) "Your results appear after about 2½ hours of listening. Short listens count."
+                        else "Your results appear after about 2½ hours of listening on each earbud. Short listens count.", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
                     return@Column
                 }
                 Text("PER FULL CHARGE", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    BudHealth("Left", left, Modifier.weight(1f))
-                    BudHealth("Right", right, Modifier.weight(1f))
+                    EarbudModel.active.buds.forEach { part -> BudHealth(part.label, if (part == BatteryPart.RIGHT) right else left, Modifier.weight(1f)) }
                 }
                 BatteryHealth.ratedHours(r.mode)?.let { rated ->
                     val best = listOfNotNull(left, right).minOf { it.hoursPerCharge }

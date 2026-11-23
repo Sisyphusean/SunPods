@@ -92,36 +92,26 @@ private fun MiniContent(snapshot: WidgetSnapshot, palette: WidgetPalette) {
             modifier = GlanceModifier.fillMaxWidth().clickable(actionRunCallback<RefreshWidgetAction>()),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (snapshot.headphones) {
-                MiniLevel("Battery", if (snapshot.connected) state.left else last?.left, snapshot.connected && state.leftCharging, palette,
-                    GlanceModifier.defaultWeight(), stale = !snapshot.connected)
-            } else if (snapshot.connected) {
-                MiniLevel("L", state.left, state.leftCharging, palette, GlanceModifier.defaultWeight())
-                Spacer(GlanceModifier.width(10.dp))
-                MiniLevel("R", state.right, state.rightCharging, palette, GlanceModifier.defaultWeight())
-                Spacer(GlanceModifier.width(10.dp))
-                MiniLevel("Case", state.case, state.caseCharging, palette, GlanceModifier.defaultWeight())
-            } else {
-                // Away: last known levels, greyed, so it never looks live.
-                MiniLevel("L", last?.left, false, palette, GlanceModifier.defaultWeight(), stale = true)
-                Spacer(GlanceModifier.width(10.dp))
-                MiniLevel("R", last?.right, false, palette, GlanceModifier.defaultWeight(), stale = true)
-                Spacer(GlanceModifier.width(10.dp))
-                MiniLevel("Case", last?.case, false, palette, GlanceModifier.defaultWeight(), stale = true)
+            // Away: last known levels, greyed, so it never looks live.
+            snapshot.model.batteries.forEachIndexed { i, part ->
+                if (i > 0) Spacer(GlanceModifier.width(10.dp))
+                if (snapshot.connected) MiniLevel(part, part.level(state), part.charging(state), palette, GlanceModifier.defaultWeight())
+                else MiniLevel(part, last?.let(part::level), false, palette, GlanceModifier.defaultWeight(), stale = true)
             }
         }
     }
 }
 
 @Composable
-private fun MiniLevel(label: String, rawLevel: Int?, charging: Boolean, palette: WidgetPalette, modifier: GlanceModifier, stale: Boolean = false) {
+private fun MiniLevel(part: BatteryPart, rawLevel: Int?, charging: Boolean, palette: WidgetPalette, modifier: GlanceModifier, stale: Boolean = false) {
+    val label = part.short
     val colors = GlanceTheme.colors
     val level = rawLevel?.takeIf { it in 1..100 }
     val low = !stale && level != null && level <= 20
     Column(modifier = modifier) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
-                text = level?.toString() ?: if (label == "Case") "Unknown" else "In Case",
+                text = level?.toString() ?: part.missing,
                 style = TextStyle(fontSize = if (level == null) 12.sp else 18.sp, fontWeight = FontWeight.Medium, color = if (low) colors.error else if (stale) colors.onSurfaceVariant else colors.onSurface),
                 maxLines = 1
             )
