@@ -571,7 +571,7 @@ private object SonyCommandCoordinator {
         val app = command.context.applicationContext
         val client = SonyBatteryClient(app)
         val target = client.findEarbuds()
-            ?: return Result.failure(EarbudsUnavailableException("Pair your earbuds in Bluetooth settings, then try again."))
+            ?: return Result.failure(EarbudsUnavailableException("Pair your ${EarbudModel.active.noun} in Bluetooth settings, then try again."))
         if (A2dpConnectionHelper.isConnected(app, target) == false) {
             return Result.failure(EarbudsUnavailableException("Your earbuds aren't connected. Open the case near your phone and try again."))
         }
@@ -709,7 +709,7 @@ private object SonyCommandCoordinator {
                     LinkVerdict.UNKNOWN -> {
                         DiagnosticsStore.add(app, "A2DP state unavailable; refresh skipped")
                         command.onComplete?.invoke()
-                        return persistCheckedState(previous.copy(status = "Couldn't check your earbuds' connection. Try again."))
+                        return persistCheckedState(previous.copy(status = "Couldn't check your ${EarbudModel.active.noun}' connection. Try again."))
                     }
                 }
             } else EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, target)
@@ -729,7 +729,7 @@ private object SonyCommandCoordinator {
             return persistCheckedState(previous)
         }
         val state = if (target == null) {
-            persistCheckedState(previous.copy(status = "Pair your earbuds in Bluetooth settings first."))
+            persistCheckedState(previous.copy(status = "Pair your ${EarbudModel.active.noun} in Bluetooth settings first."))
         } else try {
             val wasConnected = SonyControlSessionManager.currentState() == SonySessionState.CONNECTED
             val tRead = System.currentTimeMillis()
@@ -752,13 +752,13 @@ private object SonyCommandCoordinator {
         } catch (error: SonyControlChannelUnavailableException) {
             markControlChannelUnavailable(app, target)
             DiagnosticsStore.add(app, "Refresh failed: ${error.javaClass.simpleName}: ${error.message}")
-            persistCheckedState(previous.copy(status = "Couldn't reach your earbuds. If Sony Sound Connect is open, close it and try again."))
+            persistCheckedState(previous.copy(status = "Couldn't reach your ${EarbudModel.active.noun}. If Sony Sound Connect is open, close it and try again."))
         } catch (error: SecurityException) {
             DiagnosticsStore.add(app, "Refresh blocked: ${error.message ?: error.javaClass.simpleName}")
             persistCheckedState(previous.copy(status = "Android blocked Bluetooth access. Send diagnostics from Device > Help and About."))
         } catch (error: Exception) {
             DiagnosticsStore.add(app, "Refresh failed: ${error.javaClass.simpleName}: ${error.message}")
-            persistCheckedState(previous.copy(status = "Couldn't reach your earbuds. If Sony Sound Connect is open, close it and try again."))
+            persistCheckedState(previous.copy(status = "Couldn't reach your ${EarbudModel.active.noun}. If Sony Sound Connect is open, close it and try again."))
         }
 
         if (EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED &&
@@ -809,14 +809,14 @@ private object SonyCommandCoordinator {
                     DiagnosticsStore.add(app, "A2DP state unavailable; control command skipped")
                     return finishControlCommand(
                         app,
-                        previous.copy(status = "Couldn't check your earbuds' connection. Try again."),
+                        previous.copy(status = "Couldn't check your ${EarbudModel.active.noun}' connection. Try again."),
                         command.requestedAtMillis
                     )
                 }
             }
         }
         val state = if (target == null) {
-            previous.copy(status = "Pair your earbuds in Bluetooth settings first.")
+            previous.copy(status = "Pair your ${EarbudModel.active.noun} in Bluetooth settings first.")
         } else try {
             executeConfirmedControlCommand(
                 app,
@@ -868,14 +868,14 @@ private object SonyCommandCoordinator {
                     DiagnosticsStore.add(app, "A2DP state unavailable; control command skipped")
                     return finishControlCommand(
                         app,
-                        previous.copy(status = "Couldn't check your earbuds' connection. Try again."),
+                        previous.copy(status = "Couldn't check your ${EarbudModel.active.noun}' connection. Try again."),
                         command.requestedAtMillis
                     )
                 }
             }
         }
         val state = if (target == null) {
-            previous.copy(status = "Pair your earbuds in Bluetooth settings first.")
+            previous.copy(status = "Pair your ${EarbudModel.active.noun} in Bluetooth settings first.")
         } else try {
             executeConfirmedControlCommand(
                 app,

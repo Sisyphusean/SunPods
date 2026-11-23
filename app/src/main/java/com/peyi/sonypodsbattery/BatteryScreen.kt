@@ -167,6 +167,11 @@ private fun ListeningLeftCard(battery: BatteryState, outlook: BatteryOutlook) {
             )
             Text(
                 when {
+                    EarbudModel.active.headphones -> when {
+                        minutes == null -> "Turn your headphones on to see"
+                        outlook.measured -> "Measured from how you listen"
+                        else -> "Estimated from Sony's rating for now"
+                    }
                     minutes == null && buds.isEmpty() && (battery.leftCharging || battery.rightCharging) -> "Both earbuds are in the case"
                     minutes == null -> "Take your earbuds out to see"
                     outlook.measured -> "${outlook.lowestBud ?: "One"} earbud runs out first"
@@ -219,7 +224,7 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
     val haptics = LocalHapticFeedback.current
     var week by rememberSaveable { mutableStateOf(false) }
     var seriesName by rememberSaveable { mutableStateOf(Series.BUDS.name) }
-    val series = Series.valueOf(seriesName)
+    val series = if (EarbudModel.active.headphones) Series.BUDS else Series.valueOf(seriesName)
     var picked by remember { mutableStateOf<Int?>(null) }
     val span = if (week) 7 * DAY else DAY
     val from = now - span
@@ -233,7 +238,8 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
                 if (shown.isEmpty()) {
                     Text(
-                        "Battery history appears after you take your earbuds out of the case. It stays on this phone.",
+                        if (EarbudModel.active.headphones) "Battery history appears after you listen with your headphones. It stays on this phone."
+                        else "Battery history appears after you take your earbuds out of the case. It stays on this phone.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 24.dp)
@@ -257,7 +263,7 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                 val show = slot == null || slot.sample != null
                 Text(
                     if (!show) "No reading"
-                    else listOf("L" to point.left, "R" to point.right, "Case" to point.case)
+                    else (if (EarbudModel.active.headphones) listOf("Battery" to point.left) else listOf("L" to point.left, "R" to point.right, "Case" to point.case))
                         .joinToString("   ") { (n, v) -> "$n ${v?.takeIf { it in 1..100 }?.let { "$it%" } ?: "—"}" } +
                         if (point.anyBudCharging()) "   Charging" else "",
                     style = MaterialTheme.typography.titleMedium
@@ -289,7 +295,8 @@ private fun HistoryCard(samples: List<BatterySample>, now: Long) {
                     FilterChip(selected = !week, onClick = { week = false; picked = null }, label = { Text("Day") }, shape = CircleShape)
                     FilterChip(selected = week, onClick = { week = true; picked = null }, label = { Text("Week") }, shape = CircleShape)
                     Spacer(Modifier.weight(1f))
-                    Series.entries.forEach { s ->
+                    // Headphones have one battery and no case: nothing to switch between.
+                    if (!EarbudModel.active.headphones) Series.entries.forEach { s ->
                         FilterChip(selected = s == series, onClick = { seriesName = s.name; picked = null }, label = { Text(s.label) }, shape = CircleShape)
                     }
                 }
@@ -436,7 +443,7 @@ private fun WeekCard(samples: List<BatterySample>, now: Long) {
                     style = MaterialTheme.typography.headlineSmall
                 )
                 Text(
-                    if (average == 0) "Your listening time appears here as you use your earbuds."
+                    if (average == 0) "Your listening time appears here as you use your ${EarbudModel.active.noun}."
                     else "You average ${BatteryInsights.formatMinutes(average)} on days you listen.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.onSurfaceVariant
@@ -535,11 +542,11 @@ private fun StatsGrid(battery: BatteryState, samples: List<BatterySample>, outlo
     val charged = remember(samples) { BatteryInsights.lastTakenOut(samples) }
     val case = battery.case?.takeIf { it in 1..100 }
 
-    val stats = listOf(
+    val allStats = listOf(
         Stat(
             "Drain", "${outlook.drainPerHour.roundToInt()}% per hour",
             if (outlook.measured) "Measured this week" else "Sony's rating",
-            "How fast an earbud's battery drops while you listen. SunPods measures this after about an hour of listening."
+            "How fast the battery drops while you listen. SunPods measures this after about an hour of listening."
         ),
         Stat(
             "Out of the Case", charged?.let { relativeShort(it, now) } ?: "Not Yet",
@@ -564,6 +571,8 @@ private fun StatsGrid(battery: BatteryState, samples: List<BatterySample>, outlo
             "A full ${EarbudModel.active.displayName} case recharges both earbuds about ${if (EarbudModel.active.caseCharges == 2.0) "twice" else "%.1f times".format(EarbudModel.active.caseCharges)}. This shows how many charges it has left."
         )
     )
+    // Headphones: one battery and no case, so no out-of-case time, left/right balance or case reserve.
+    val stats = if (EarbudModel.active.headphones) allStats.filter { it.label !in setOf("Out of the Case", "Balance", "Case Reserve") } else allStats
     var open by rememberSaveable { mutableIntStateOf(-1) }
     Column {
         SectionHeader("At a Glance")
@@ -624,7 +633,7 @@ private fun AlertsCard() {
     var threshold by remember { mutableStateOf(BatteryNudges.budThreshold(context).toFloat()) }
     Column {
         SunCard {
-            ToggleRow(Icons.Rounded.BatteryAlert, "Earbuds", "", buds) {
+            ToggleRow(Icons.Rounded.BatteryAlert, EarbudModel.active.titleNoun, "", buds) {
                 buds = it; BatteryNudges.setBudAlerts(context, it)
             }
             AnimatedVisibility(buds, enter = revealIn(), exit = revealOut()) {
@@ -644,11 +653,14 @@ private fun AlertsCard() {
                     )
                 }
             }
-            RowDivider()
-            ToggleRow(SunIcons.Case, "Case", "", case) {
-                case = it; BatteryNudges.setCaseAlerts(context, it)
+            if (!EarbudModel.active.headphones) {
+                RowDivider()
+                ToggleRow(SunIcons.Case, "Case", "", case) {
+                    case = it; BatteryNudges.setCaseAlerts(context, it)
+                }
             }
         }
-        Footer("A notification when an earbud reaches the level you set, or the case reaches 20%.")
+        Footer(if (EarbudModel.active.headphones) "A notification when your headphones reach the level you set."
+            else "A notification when an earbud reaches the level you set, or the case reaches 20%.")
     }
 }

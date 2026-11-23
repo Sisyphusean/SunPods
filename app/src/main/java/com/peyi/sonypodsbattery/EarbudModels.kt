@@ -14,12 +14,21 @@ enum class EarbudModel(
     /** Sony's rated listening time per charge, hours: noise cancelling on, and off. */
     val ratedHoursNc: Double,
     val ratedHoursOff: Double,
-    /** Roughly how many full earbud charges a full case holds (Sony's total minus one charge). */
+    /** Roughly how many full earbud charges a full case holds (Sony's total minus one charge); 0 without a charging case. */
     val caseCharges: Double,
+    /** Over-ear headphones: one battery, no charging case, buttons and a touch panel instead of per-side touch. */
+    val headphones: Boolean = false,
 ) {
     WF_1000XM5("xm5", "WF-1000XM5", Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE), 8.0, 12.0, 2.0),
     // Sony: 8.5 h NC on / 12 h off, about 30 h in total with the case (21.5 h in the case).
-    WF_C710N("c710n", "WF-C710N", Regex("WF[- ]?C710N", RegexOption.IGNORE_CASE), 8.5, 12.0, 2.5);
+    WF_C710N("c710n", "WF-C710N", Regex("WF[- ]?C710N", RegexOption.IGNORE_CASE), 8.5, 12.0, 2.5),
+    // Sony: 30 h with noise cancelling, 40 h without; no charging case.
+    WH_1000XM5("wh1000xm5", "WH-1000XM5", Regex("WH[- ]?1000XM5", RegexOption.IGNORE_CASE), 30.0, 40.0, 0.0, headphones = true);
+
+    /** What to call them in copy: "earbuds" or "headphones". */
+    val noun: String get() = if (headphones) "headphones" else "earbuds"
+    /** "Earbuds" or "Headphones", for titles. */
+    val titleNoun: String get() = noun.replaceFirstChar { it.uppercase() }
 
     fun matches(name: String?): Boolean = name != null && pattern.containsMatchIn(name)
 

@@ -1,6 +1,6 @@
 # SunPods
 
-An unofficial, free and open source companion app for the Sony WF-1000XM5 and WF-C710N on Android.
+An unofficial, free and open source companion app for the Sony WF-1000XM5, WF-C710N and WH-1000XM5 on Android.
 Not made by or affiliated with Sony.
 
 [![Build](https://github.com/Sisyphusean/SunPods/actions/workflows/android.yml/badge.svg)](https://github.com/Sisyphusean/SunPods/actions/workflows/android.yml)
@@ -49,14 +49,15 @@ button does the same:
 Everything stays on your phone. The only thing SunPods does online is check GitHub once a day for a
 new version, and you can turn that off.
 
-## Supported earbuds
+## Supported earbuds and headphones
 
-| Earbuds | Status | Notes |
+| Model | Status | Notes |
 | --- | --- | --- |
 | **WF-1000XM5** | ✅ Works | Classic and LE Audio, firmware 6.1.0 tested |
 | **WF-C710N** | 🧪 Testing | Built from Sony's own app and tested on simulated earbuds; [needs a tester](https://github.com/Sisyphusean/SunPods/issues/2) |
 | WF-1000XM4 | ⏳ Not yet | |
-| WH-1000XM5, WH-1000XM6 | ⏳ Not yet | |
+| **WH-1000XM5** | 🧪 Testing | Headphones. Built from Sony's own app and other projects' captures, tested on simulated headphones; needs a tester |
+| WH-1000XM4, WH-1000XM6 | ⏳ Not yet | |
 | LinkBuds, LinkBuds S, Fit, Open | ⏳ Not yet | |
 | Earbuds from other brands | ❌ Not supported | Sony only |
 

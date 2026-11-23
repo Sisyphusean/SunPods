@@ -155,6 +155,7 @@ internal fun budArt(colorCode: Int?, model: EarbudModel = EarbudModel.active): B
     val c = colorCode?.let { if (it in 0x11..0x1e) it - 0x10 else it }
     return when (model) {
         EarbudModel.WF_C710N -> c710nArt(c)
+        EarbudModel.WH_1000XM5 -> wh1000xm5Art(c)
         EarbudModel.WF_1000XM5 -> when (c) {
             0x03 -> BudArt(R.drawable.bud_left_silver, R.drawable.bud_right_silver, R.drawable.bud_case_silver, R.drawable.buds_pair_silver, "silver", R.raw.anim_pair_silver, R.raw.anim_open_silver)
             0x06 -> BudArt(R.drawable.bud_left_pink, R.drawable.bud_right_pink, R.drawable.bud_case_pink, R.drawable.buds_pair_pink, "pink", R.raw.anim_pair_pink, R.raw.anim_open_pink)
@@ -171,6 +172,13 @@ private fun c710nArt(c: Int?): BudArt = when (c) {
     0x05 -> BudArt(R.drawable.c710n_bud_left_blue, R.drawable.c710n_bud_right_blue, R.drawable.c710n_bud_case_blue, R.drawable.c710n_buds_pair_blue, "blue", R.raw.c710n_anim_pair_blue, R.raw.c710n_anim_open_blue, device = EarbudModel.WF_C710N.id)
     0x06 -> BudArt(R.drawable.c710n_bud_left_pink, R.drawable.c710n_bud_right_pink, R.drawable.c710n_bud_case_pink, R.drawable.c710n_buds_pair_pink, "pink", R.raw.c710n_anim_pair_pink, R.raw.c710n_anim_open_pink, device = EarbudModel.WF_C710N.id)
     else -> BudArt(R.drawable.c710n_bud_left_black, R.drawable.c710n_bud_right_black, R.drawable.c710n_bud_case_black, R.drawable.c710n_buds_pair_black, "black", R.raw.c710n_anim_pair_black, R.raw.c710n_anim_open_black, device = EarbudModel.WF_C710N.id)
+}
+
+/** WH-1000XM5 finishes; the 3D hero names them black, silver, blue and pink. */
+private fun wh1000xm5Art(c: Int?): BudArt {
+    val name = when (c) { 0x03 -> "silver"; 0x05 -> "blue"; 0x06 -> "pink"; else -> "black" }
+    // Stills and clips land with the WH-1000XM5 renders; until then the 3D hero is the headphones already.
+    return BudArt(R.drawable.bud_left, R.drawable.bud_right, R.drawable.bud_case, R.drawable.buds_pair, name, R.raw.anim_pair, R.raw.anim_open, device = EarbudModel.WH_1000XM5.id)
 }
 
 /** The current earbuds' pictures; provided by the app shell from the colour the earbuds report. */

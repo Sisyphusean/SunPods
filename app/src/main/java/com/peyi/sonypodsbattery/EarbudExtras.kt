@@ -49,8 +49,8 @@ object VoiceAssistantSetting {
     }
 
     fun detail(value: Int): String? = when (value) {
-        0x31 -> "Talk to Google Assistant from your earbuds"
-        0x32 -> "Talk to Alexa from your earbuds"
+        0x31 -> "Talk to Google Assistant from your ${EarbudModel.active.noun}"
+        0x32 -> "Talk to Alexa from your ${EarbudModel.active.noun}"
         0x30 -> "Uses the assistant your phone is set to"
         0xff -> "No voice assistant from the earbuds"
         else -> null
@@ -147,6 +147,8 @@ object EarbudReset {
  *   protection  54 04 [0 standard / 1 sensitive]
  */
 object SafeListening {
+    /** Sony's Safe Listening type: 02 for headphones (one headband), 03 for earbuds (TWS). */
+    private fun slType(): Byte = if (EarbudModel.active.headphones) 0x02 else 0x03
     private const val PREFS = "safe_listening"
     private const val T2 = SonyProtocol.DATA_MDR_NO2
 
@@ -155,7 +157,7 @@ object SafeListening {
 
     internal fun setOn(context: android.content.Context, s: SonyBatteryClient.SonySession, on: Boolean): Boolean {
         // Logging on or off; the live meter stays off (Sony's app never runs both).
-        val ok = s.command(byteArrayOf(0x58, 0x03, if (on) 0x00 else 0x01, 0x01), type = T2)
+        val ok = s.command(byteArrayOf(0x58, slType(), if (on) 0x00 else 0x01, 0x01), type = T2)
         if (ok) context.getSharedPreferences(PREFS, 0).edit().putBoolean("on", on).apply()
         return ok
     }
@@ -170,16 +172,16 @@ object SafeListening {
 
     /** Starts the earbuds' live measurement; logging pauses while it runs. */
     internal fun startMeter(s: SonyBatteryClient.SonySession): Boolean =
-        s.command(byteArrayOf(0x58, 0x03, 0x01, 0x00), type = T2)
+        s.command(byteArrayOf(0x58, slType(), 0x01, 0x00), type = T2)
 
     /** Puts the earbuds back to Safe Listening logging on or off. */
     internal fun stopMeter(s: SonyBatteryClient.SonySession, loggingOn: Boolean): Boolean =
-        s.command(byteArrayOf(0x58, 0x03, if (loggingOn) 0x00 else 0x01, 0x01), type = T2)
+        s.command(byteArrayOf(0x58, slType(), if (loggingOn) 0x00 else 0x01, 0x01), type = T2)
 
     internal fun readLevel(s: SonyBatteryClient.SonySession): Level? {
-        s.send(byteArrayOf(0x5a, 0x03), T2)
+        s.send(byteArrayOf(0x5a, slType()), T2)
         val p = s.waitFor(1_500) { f ->
-            f.type == T2 && f.payload.size >= 4 && (f.payload[0].toInt() and 0xff) == 0x5b && f.payload[1].toInt() == 0x03
+            f.type == T2 && f.payload.size >= 4 && (f.payload[0].toInt() and 0xff) == 0x5b && f.payload[1] == slType()
         }?.payload ?: return null
         val db = p[2].toInt() and 0xff
         return when {

@@ -92,7 +92,10 @@ private fun MiniContent(snapshot: WidgetSnapshot, palette: WidgetPalette) {
             modifier = GlanceModifier.fillMaxWidth().clickable(actionRunCallback<RefreshWidgetAction>()),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (snapshot.connected) {
+            if (snapshot.headphones) {
+                MiniLevel("Battery", if (snapshot.connected) state.left else last?.left, snapshot.connected && state.leftCharging, palette,
+                    GlanceModifier.defaultWeight(), stale = !snapshot.connected)
+            } else if (snapshot.connected) {
                 MiniLevel("L", state.left, state.leftCharging, palette, GlanceModifier.defaultWeight())
                 Spacer(GlanceModifier.width(10.dp))
                 MiniLevel("R", state.right, state.rightCharging, palette, GlanceModifier.defaultWeight())

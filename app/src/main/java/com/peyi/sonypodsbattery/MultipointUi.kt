@@ -89,7 +89,7 @@ internal fun DevicesCard(connected: Boolean, leOn: Boolean = false) {
                     colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
                 )
             }
-            Footer("On LE Audio, your earbuds connect to one device at a time. Switch to Classic in Controls > Calls to use two at once.")
+            Footer("On LE Audio, your ${EarbudModel.active.noun} connect to one device at a time. Switch to Classic in Controls > Calls to use two at once.")
         }
         return
     }
@@ -141,7 +141,7 @@ internal fun DevicesCard(connected: Boolean, leOn: Boolean = false) {
         AlertDialog(
             onDismissRequest = { forgetting = null },
             title = { Text("Forget ${d.name}?") },
-            text = { Text("Your earbuds won't connect to it anymore. To use it again, pair it from its Bluetooth settings.") },
+            text = { Text("Your ${EarbudModel.active.noun} won't connect to it anymore. To use it again, pair it from its Bluetooth settings.") },
             confirmButton = {
                 TextButton(onClick = {
                     forgetting = null
@@ -247,7 +247,7 @@ private fun PairRow(pairing: Boolean, enabled: Boolean, onChange: (Boolean) -> U
         }
         AnimatedVisibility(pairing, enter = revealIn(), exit = revealOut()) {
             Text(
-                "Your earbuds are ready to pair. On the other device, open Bluetooth settings and choose ${EarbudModel.active.displayName}.",
+                "Your ${EarbudModel.active.noun} are ready to pair. On the other device, open Bluetooth settings and choose ${EarbudModel.active.displayName}.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 76.dp, end = 20.dp, bottom = 14.dp)

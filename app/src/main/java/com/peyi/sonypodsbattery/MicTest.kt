@@ -152,7 +152,7 @@ internal object MicTest {
         else if (a.voiceDb < -32) add("Your voice is a little quiet. A snugger fit or speaking slightly louder can help.")
         if (a.voiceDb - a.noiseDb < 15) add("Background noise is loud compared with your voice. Callers may find it hard to hear you here.")
         if (a.clipped > 0.01) add("Some parts were too loud and sounded distorted.")
-        if (isEmpty()) add("Your voice sounds clear. If callers still have trouble hearing you, the Bluetooth connection may be dropping out. Keep your phone on the same side as your earbuds.")
+        if (isEmpty()) add("Your voice sounds clear. If callers still have trouble hearing you, the Bluetooth connection may be dropping out. Keep your phone on the same side as your ${EarbudModel.active.noun}.")
     }
 }
 
@@ -180,7 +180,7 @@ internal fun MicTestSheet(onDismiss: () -> Unit) {
             val device = MicTest.routeToEarbuds(context)
             if (device == null) {
                 MicTest.release(context)
-                state = MicState.Failed("Couldn't use your earbuds' mic. Make sure they're connected and try again.")
+                state = MicState.Failed("Couldn't use your ${EarbudModel.active.noun}' mic. Make sure they're connected and try again.")
                 return@launch
             }
             try {

@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.2.0
+
+The WH-1000XM5 headphones join the WF-1000XM5 and WF-C710N, in testing: own a pair? Tell us how it goes.
+
+**New**
+- WH-1000XM5 support: one battery reading across Home, the widgets, the notification and Battery, noise cancelling and Ambient Sound with Focus on Voice, the NC/AMB button's cycle, touch controls on or off, the equaliser, DSEE Extreme, Speak-to-Chat, pause when you take them off, two devices at once, voice prompts, Safe Listening, turn off and reset
+- The WH-1000XM5 in 3D, in black, silver, blue and pink
+- Setup explains how to put headphones in pairing mode
+
 ## 3.1.1
 
 **Fixes**
