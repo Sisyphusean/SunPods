@@ -360,7 +360,7 @@ private fun WelcomeStep(onStart: () -> Unit) {
         progress = null,
         art = {
             Image(
-                painter = painterResource(R.drawable.buds_pair),
+                painter = painterResource(remember { budArt(SettingsStore.load(context).colorCode).pair }),
                 contentDescription = "WF-1000XM5 earbuds",
                 modifier = Modifier.fillMaxWidth(0.8f).height(200.dp).drawBehind {
                     drawCircle(

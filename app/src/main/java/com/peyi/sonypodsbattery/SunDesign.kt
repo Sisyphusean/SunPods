@@ -175,6 +175,18 @@ internal fun rememberBuzz(): (Buzz) -> Unit {
     }
 }
 
+/** The earbud and case pictures in the colour of the user's own earbuds (Sony's colour codes). */
+internal data class BudArt(val left: Int, val right: Int, val case: Int, val pair: Int)
+
+internal fun budArt(colorCode: Int?): BudArt = when (colorCode) {
+    0x03 -> BudArt(R.drawable.bud_left_silver, R.drawable.bud_right_silver, R.drawable.bud_case_silver, R.drawable.buds_pair_silver)
+    0x06 -> BudArt(R.drawable.bud_left_pink, R.drawable.bud_right_pink, R.drawable.bud_case_pink, R.drawable.buds_pair_pink)
+    else -> BudArt(R.drawable.bud_left, R.drawable.bud_right, R.drawable.bud_case, R.drawable.buds_pair)
+}
+
+/** The current earbuds' pictures; provided by the app shell from the colour the earbuds report. */
+internal val LocalBudArt = staticCompositionLocalOf { budArt(null) }
+
 /** Pages one tap deeper than a tab, so each tab stays short. */
 internal enum class Page(val title: String) {
     AUTOMATIONS("Automations"),

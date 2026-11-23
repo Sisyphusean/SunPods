@@ -528,7 +528,10 @@ fun SunpodsApp(
             onRefresh = refresh,
             modifier = Modifier.fillMaxSize().padding(padding)
         ) {
-            androidx.compose.runtime.CompositionLocalProvider(LocalOpenPage provides { go(tab, it) }) {
+            androidx.compose.runtime.CompositionLocalProvider(
+                LocalOpenPage provides { go(tab, it) },
+                LocalBudArt provides budArt(settings.colorCode)
+            ) {
                 navTransition.AnimatedContent(
                     modifier = Modifier.fillMaxSize(),
                     transitionSpec = {
@@ -1131,12 +1134,13 @@ private fun BatteryCard(battery: BatteryState, busy: Boolean, liveAt: Long = 0L)
     Column {
         SunCard {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 24.dp)) {
-                BatteryRing("Left", battery.left?.takeIf { it in 1..100 }, battery.leftCharging, R.drawable.bud_left, Modifier.weight(1f))
-                BatteryRing("Right", battery.right?.takeIf { it in 1..100 }, battery.rightCharging, R.drawable.bud_right, Modifier.weight(1f))
+                val art = LocalBudArt.current
+                BatteryRing("Left", battery.left?.takeIf { it in 1..100 }, battery.leftCharging, art.left, Modifier.weight(1f))
+                BatteryRing("Right", battery.right?.takeIf { it in 1..100 }, battery.rightCharging, art.right, Modifier.weight(1f))
                 // The case reports its level only when the earbuds come out of it. An old reading
                 // greys out and the status line says how old, like Sony's app explains it.
                 BatteryRing(
-                    "Case", battery.case?.takeIf { it in 1..100 }, battery.caseCharging, R.drawable.bud_case, Modifier.weight(1f),
+                    "Case", battery.case?.takeIf { it in 1..100 }, battery.caseCharging, art.case, Modifier.weight(1f),
                     muted = caseStale
                 )
             }
@@ -1203,7 +1207,7 @@ private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int,
                 painter = painterResource(art),
                 contentDescription = null,
                 alpha = if (level == null) 0.4f else 1f,
-                modifier = Modifier.size(if (art == R.drawable.bud_case) 40.dp else 52.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value }
+                modifier = Modifier.size(if (label == "Case") 40.dp else 52.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value }
             )
         }
         Spacer(Modifier.height(12.dp))
@@ -1862,8 +1866,8 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
         SunCard {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 val options = settings.touchOptions
-                TouchSide("Left", R.drawable.bud_left, left, options?.get(0), Modifier.weight(1f)) { picked -> vm.setTouch(picked, null) }
-                TouchSide("Right", R.drawable.bud_right, right, options?.get(1), Modifier.weight(1f)) { picked -> vm.setTouch(null, picked) }
+                TouchSide("Left", LocalBudArt.current.left, left, options?.get(0), Modifier.weight(1f)) { picked -> vm.setTouch(picked, null) }
+                TouchSide("Right", LocalBudArt.current.right, right, options?.get(1), Modifier.weight(1f)) { picked -> vm.setTouch(null, picked) }
             }
             if (left == TouchFunction.AMBIENT_SOUND_CONTROL || right == TouchFunction.AMBIENT_SOUND_CONTROL) {
                 RowDivider(inset = 16.dp)
@@ -2097,7 +2101,7 @@ private fun DeviceScreen(
     val colors = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Image(
-            painter = painterResource(R.drawable.buds_pair),
+            painter = painterResource(LocalBudArt.current.pair),
             contentDescription = null,
             modifier = Modifier
                 .fillMaxWidth(0.62f)
