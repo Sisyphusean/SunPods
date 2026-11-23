@@ -380,7 +380,8 @@ fun SunpodsApp(
     val demoContext = LocalContext.current
     val demo = remember { DemoMode.on(demoContext) }
     val battery = if (demo) DemoMode.battery else liveBattery
-    val settings = if (demo) DemoMode.settings else liveSettings
+    // Demo screenshots in any colour: the "demo_color" flag (Sony's code, e.g. 6 for pink).
+    val settings = if (demo) DemoMode.settings.copy(colorCode = DemoMode.color(demoContext)) else liveSettings
     val busy by vm.busy.collectAsState()
     val message by vm.message.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
@@ -2383,6 +2384,9 @@ internal object DemoMode {
     fun on(context: android.content.Context): Boolean =
         (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0 &&
             context.getSharedPreferences("sunpods_ui", android.content.Context.MODE_PRIVATE).getBoolean("demo_connected", false)
+
+    fun color(context: android.content.Context): Int? =
+        context.getSharedPreferences("sunpods_ui", android.content.Context.MODE_PRIVATE).getInt("demo_color", 1)
 
     val battery = BatteryState(
         left = 82, right = 76, case = 15, caseCharging = true,
