@@ -282,7 +282,11 @@ object SonyControlSessionManager {
             openGatt(context, device, generation)?.let { return it }
         }
         val attempts = listOf(UUID_V2, UUID_V1).flatMap { u -> listOf(true, false).map { u to it } }
+        var timeouts = 0
         for ((uuid, insecure) in listOfNotNull(lastGood) + (attempts - listOfNotNull(lastGood).toSet())) {
+            // Two timeouts mean the earbuds aren't answering at this address at all; the other ways in
+            // would time out too, so stop instead of making the user wait another 10 s.
+            if (timeouts >= 2) break
             var socket: SonyLink? = null
             try {
                 val raw = if (insecure) device.createInsecureRfcommSocketToServiceRecord(uuid)
@@ -312,7 +316,12 @@ object SonyControlSessionManager {
                 return session
             } catch (error: Exception) {
                 lastError = error
-                DiagnosticsStore.add(context, "RFCOMM session failure: ${error.message ?: error.javaClass.simpleName}")
+                if ((error.message ?: "").contains("timed out", ignoreCase = true) || error is java.util.concurrent.TimeoutException) timeouts++
+                DiagnosticsStore.add(
+                    context,
+                    "RFCOMM session failure (${if (uuid == UUID_V2) "v2" else "v1"}, ${if (insecure) "insecure" else "secure"}, …${address.takeLast(5)}): " +
+                        (error.message ?: error.javaClass.simpleName)
+                )
             } finally {
                 synchronized(this) {
                     if (connectingSocket === socket) connectingSocket = null

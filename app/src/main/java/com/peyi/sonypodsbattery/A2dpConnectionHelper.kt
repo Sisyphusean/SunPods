@@ -41,6 +41,34 @@ object A2dpConnectionHelper {
     /** Devices on A2DP right now, from the already-bound proxy; empty if it isn't bound yet. */
     fun connectedNow(): List<BluetoothDevice> = runCatching { proxy?.connectedDevices }.getOrNull().orEmpty()
 
+    /** Binds the proxy if it isn't yet, so [connectedNow] can steer which paired entry is used. */
+    suspend fun ensureBound(context: Context) {
+        if (proxy == null && !SimMode.active(context)) bind(context)
+    }
+
+    /** Whether Android has any media (A2DP) and any call (HFP) audio link up, whatever the device. */
+    @SuppressLint("MissingPermission")
+    fun profilesUp(context: Context): Pair<Boolean, Boolean> = runCatching {
+        val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
+        (adapter?.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED) to
+            (adapter?.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothProfile.STATE_CONNECTED)
+    }.getOrDefault(false to false)
+
+    /** One line for diagnostics: which entry was picked and what each audio profile says. */
+    @SuppressLint("MissingPermission")
+    fun describe(context: Context, target: BluetoothDevice, onA2dp: Boolean?): String {
+        val kind = runCatching {
+            when (target.type) { BluetoothDevice.DEVICE_TYPE_CLASSIC -> "Classic"; BluetoothDevice.DEVICE_TYPE_DUAL -> "dual"; BluetoothDevice.DEVICE_TYPE_LE -> "LE only"; else -> "unknown type" }
+        }.getOrDefault("type hidden")
+        val listed = connectedNow().joinToString(", ") { d ->
+            "…" + d.address.takeLast(5) + (if (runCatching { EarbudModel.isSupported(d.name) }.getOrDefault(false)) " (Sony)" else "")
+        }.ifEmpty { "none" }
+        val (a2dp, calls) = profilesUp(context)
+        return "Link: using …${target.address.takeLast(5)} ($kind, ${if (EarbudAddresses.isRandom(target.address)) "random" else "public"} address), " +
+            "on A2DP ${onA2dp ?: "unknown"}; A2DP lists $listed; media ${if (a2dp) "up" else "down"}, calls ${if (calls) "up" else "down"}, " +
+            "LE Audio ${if (LeAudio.anyConnected(context)) "up" else "down"}"
+    }
+
     private suspend fun bind(context: Context): BluetoothA2dp? {
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: return null
         val result = CompletableDeferred<BluetoothA2dp?>()
