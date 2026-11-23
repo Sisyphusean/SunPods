@@ -62,7 +62,7 @@ internal fun Hero3D(
     val cycle = cycleDevices?.takeIf { it.size > 1 }
     val reduceMotion = remember { android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) <= 0f }
     val cycling = cycle != null && !reduceMotion
-    var step by androidx.compose.runtime.mutableIntStateOf(0)
+    var step by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val shownDevice = if (cycle != null) cycle[step % cycle.size] else device
     val nextDevice = if (cycling) cycle!![(step + 1) % cycle.size] else null
     // One hero view for the whole screen, kept alive while you move between tabs and pages, so
