@@ -97,7 +97,10 @@ internal fun Hero3D(
 
     // Until the 3D page has drawn, show the picture it left last time (same size, same pose), then
     // fade across. Opening the app shows the earbuds at once instead of them popping in.
-    val placeholder = if (state.drawn) null else remember(shownDevice, color, model) { HeroSnapshots.load(context, shownDevice, color, model) }
+    // The centred pages (Welcome, the picker) have their own pictures, never Home's (its case and framing): a snapshot
+    // the centred view saved itself, or none (just the glow).
+    val snapKey = if (centered) "centered" else model
+    val placeholder = if (state.drawn) null else remember(shownDevice, color, snapKey) { HeroSnapshots.load(context, shownDevice, color, snapKey) }
     if (cycling && isOwner) LaunchedEffect(state.drawn) {
         if (!state.drawn) return@LaunchedEffect
         while (true) { kotlinx.coroutines.delay(CYCLE_MS); step++ }
@@ -325,11 +328,11 @@ private fun createHeroWebView(context: Context, state: Hero3DState, onTap: () ->
             web.postDelayed({ state.drawn = true }, 120)
             // Keep this exact picture for next launch (once per colour, model and app version).
             val d = state.device; val c = state.color; val m = state.model
-            // (Not from the centred pages: Home keeps the hero framing.)
-            if (!state.centered && !HeroSnapshots.has(context, d, c, m)) web.postDelayed({
+            val key = if (state.centered) "centered" else m
+            if (!HeroSnapshots.has(context, d, c, key)) web.postDelayed({
                 if (state.device == d && state.color == c && state.model == m) web.evaluateJavascript("window.sunpods&&window.sunpods.snapshot()") { r ->
                     val url = r?.trim('"')?.takeIf { it.startsWith("data:image/png") } ?: return@evaluateJavascript
-                    Thread { HeroSnapshots.save(context.applicationContext, d, c, m, url) }.start()
+                    Thread { HeroSnapshots.save(context.applicationContext, d, c, key, url) }.start()
                 }
             }, 900)
         }
