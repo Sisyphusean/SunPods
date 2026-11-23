@@ -626,6 +626,20 @@ class SonyBatteryClient(private val context: Context) {
             // Both earbuds and the case, on the inquired types these earbuds list: with thresholds
             // (0x09, 0x0a; the WF-1000XM5) or without (0x01, 0x02). Same fields either way.
             val f = functions()
+            // Headphones: one battery and no case (22 00, or 22 08 with a threshold), reported as "left".
+            if (f != null && !f.has1(Fn.LR_BATTERY, Fn.LR_BATTERY_THRESHOLD) && f.has1(Fn.BATTERY, Fn.BATTERY_THRESHOLD)) {
+                val t: Byte = if (f.has1(Fn.BATTERY_THRESHOLD)) 0x08 else 0x00
+                send(byteArrayOf(0x22, t))
+                val one = waitFor(3_000) { frame ->
+                    frame.type == SonyProtocol.DATA_MDR && frame.payload.size >= 4 &&
+                        frame.payload[0] == 0x23.toByte() && frame.payload[1] == t
+                } ?: throw IOException("Battery was not reported")
+                return Result(
+                    left = percent(one.payload[2]), right = null, case = null,
+                    leftCharging = charging(one.payload[3]), rightCharging = false, caseCharging = false,
+                    raw = "battery=${hex(one.payload)}"
+                )
+            }
             val budsType: Byte = if (f != null && !f.has1(Fn.LR_BATTERY_THRESHOLD) && f.has1(Fn.LR_BATTERY)) 0x01 else 0x09
             val caseType: Byte? = when {
                 f == null || f.has1(Fn.CRADLE_BATTERY_THRESHOLD) -> 0x0a

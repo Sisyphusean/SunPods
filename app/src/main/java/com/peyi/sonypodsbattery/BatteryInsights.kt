@@ -303,7 +303,7 @@ object BatteryNudges {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, "Battery Alerts", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Alerts when your earbuds or case are running low."
+                description = "Alerts when your earbuds, case or headphones are running low."
             }
         )
         val open = PendingIntent.getActivity(

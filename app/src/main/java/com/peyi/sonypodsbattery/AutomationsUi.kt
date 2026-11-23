@@ -90,7 +90,7 @@ internal fun AutomationsCard() {
                     AutoPlay.setEnabled(context, it)
                 }
             }
-            Footer("Your music starts when you take your earbuds out.")
+            Footer(if (EarbudModel.active.headphones) "Your music starts when you put your headphones on." else "Your music starts when you take your earbuds out.")
         }
     }
 }

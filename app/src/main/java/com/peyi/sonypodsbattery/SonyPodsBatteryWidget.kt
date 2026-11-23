@@ -260,15 +260,19 @@ private fun WidgetContent(
     ) {
         Header(state, context, refreshing, snapshot.connected)
         if (!snapshot.connected) {
-            NotConnectedBody(snapshot.last, palette, GlanceModifier.fillMaxWidth().defaultWeight())
+            NotConnectedBody(snapshot.last, palette, GlanceModifier.fillMaxWidth().defaultWeight(), snapshot.headphones)
             return@Column
         }
         Row(modifier = GlanceModifier.fillMaxWidth().defaultWeight()) {
-            BatteryTile("Left", usable(state.left), state.leftCharging, palette, GlanceModifier.defaultWeight())
-            Spacer(GlanceModifier.width(6.dp))
-            BatteryTile("Right", usable(state.right), state.rightCharging, palette, GlanceModifier.defaultWeight())
-            Spacer(GlanceModifier.width(6.dp))
-            BatteryTile("Case", usable(state.case), state.caseCharging, palette, GlanceModifier.defaultWeight())
+            if (snapshot.headphones) {
+                BatteryTile("Battery", usable(state.left), state.leftCharging, palette, GlanceModifier.defaultWeight())
+            } else {
+                BatteryTile("Left", usable(state.left), state.leftCharging, palette, GlanceModifier.defaultWeight())
+                Spacer(GlanceModifier.width(6.dp))
+                BatteryTile("Right", usable(state.right), state.rightCharging, palette, GlanceModifier.defaultWeight())
+                Spacer(GlanceModifier.width(6.dp))
+                BatteryTile("Case", usable(state.case), state.caseCharging, palette, GlanceModifier.defaultWeight())
+            }
         }
         if (!controls) return@Column
         Spacer(GlanceModifier.height(6.dp))
@@ -288,7 +292,7 @@ private fun WidgetContent(
 
 /** Shown when the earbuds are away: the last reading, quietly, and how to reconnect. */
 @Composable
-private fun NotConnectedBody(last: BatterySample?, palette: WidgetPalette, modifier: GlanceModifier) {
+private fun NotConnectedBody(last: BatterySample?, palette: WidgetPalette, modifier: GlanceModifier, headphones: Boolean = false) {
     val colors = GlanceTheme.colors
     Column(
         modifier = modifier
@@ -298,17 +302,21 @@ private fun NotConnectedBody(last: BatterySample?, palette: WidgetPalette, modif
             .clickable(actionStartActivity<MainActivity>()),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("Earbuds not connected", style = titleText.copy(color = colors.onSurface), maxLines = 1)
+        Text(if (headphones) "Headphones not connected" else "Earbuds not connected", style = titleText.copy(color = colors.onSurface), maxLines = 1)
         Spacer(GlanceModifier.height(2.dp))
-        Text("Open the case near your phone", style = smallText.copy(color = colors.onSurfaceVariant), maxLines = 1)
+        Text(if (headphones) "Turn them on near your phone" else "Open the case near your phone", style = smallText.copy(color = colors.onSurfaceVariant), maxLines = 1)
         if (last != null) {
             Spacer(GlanceModifier.height(10.dp))
             Row(modifier = GlanceModifier.fillMaxWidth()) {
-                LastLevel("L", usable(last.left), palette, GlanceModifier.defaultWeight())
-                Spacer(GlanceModifier.width(10.dp))
-                LastLevel("R", usable(last.right), palette, GlanceModifier.defaultWeight())
-                Spacer(GlanceModifier.width(10.dp))
-                LastLevel("Case", usable(last.case), palette, GlanceModifier.defaultWeight())
+                if (headphones) {
+                    LastLevel("Battery", usable(last.left), palette, GlanceModifier.defaultWeight())
+                } else {
+                    LastLevel("L", usable(last.left), palette, GlanceModifier.defaultWeight())
+                    Spacer(GlanceModifier.width(10.dp))
+                    LastLevel("R", usable(last.right), palette, GlanceModifier.defaultWeight())
+                    Spacer(GlanceModifier.width(10.dp))
+                    LastLevel("Case", usable(last.case), palette, GlanceModifier.defaultWeight())
+                }
             }
             Spacer(GlanceModifier.height(6.dp))
             Text("Updated ${agoShort(last.time)}", style = smallText.copy(color = colors.onSurfaceVariant), maxLines = 1)

@@ -186,7 +186,8 @@ data class GeneralSetting(val slot: Int, val key: String, val on: Boolean?) {
     companion object {
         private val GS_TITLES = mapOf(
             "MULTIPOINT_SETTING" to ("Connect to Two Devices" to "Stay connected to your phone and another device at the same time"),
-            "SIDETONE_SETTING" to ("Hear Your Voice on Calls" to "Hear yourself in your earbuds while you talk"),
+            "SIDETONE_SETTING" to ("Hear Your Voice on Calls" to "Hear yourself in your ${EarbudModel.active.noun} while you talk"),
+            "TOUCH_PANEL_SETTING" to ("Touch Controls" to "Tap and swipe on the right ear cup to control playback and volume"),
             "TWS_ONE_SIDE_USE_NCASM_SETTING" to ("Noise Control with One Earbud" to "Keeps noise control on when you wear one earbud"),
             "FACETAP_SETTING" to ("Face Tap" to "Tap near your ear instead of on the earbud")
         )
@@ -275,6 +276,8 @@ internal enum class Feature(val test: (SupportedFunctions) -> Boolean) {
     LE_AUDIO_SWITCH({ it.has1(Fn.CLASSIC_LE_SETTING) }),
     VOICE_PROMPTS({ it.has2Any(Fn.T2_VOICE_GUIDANCE) }),
     SAFE_LISTENING({ it.has2Any(Fn.T2_SAFE_LISTENING) }),
+    /** Headphones: the NC/AMB button's cycle (instead of a touch control's). */
+    NC_AMB_BUTTON({ it.has1(Fn.NC_AMB_SELECT) }),
     VOLUME_PROTECTION({ it.has2(Fn.T2_SAFE_VOLUME) }),
 }
 
@@ -352,6 +355,8 @@ internal object SonyFeatures {
     @Volatile private var prioritySub: Int? = null
     private const val SYSTEM_PLAYBACK_BY_WEARING = 0x01
     private const val SYSTEM_ASSIGNABLE = 0x03
+    private const val NCASM_GET_PARAM = 0x66
+    private const val NCASM_BUTTON = 0x30
     private const val SYSTEM_SPEAK_TO_CHAT = 0x0c
     private const val SYSTEM_HEAD_GESTURE = 0x0f
     private const val SYSTEM_T2_AUTO_SWITCH = 0x0a
@@ -383,7 +388,7 @@ internal object SonyFeatures {
         if (r.has(Feature.TOUCH)) r = readTouchCap(s, r)
         if (r.has(Feature.HEAD_GESTURES)) r = readHeadGestures(s, r)
         if (r.has(Feature.AUTO_SWITCH)) r = readAutoSwitch(s, r)
-        if (r.has(Feature.TOUCH)) r = readNoiseCycle(s, r)
+        if (r.has(Feature.TOUCH) || r.has(Feature.NC_AMB_BUTTON)) r = readNoiseCycle(s, r)
         r = readGeneral(s, r)
         if (r.has(Feature.VOICE_PROMPTS)) r = readPrompts(s, r)
         r = if (r.has(Feature.LE_AUDIO_SWITCH)) readLeMode(s, r) else r.copy(leModeSupported = false)
@@ -665,12 +670,21 @@ internal object SonyFeatures {
 
     // Which modes a tap on a "noise control" earbud cycles through: [fb, 03, 01, 00, 01, 00, mode]
     private fun readNoiseCycle(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
+        if (r.has(Feature.NC_AMB_BUTTON)) {
+            // Headphones: the NC/AMB button's cycle, 66 30 -> 67 30 [cycle].
+            val p = s.request(bytes(NCASM_GET_PARAM, NCASM_BUTTON)) ?: return r
+            return if (p.size >= 3) r.copy(noiseCycle = NoiseCycle.from(u(p[2])) ?: r.noiseCycle) else r
+        }
         val p = s.request(bytes(SYSTEM_GET_EXT_PARAM, SYSTEM_ASSIGNABLE)) ?: return r
         if (p.size != 7) return r
         return r.copy(noiseCycle = NoiseCycle.from(u(p[6])) ?: r.noiseCycle)
     }
 
     fun setNoiseCycle(s: SonyBatteryClient.SonySession, r: DeviceSettings, cycle: NoiseCycle): DeviceSettings {
+        if (r.has(Feature.NC_AMB_BUTTON)) {
+            val ok = s.command(bytes(NCASM_GET_PARAM + 2, NCASM_BUTTON, cycle.code))
+            return readNoiseCycle(s, if (ok) r.copy(noiseCycle = cycle) else r)
+        }
         // Send back the preset byte the earbuds report here (the WF-1000XM5 reports 00), as Sound Connect does.
         val preset = s.request(bytes(SYSTEM_GET_EXT_PARAM, SYSTEM_ASSIGNABLE))?.takeIf { it.size == 7 }?.let { u(it[3]) }
             ?: TouchFunction.AMBIENT_SOUND_CONTROL.code
@@ -759,7 +773,7 @@ internal object SonyFeatures {
         fun code(f: TouchFunction) = if (f == TouchFunction.AMBIENT_SOUND_CONTROL) ambientCode else f.code
         val l = left?.let(::code) ?: now?.let { u(it[3]) } ?: r.touchLeft?.let(::code)
         val rt = right?.let(::code) ?: now?.let { u(it[4]) } ?: r.touchRight?.let(::code)
-        if (l == null || rt == null) throw EarbudsUnavailableException("Couldn't load your touch controls. Make sure your earbuds are connected and try again.")
+        if (l == null || rt == null) throw EarbudsUnavailableException("Couldn't load your touch controls. Make sure your ${EarbudModel.active.noun} are connected and try again.")
         // Moving Playback Control (it carries the voice assistant) makes the earbuds ask for a
         // confirmation first (alert 99 00 0f); without an answer they keep the old setting.
         s.withConfirmation(timeoutMs = 1_200) { s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_ASSIGNABLE, 0x02, l, rt)) }

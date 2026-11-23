@@ -3,7 +3,7 @@ package com.peyi.sonypodsbattery
 import android.content.Context
 
 /** What a widget shows: live levels when the earbuds are really connected, else the last reading. */
-internal data class WidgetSnapshot(val connected: Boolean, val state: BatteryState, val last: BatterySample?)
+internal data class WidgetSnapshot(val connected: Boolean, val state: BatteryState, val last: BatterySample?, val headphones: Boolean = false)
 
 internal fun widgetSnapshot(context: Context): WidgetSnapshot {
     val state = BatteryStore.load(context)
@@ -21,7 +21,7 @@ internal fun widgetSnapshot(context: Context): WidgetSnapshot {
         val saved = if (hasLevels) BatterySample(state.updatedAt, state.left, state.right, state.case, false, false, false) else null
         listOfNotNull(logged, saved).maxByOrNull { it.time }
     }
-    return WidgetSnapshot(connected, if (connected) state else BatteryStore.load(context), last)
+    return WidgetSnapshot(connected, if (connected) state else BatteryStore.load(context), last, EarbudModel.current(context).headphones)
 }
 
 internal fun agoShort(time: Long): String {

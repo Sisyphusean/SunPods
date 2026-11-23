@@ -31,6 +31,7 @@ internal object SimProfiles {
     fun forModel(model: EarbudModel, color: Int): SimProfile = when (model) {
         EarbudModel.WF_1000XM5 -> XM5
         EarbudModel.WF_C710N -> C710nProfile.build(color)
+        EarbudModel.WH_1000XM5 -> Wh1000xm5Profile.build(color)
     }
 
     val XM5 = SimProfile(

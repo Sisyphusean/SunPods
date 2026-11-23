@@ -81,7 +81,7 @@ class BatteryPollingService : Service() {
         val notification = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_sunpods_mark)
             .setContentTitle("SunPods")
-            .setContentText("Checking battery levels while your earbuds are connected.")
+            .setContentText("Checking battery levels while your ${EarbudModel.active.noun} are connected.")
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)

@@ -629,7 +629,7 @@ fun SunpodsApp(
                 exit = fadeOut(tween(300))
             ) {
                 LinearProgressIndicator(
-                    Modifier.fillMaxWidth().height(3.dp).semantics { contentDescription = "Saving to your earbuds" },
+                    Modifier.fillMaxWidth().height(3.dp).semantics { contentDescription = "Saving to your ${EarbudModel.active.noun}" },
                     trackColor = Color.Transparent
                 )
             }
@@ -843,7 +843,7 @@ private fun PermissionBanner(onRequest: () -> Unit) {
         Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Allow Nearby Devices", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
             Text(
-                "SunPods needs this to connect to your earbuds over Bluetooth.",
+                "SunPods needs this to connect to your ${EarbudModel.active.noun} over Bluetooth.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer
             )
@@ -1121,19 +1121,26 @@ private fun BatteryCard(battery: BatteryState, busy: Boolean, liveAt: Long = 0L)
         SunCard {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 24.dp)) {
                 val art = LocalBudArt.current
-                BatteryRing("Left", battery.left?.takeIf { it in 1..100 }, battery.leftCharging, art.left, Modifier.weight(1f))
-                BatteryRing("Right", battery.right?.takeIf { it in 1..100 }, battery.rightCharging, art.right, Modifier.weight(1f))
-                // The case reports its level only when the earbuds come out of it. An old reading
-                // greys out and the status line says how old, like Sony's app explains it.
-                BatteryRing(
-                    "Case", battery.case?.takeIf { it in 1..100 }, battery.caseCharging, art.case, Modifier.weight(1f),
-                    muted = caseStale
-                )
+                if (EarbudModel.fromId(art.device)?.headphones == true) {
+                    // Headphones: one battery, no case.
+                    Spacer(Modifier.weight(1f))
+                    BatteryRing("Battery", battery.left?.takeIf { it in 1..100 }, battery.leftCharging, art.left, Modifier.weight(1f))
+                    Spacer(Modifier.weight(1f))
+                } else {
+                    BatteryRing("Left", battery.left?.takeIf { it in 1..100 }, battery.leftCharging, art.left, Modifier.weight(1f))
+                    BatteryRing("Right", battery.right?.takeIf { it in 1..100 }, battery.rightCharging, art.right, Modifier.weight(1f))
+                    // The case reports its level only when the earbuds come out of it. An old reading
+                    // greys out and the status line says how old, like Sony's app explains it.
+                    BatteryRing(
+                        "Case", battery.case?.takeIf { it in 1..100 }, battery.caseCharging, art.case, Modifier.weight(1f),
+                        muted = caseStale
+                    )
+                }
             }
         }
         RollingFooter(
             when {
-                busy -> "Checking your earbuds…"
+                busy -> "Checking your ${EarbudModel.fromId(LocalBudArt.current.device)?.noun ?: "earbuds"}…"
                 battery.updatedAt == 0L -> "Pull down to refresh."
                 outlook.caseNeedsCharge -> "Case battery is low. Charge it tonight."
                 caseStale -> "Updated ${relative(heard)}. Case level from ${relative(caseAt)}."
@@ -1234,9 +1241,13 @@ private fun LastReading(battery: BatteryState) {
         SectionHeader("Last Reading")
         SunCard {
             Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                LevelBar("Left", last.left, Modifier.weight(1f))
-                LevelBar("Right", last.right, Modifier.weight(1f))
-                LevelBar("Case", last.case, Modifier.weight(1f))
+                if (EarbudModel.fromId(LocalBudArt.current.device)?.headphones == true) {
+                    LevelBar("Battery", last.left, Modifier.weight(1f))
+                } else {
+                    LevelBar("Left", last.left, Modifier.weight(1f))
+                    LevelBar("Right", last.right, Modifier.weight(1f))
+                    LevelBar("Case", last.case, Modifier.weight(1f))
+                }
             }
         }
         Footer("Updated ${relative(last.time)}.")
@@ -1308,8 +1319,8 @@ private fun LastSeenCard() {
                         Text("Turn On Last Seen", style = MaterialTheme.typography.titleMedium)
                     }
                     Text(
-                        if (enabled) "Location access is off for SunPods, so Last Seen can't save where your earbuds disconnect."
-                        else "SunPods can save where your earbuds disconnect, so you know where to look. The location stays on this phone.",
+                        if (enabled) "Location access is off for SunPods, so Last Seen can't save where your ${EarbudModel.active.noun} disconnect."
+                        else "SunPods can save where your ${EarbudModel.active.noun} disconnect, so you know where to look. The location stays on this phone.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant
                     )
@@ -1346,7 +1357,7 @@ private fun LastSeenCard() {
         SunCard {
             if (spot == null) {
                 Text(
-                    "SunPods saves the location the next time your earbuds disconnect.",
+                    "SunPods saves the location the next time your ${EarbudModel.active.noun} disconnect.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = colors.onSurfaceVariant,
                     modifier = Modifier.padding(20.dp)
@@ -1520,7 +1531,7 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
         }
         val context = LocalContext.current
         val automation = remember(battery.listeningMode, battery.updatedAt) { AutomationStore.active(context) }
-        Footer(automation?.let { "Set automatically: $it. Choose a mode to take over." } ?: "You can also tap the earbuds to switch modes.")
+        Footer(automation?.let { "Set automatically: $it. Choose a mode to take over." } ?: if (EarbudModel.active.headphones) "You can also press the NC/AMB button to switch modes." else "You can also tap the earbuds to switch modes.")
     }
 }
 
@@ -1704,7 +1715,7 @@ private fun LevelMeter(vm: SunpodsViewModel, sensitive: Boolean) {
                 }
             }
         }
-        Footer("Measured live by your earbuds. Try to keep long listens under $limit dB.")
+        Footer("Measured live by your ${EarbudModel.active.noun}. Try to keep long listens under $limit dB.")
     }
 }
 
@@ -1850,7 +1861,17 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
     val left = settings.touchLeft
     val right = settings.touchRight
 
-    Column {
+    if (!settings.has(Feature.TOUCH) && settings.has(Feature.NC_AMB_BUTTON)) Column {
+        SunCard {
+            var open by remember { mutableStateOf(false) }
+            NavRow(Icons.Rounded.NoiseAware, "NC/AMB Button", settings.noiseCycle?.short ?: "—") { open = true }
+            if (open) {
+                ChoiceSheet("NC/AMB Button Cycles Through", NoiseCycle.entries.toList(), settings.noiseCycle,
+                    label = { it.label }, onDismiss = { open = false }, onPick = vm::setNoiseCycle)
+            }
+        }
+        Footer("Press the NC/AMB button on the left ear cup to switch. Tap and swipe controls are on the right ear cup.")
+    } else Column {
         SunCard {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 val options = settings.touchOptions
@@ -2218,18 +2239,18 @@ private fun EarbudsGroup(settings: DeviceSettings) {
     if (confirmOff) {
         AlertDialog(
             onDismissRequest = { confirmOff = false },
-            title = { Text("Turn off your earbuds?") },
+            title = { Text("Turn off your ${EarbudModel.active.noun}?") },
             text = { Text("They stay off until you put them in the case and take them out again.") },
-            confirmButton = { TextButton(onClick = { confirmOff = false; vm.powerOff { ok -> note = if (ok) null else "Couldn't turn off your earbuds. Make sure they're connected." } }) { Text("Turn Off") } },
+            confirmButton = { TextButton(onClick = { confirmOff = false; vm.powerOff { ok -> note = if (ok) null else "Couldn't turn off your ${EarbudModel.active.noun}. Make sure they're connected." } }) { Text("Turn Off") } },
             dismissButton = { TextButton(onClick = { confirmOff = false }) { Text("Cancel") } }
         )
     }
     if (confirmReset) {
         AlertDialog(
             onDismissRequest = { confirmReset = false },
-            title = { Text("Reset your earbuds' settings?") },
+            title = { Text("Reset your ${EarbudModel.active.noun}' settings?") },
             text = { Text("Equaliser, noise control, touch controls and other settings go back to their defaults. Your paired devices stay.") },
-            confirmButton = { TextButton(onClick = { confirmReset = false; vm.resetSettings { ok -> note = if (ok) "Your earbuds are back to their original settings." else "Couldn't reset your earbuds. Make sure both are connected and try again." } }) { Text("Reset") } },
+            confirmButton = { TextButton(onClick = { confirmReset = false; vm.resetSettings { ok -> note = if (ok) "Your earbuds are back to their original settings." else "Couldn't reset your ${EarbudModel.active.noun}. Make sure both are connected and try again." } }) { Text("Reset") } },
             dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } }
         )
     }
@@ -2261,7 +2282,7 @@ private fun FitTestSheet(vm: SunpodsViewModel, onDone: () -> Unit) {
             val t = tips
             when (shown) {
                 0 -> Text("Getting your earbuds ready…", style = MaterialTheme.typography.bodyMedium)
-                1 -> Text("Couldn't start the fit test. Make sure your earbuds are connected and in your ears.", style = MaterialTheme.typography.bodyMedium)
+                1 -> Text("Couldn't start the fit test. Make sure your ${EarbudModel.active.noun} are connected and in your ears.", style = MaterialTheme.typography.bodyMedium)
                 2 -> {
                     Text("Stay still and quiet while your earbuds play a short tone.", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(16.dp))
@@ -2366,12 +2387,12 @@ private fun LastSeenSettings() {
     }
     Group(
         null,
-        footer = "Saves where your earbuds disconnect, only on this phone.",
+        footer = "Saves where your ${EarbudModel.active.noun} disconnect, only on this phone.",
         rows = buildList {
             add {
                 ToggleRow(
                     Icons.Rounded.LocationOn, "Last Seen",
-                    "Saves where your earbuds disconnect. Stored only on this phone.", enabled
+                    "Saves where your ${EarbudModel.active.noun} disconnect. Stored only on this phone.", enabled
                 ) { on ->
                     if (on && !LastSeenStore.hasLocationPermission(context)) {
                         launcher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))

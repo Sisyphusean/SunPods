@@ -59,6 +59,8 @@ internal object Fn {
 
     // Noise cancelling and ambient sound: 0x61..0x6d, mapped to an NC/ASM inquired type below.
     val NC_ASM = 0x61..0x6d
+    /** The NC/AMB button's cycle on headphones (NcAsm type 0x30). */
+    const val NC_AMB_SELECT = 0x69
 
     const val CLASSIC_LE_SETTING = 0x42
     const val PRESET_EQ = 0x50

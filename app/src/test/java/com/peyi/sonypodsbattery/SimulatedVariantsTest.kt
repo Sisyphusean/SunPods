@@ -82,7 +82,7 @@ class SimulatedVariantsTest {
         assertEquals(EarbudModel.WF_C710N, EarbudModel.fromName("LE_WF-C710N"))
         assertTrue(EarbudModel.WF_C710N.matchesLe("LE_WF-C710N"))
         assertEquals(EarbudModel.WF_1000XM5, EarbudModel.fromName("WF-1000XM5"))
-        assertNull(EarbudModel.fromName("WH-1000XM5"))
+        assertNull(EarbudModel.fromName("WH-CH720N"))   // not supported
         assertTrue(EarbudModel.scanPattern.matcher("WF-C710N").matches())
         assertTrue(EarbudModel.scanPattern.matcher("WF-1000XM5").matches())
     }

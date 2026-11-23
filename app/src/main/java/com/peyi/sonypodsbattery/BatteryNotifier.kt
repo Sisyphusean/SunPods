@@ -18,15 +18,16 @@ object BatteryNotifier {
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Battery Updates", NotificationManager.IMPORTANCE_LOW).apply {
-            description = "Live battery levels while your earbuds are connected."
+            description = "Live battery levels while your earbuds or headphones are connected."
         })
-        val content = listOfNotNull(
+        val model = EarbudModel.current(context)
+        val content = if (model.headphones) state.left?.let { "Battery $it%" }.orEmpty() else listOfNotNull(
             state.left?.let { "L $it%" }, state.right?.let { "R $it%" }, state.case?.let { "Case $it%" }
         ).joinToString("   ")
         val open = PendingIntent.getActivity(context, 20, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = android.app.Notification.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_sunpods_mark)
-            .setContentTitle(EarbudModel.current(context).displayName)
+            .setContentTitle(model.displayName)
             .setContentText(content)
             .setContentIntent(open)
             .setOnlyAlertOnce(true)

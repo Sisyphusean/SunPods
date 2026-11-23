@@ -134,7 +134,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
                 }
                 _battery.value = state
                 if (!state.status.startsWith("Updated") && audioLinkUp(app)) {
-                    _message.value = "Couldn't reach your earbuds. If Sony Sound Connect is open, close it, then pull down to try again."
+                    _message.value = "Couldn't reach your ${EarbudModel.active.noun}. If Sony Sound Connect is open, close it, then pull down to try again."
                 }
                 if (_battery.value.left != null || _battery.value.right != null) {
                     launch { LastSeenStore.captureWhileConnected(app) }
@@ -294,7 +294,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     fun setSafeListening(on: Boolean) {
         val before = _safe.value
         _safe.value = before.copy(first = on)
-        safeJob = applying("Couldn't change Safe Listening. Make sure your earbuds are connected and try again.", { _safe.value = before }) {
+        safeJob = applying("Couldn't change Safe Listening. Make sure your ${EarbudModel.active.noun} are connected and try again.", { _safe.value = before }) {
             RefreshCoordinator.awaitSession(app, "Safe Listening", bothEarbuds = true) { SafeListening.setOn(app, it, on) }.getOrDefault(false)
         }
     }
@@ -338,7 +338,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     fun setVolumeProtection(sensitive: Boolean) {
         val before = _safe.value
         _safe.value = before.copy(second = sensitive)
-        applying("Couldn't change Volume Protection. Make sure your earbuds are connected and try again.", { _safe.value = before }) {
+        applying("Couldn't change Volume Protection. Make sure your ${EarbudModel.active.noun} are connected and try again.", { _safe.value = before }) {
             RefreshCoordinator.awaitSession(app, "Volume Protection", bothEarbuds = true) { SafeListening.setSensitive(app, it, sensitive) }.getOrDefault(false)
         }
     }
@@ -392,7 +392,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     fun setAssistant(value: Int) {
         val before = _assistant.value
         _assistant.value = before?.copy(first = value)
-        applying("Couldn't change your voice assistant. Make sure your earbuds are connected and try again.", { _assistant.value = before }) {
+        applying("Couldn't change your voice assistant. Make sure your ${EarbudModel.active.noun} are connected and try again.", { _assistant.value = before }) {
             RefreshCoordinator.awaitSession(app, "Voice Assistant", bothEarbuds = true) { s ->
                 VoiceAssistantSetting.set(s, value)
                 VoiceAssistantSetting.read(s)
@@ -408,7 +408,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             done(
                 RefreshCoordinator.awaitSession(app, "Fit Test") { FitTest.run(it, tips, size) }
-                    .getOrElse { FitTest.Result(null, null, "Couldn't reach your earbuds. Make sure they're connected and try again.") }
+                    .getOrElse { FitTest.Result(null, null, "Couldn't reach your ${EarbudModel.active.noun}. Make sure they're connected and try again.") }
             )
         }
     }
@@ -450,7 +450,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
                             _rejected.value++
                             _message.value = when (error) {
                                 is EarbudsUnavailableException -> error.message
-                                else -> "Couldn't change $label. Make sure your earbuds are connected and Sony Sound Connect is closed."
+                                else -> "Couldn't change $label. Make sure your ${EarbudModel.active.noun} are connected and Sony Sound Connect is closed."
                             }
                         }
                 }
