@@ -48,18 +48,21 @@ internal fun Hero3D(
     lid: Float = 0f,
     onTap: (() -> Unit)? = null,
 ) {
-    val tap by rememberUpdatedState(onTap)
-    val state = remember { Hero3DState() }
+    // One hero view for the whole screen, kept alive while you move between tabs and pages, so
+    // coming back to Home doesn't reload the 3D scene (which showed as the earbuds vanishing).
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    val state = remember(lifecycle) { HeroCache.stateFor(lifecycle) }
+    SideEffect { HeroCache.onTap = onTap }
     state.color = color
     state.model = model
     state.lid = lid.coerceIn(0f, 1f)
 
-    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> state.view?.onResume()
                 Lifecycle.Event.ON_PAUSE -> state.view?.onPause()
+                Lifecycle.Event.ON_DESTROY -> HeroCache.release(lifecycle)
                 else -> Unit
             }
         }
@@ -72,14 +75,37 @@ internal fun Hero3D(
 
     AndroidView(
         modifier = modifier,
-        factory = { context -> createHeroWebView(context, state) { tap?.invoke() } },
-        onRelease = { view ->
-            state.view = null
-            view.stopLoading()
-            view.removeJavascriptInterface("SunPodsHost")
-            view.destroy()
+        factory = { context ->
+            state.view?.also { (it.parent as? android.view.ViewGroup)?.removeView(it) }
+                ?: createHeroWebView(context, state) { HeroCache.onTap?.invoke() }
         },
+        // Not destroyed here: the next Home screen picks the same view up again.
+        onRelease = { view -> (view.parent as? android.view.ViewGroup)?.removeView(view) },
     )
+}
+
+/** Holds the hero's view and state for one screen (activity) lifetime. */
+private object HeroCache {
+    private var owner: Lifecycle? = null
+    private var state: Hero3DState? = null
+    var onTap: (() -> Unit)? = null
+
+    fun stateFor(lifecycle: Lifecycle): Hero3DState {
+        if (owner !== lifecycle) {
+            state?.view?.destroy()
+            owner = lifecycle
+            state = Hero3DState()
+        }
+        return state!!
+    }
+
+    fun release(lifecycle: Lifecycle) {
+        if (owner !== lifecycle) return
+        state?.view?.let { v -> (v.parent as? android.view.ViewGroup)?.removeView(v); v.stopLoading(); v.removeJavascriptInterface("SunPodsHost"); v.destroy() }
+        state = null
+        owner = null
+        onTap = null
+    }
 }
 
 /** Sony's colour codes from the earbuds: 0x01 Black, 0x03 Platinum Silver, 0x06 Smoky Pink. */
