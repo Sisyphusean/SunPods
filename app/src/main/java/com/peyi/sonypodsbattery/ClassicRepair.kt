@@ -83,11 +83,11 @@ internal object ClassicRepair {
             return@withLock true
         }
         if (classic == null) { log(app, "no Classic address saved"); return@withLock false }
-        // Removing pairings is only safe when the earbuds are out and reachable: right after a
-        // switch (they wait in pairing mode) or while the phone keeps dropping their link. Earbuds
-        // sitting in the case would otherwise lose their pairing for nothing.
-        if (!justSwitched && !SonyControlSessionManager.aclDroppedRecently(app)) {
-            log(app, "earbuds not reachable, keeping the pairing")
+        // Removing pairings is only safe right after a switch the user asked for: the earbuds have
+        // just said they're waiting in pairing mode. Never on a dropped link: a drop can have any
+        // cause, the earbuds then refuse a new pairing, and the phone is left with none at all.
+        if (!justSwitched) {
+            log(app, "not right after a switch, keeping the pairing")
             return@withLock false
         }
         status("Pairing your earbuds")

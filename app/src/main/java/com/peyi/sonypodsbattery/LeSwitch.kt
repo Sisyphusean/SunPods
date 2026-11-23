@@ -161,10 +161,6 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
             ShizukuWatch.start(context)
             // Checked again right before the earbuds change: the phone may have closed Shizuku.
             if (ShizukuBluetooth.state() != ShizukuBluetooth.State.READY) { pendingLe = true; state = Switch.PrepareShizuku; return@launch }
-            if (!lePairingExists() && classicConnected(context)) {
-                state = Switch.Working("Getting LE Audio ready…")
-                LePairing.pairOverClassic(context) { log(it) }
-            }
             SonyControlSessionManager.setClassicOnly(context, false)
             if (!switchEarbuds(true)) {
                 state = Switch.Failed("Couldn't switch. If Sony Sound Connect is open, close it and try again.")
@@ -591,34 +587,3 @@ private fun Step(n: Int, text: String) {
 private fun classicConnected(context: Context): Boolean = runCatching {
     context.getSystemService(BluetoothManager::class.java)?.adapter?.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED
 }.getOrDefault(false)
-
-/**
- * The LE Audio pairing, made while the earbuds are still on Classic and without the case button:
- * SunPods asks the earbuds to enter pairing mode over the control channel (the same request as
- * "Pair a New Device"), pairs their LE side through Shizuku, then ends pairing mode. With the LE
- * pairing in place, the switch itself is just a reconnect.
- */
-internal object LePairing {
-    suspend fun pairOverClassic(context: Context, log: (String) -> Unit): Boolean {
-        val le = EarbudAddresses.le(context)
-        if (le.isEmpty()) { log("LE pairing: no LE addresses yet"); return false }
-        val on = RefreshCoordinator.awaitSession(context, "Pairing mode on") { Multipoint.setPairingMode(it, true) }.getOrDefault(false)
-        log("LE pairing: pairing mode ${if (on) "on" else "refused"}")
-        if (!on) return false
-        try {
-            val ok = ShizukuBluetooth.use(context) { sh ->
-                le.all { address ->
-                    if (sh.bondState(address) == BluetoothDevice.BOND_BONDED) return@all true
-                    log("LE pairing: pair $address: ${sh.bondLe(address)}")
-                    var waited = 0
-                    while (waited < 20_000 && sh.bondState(address) != BluetoothDevice.BOND_BONDED) { Thread.sleep(500); waited += 500 }
-                    (sh.bondState(address) == BluetoothDevice.BOND_BONDED).also { log("LE pairing: $address ${if (it) "paired" else "not paired"}") }
-                }
-            } == true
-            log("LE pairing without the case: ${if (ok) "done" else "didn't finish"}")
-            return ok
-        } finally {
-            RefreshCoordinator.awaitSession(context, "Pairing mode off") { Multipoint.setPairingMode(it, false) }
-        }
-    }
-}

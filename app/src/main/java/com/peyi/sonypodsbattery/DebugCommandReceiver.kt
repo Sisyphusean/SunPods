@@ -19,22 +19,6 @@ import kotlinx.coroutines.launch
  */
 class DebugCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        // --es run lepair: pairs the LE side over Classic without the case button (LePairing).
-        // --es run unpairle: removes the LE-only pairings (random addresses), to test lepair.
-        if (intent.getStringExtra("run") == "lepair" || intent.getStringExtra("run") == "unpairle") {
-            val app = context.applicationContext
-            val pending = goAsync()
-            val which = intent.getStringExtra("run")
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    if (which == "lepair") Log.i("SunPods", "Debug lepair: ${LePairing.pairOverClassic(app) { Log.i("SunPods", it) }}")
-                    else Log.i("SunPods", "Debug unpairle: ${ShizukuBluetooth.use(app) { sh ->
-                        EarbudAddresses.le(app).filter { EarbudAddresses.isRandom(it) }.map { "$it ${sh.removeBond(it)}" }
-                    }}")
-                } finally { pending.finish() }
-            }
-            return
-        }
         // --es run repair: runs the Classic repair as if a switch to Classic had just been confirmed.
         if (intent.getStringExtra("run") == "repair") {
             val app = context.applicationContext
