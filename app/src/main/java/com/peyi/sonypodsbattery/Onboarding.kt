@@ -373,6 +373,7 @@ private fun WelcomeStep(onStart: () -> Unit) {
             // The one live 3D hero: it steps through every supported model (EarbudModel.entries, so new
             // models join by themselves), each in black, even when the user's own model is already known.
             Hero3D(
+                centered = true,
                 device = EarbudModel.entries.first().id,
                 color = "black",
                 cycleDevices = EarbudModel.entries.map { it.id },
@@ -479,7 +480,7 @@ private fun DeviceStep(onNext: () -> Unit) {
             // swipe anywhere changes the device. The name sits right under the picture.
             Box(Modifier.align(Alignment.TopCenter).requiredWidth(heroW).height(heroH)) {
                 Hero3D(
-                    device = model.id, color = "black", softSwap = true, preload = warm,
+                    device = model.id, color = "black", softSwap = true, centered = true, preload = warm,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -499,10 +500,6 @@ private fun DeviceStep(onNext: () -> Unit) {
                 ) {
                     Text(
                         m.displayName, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center, maxLines = 1
-                    )
-                    Text(
-                        m.titleNoun, style = MaterialTheme.typography.titleMedium, color = colors.onSurfaceVariant,
                         textAlign = TextAlign.Center, maxLines = 1
                     )
                     Spacer(Modifier.height(48.dp))

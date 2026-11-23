@@ -119,16 +119,84 @@ function fitCamera(w, h) {
   camera.fov = 2 * Math.atan(tanV) * 180 / Math.PI;
   camera.aspect = aspect;
   camera.updateProjectionMatrix();
+  if (centered && (shift.x || shift.y)) {
+    // an off-axis shift of the frustum: the picture moves on screen, nothing else about it changes
+    camera.projectionMatrix.elements[8] = shift.x;
+    camera.projectionMatrix.elements[9] = shift.y;
+    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Centring (the device picker and Welcome; Home keeps the hero framing). Each model's hero pose has
+// its own offset, so the shown model's projected silhouette (every visible vertex at the rest pose)
+// is measured and the frustum shifted until its box sits at the middle of the canvas, both ways.
+let centered = params.get('centered') === '1';
+const shift = { x: 0, y: 0 };
+let viewW = 0, viewH = 0;
+let forcedSize = null;
+const ptsCache = new Map();
+function activeRoot() {
+  if (state.device === 'xm5') return buds.root;
+  const s = mods[state.device];
+  return s && s.m ? s.m.buds.root : null;
+}
+function heroPoints(root) {
+  const key = state.device;
+  if (ptsCache.has(key)) return ptsCache.get(key);
+  const a0 = state.angle;
+  state.angle = 0; applyPose();
+  root.updateWorldMatrix(true, true);
+  const out = [], v = new THREE.Vector3();
+  (function walk(o) {
+    if (!o.visible) return;
+    const pos = o.isMesh && o.geometry && o.geometry.attributes.position;
+    if (pos) {
+      const step = Math.max(1, Math.ceil(pos.count / 60000));
+      for (let i = 0; i < pos.count; i += step) { v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld); out.push(v.x, v.y, v.z); }
+    }
+    for (const c of o.children) walk(c);
+  })(root);
+  state.angle = a0; applyPose();
+  const pts = new Float32Array(out);
+  if (pts.length) ptsCache.set(key, pts);
+  return pts;
+}
+function recenter() {
+  shift.x = 0; shift.y = 0;
+  if (viewW < 2 || viewH < 2) return;
+  fitCamera(viewW, viewH);
+  const root = centered && state.model === 'buds' ? activeRoot() : null;
+  if (root) {
+    const p = heroPoints(root);
+    if (p.length) {
+      camera.updateMatrixWorld();
+      const e = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).elements;
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (let i = 0; i < p.length; i += 3) {
+        const x = p[i], y = p[i + 1], z = p[i + 2];
+        const w = e[3] * x + e[7] * y + e[11] * z + e[15];
+        if (w <= 0) continue;
+        const nx = (e[0] * x + e[4] * y + e[8] * z + e[12]) / w, ny = (e[1] * x + e[5] * y + e[9] * z + e[13]) / w;
+        if (nx < x0) x0 = nx; if (nx > x1) x1 = nx; if (ny < y0) y0 = ny; if (ny > y1) y1 = ny;
+      }
+      if (x1 > x0) { shift.x = (x0 + x1) / 2; shift.y = (y0 + y1) / 2; fitCamera(viewW, viewH); }
+    }
+  }
+  requestRender();
 }
 function resize() {
   // Size from the window, not CSS: Android's WebView starts at zero height, and 100%/100vh can
   // stay at zero after it grows. innerWidth/innerHeight always follow the real view.
-  const w = Math.max(1, window.innerWidth || canvas.clientWidth), h = Math.max(1, window.innerHeight || canvas.clientHeight);
+  // The app pushes the WebView's own layout size (setSize) on every layout change; it wins over innerWidth,
+  // which can lag behind when the shared view is moved to another screen.
+  const w = forcedSize ? forcedSize.w : Math.max(1, window.innerWidth || canvas.clientWidth), h = forcedSize ? forcedSize.h : Math.max(1, window.innerHeight || canvas.clientHeight);
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DPR_CAP));
   renderer.setSize(w, h, false);
-  fitCamera(w, h);
+  viewW = w; viewH = h;
+  recenter();
   requestRender();
 }
 
@@ -803,6 +871,7 @@ function setDevice(d, fadeMs) {
     setTimeout(() => {
       if (token !== deviceToken) return;
       state.device = want; state.angle = 0; stopMotion();
+      if (centered) { applyPose(); recenter(); }
       requestRender();
       requestAnimationFrame(() => { canvas.style.opacity = '1'; });
     }, fade ? fade + 20 : 170);
@@ -928,6 +997,8 @@ const api = {
   setLid: (v, instant) => setLid(v, !!instant),
   setDevice: (d, fadeMs) => setDevice(String(d), Number(fadeMs) || 0),
   preload: (d) => preload(String(d)),
+  setSize: (w, h) => { w = Number(w); h = Number(h); if (w >= 1 && h >= 1 && (!forcedSize || forcedSize.w !== w || forcedSize.h !== h)) { forcedSize = { w, h }; resize(); } },
+  setCentered: (on) => { on = !!on; if (on !== centered) { centered = on; applyPose(); recenter(); } },
   wiggle, spin,
   get state() { return { ...state }; },
 };

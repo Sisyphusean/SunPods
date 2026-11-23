@@ -24,7 +24,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -46,6 +45,7 @@ import kotlin.math.abs
  *   WebView, every [CYCLE_MS] with a soft fade, each in [color]; the next is preloaded. The timer starts
  *   once the first has drawn. Not with reduced motion (animator duration scale 0): the first one stays.
  *
+ * @param centered shift the picture so the shown model sits in the middle of the view (the device picker and Welcome); Home keeps the hero framing.
  * @param softSwap a change of [device] fades across (the device picker); not with reduced motion.
  * @param preload devices to warm up in the background (all of them, for the device picker), so no swap lands on an empty hero.
  *
@@ -62,6 +62,7 @@ internal fun Hero3D(
     device: String = "xm5",
     cycleDevices: List<String>? = null,
     softSwap: Boolean = false,
+    centered: Boolean = false,
     preload: List<String> = emptyList(),
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -75,21 +76,29 @@ internal fun Hero3D(
     // coming back to Home doesn't reload the 3D scene (which showed as the earbuds vanishing).
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     val state = remember(lifecycle) { HeroCache.stateFor(lifecycle) }
-    SideEffect { HeroCache.onTap = onTap }
-    state.device = shownDevice
-    state.soft = cycling || (softSwap && !reduceMotion)
-    state.preload = nextDevice
-    state.color = color
-    state.model = model
-    state.lid = lid.coerceIn(0f, 1f)
+    // While one page slides out and the next slides in, both hold a Hero3D. Only the newest owns the one
+    // view: the other leaves it alone, so the two never fight over its size, device or position.
+    val token = remember { Any().also { HeroCache.driver = it } }
+    val isOwner = HeroCache.driver === token
+    androidx.compose.runtime.DisposableEffect(token) { onDispose { if (HeroCache.driver === token) HeroCache.driver = null } }
+    SideEffect { if (isOwner) HeroCache.onTap = onTap }
+    if (isOwner) {
+        state.device = shownDevice
+        state.soft = cycling || (softSwap && !reduceMotion)
+        state.centered = centered
+        state.preload = nextDevice
+        state.color = color
+        state.model = model
+        state.lid = lid.coerceIn(0f, 1f)
+    }
 
     // push changes after every recomposition (each is a no-op unless a value changed)
-    SideEffect { state.sync() }
+    SideEffect { if (isOwner) state.sync() }
 
     // Until the 3D page has drawn, show the picture it left last time (same size, same pose), then
     // fade across. Opening the app shows the earbuds at once instead of them popping in.
     val placeholder = if (state.drawn) null else remember(shownDevice, color, model) { HeroSnapshots.load(context, shownDevice, color, model) }
-    if (cycling) LaunchedEffect(state.drawn) {
+    if (cycling && isOwner) LaunchedEffect(state.drawn) {
         if (!state.drawn) return@LaunchedEffect
         while (true) { kotlinx.coroutines.delay(CYCLE_MS); step++ }
     }
@@ -101,8 +110,8 @@ internal fun Hero3D(
     var mountWeb by remember { mutableStateOf(state.view != null) }
     if (!mountWeb) LaunchedEffect(Unit) { withFrameNanos { }; mountWeb = true }
     androidx.compose.foundation.layout.Box(modifier) {
-        if (mountWeb) AndroidView(
-            modifier = Modifier.matchParentSize().onSizeChanged { _ -> state.view?.postDelayed({ state.view?.evaluateJavascript("window.dispatchEvent(new Event('resize'))", null) }, 80) },
+        if (mountWeb && isOwner) AndroidView(
+            modifier = Modifier.matchParentSize(),
             factory = { ctx ->
                 state.hosts++
                 state.view?.also { (it.parent as? android.view.ViewGroup)?.removeView(it) }
@@ -160,6 +169,8 @@ private object HeroCache {
     private var owner: Lifecycle? = null
     private var state: Hero3DState? = null
     var onTap: (() -> Unit)? = null
+    /** The Hero3D that currently drives the view (the newest one composed). */
+    var driver by androidx.compose.runtime.mutableStateOf<Any?>(null)
 
     fun stateFor(lifecycle: Lifecycle): Hero3DState {
         if (owner !== lifecycle) {
@@ -209,6 +220,13 @@ private class Hero3DState {
     var lid = 0f
     /** Slow fade for device swaps (the Welcome cycle), and the device to warm up next. */
     var soft = false
+    var centered = false
+    /** The WebView's own layout size in dp, pushed to the page so its canvas always matches it. */
+    var wDp = 0f
+    var hDp = 0f
+    private var sentW = 0f
+    private var sentH = 0f
+    private var sentCentered = false
     var preload: List<String> = emptyList()
     private val sentPreloads = mutableSetOf<String>()
     private var sentDevice: String? = null
@@ -217,12 +235,20 @@ private class Hero3DState {
     private var sentLid: Float? = null
 
     fun markLoaded(device: String, color: String, model: String, lid: Float) {
-        sentDevice = device; sentColor = color; sentModel = model; sentLid = lid
+        sentDevice = device; sentColor = color; sentModel = model; sentLid = lid; sentCentered = centered; sentW = 0f; sentH = 0f
     }
 
     fun sync() {
         val v = view ?: return
         if (!ready) return
+        if (wDp > 0f && hDp > 0f && (wDp != sentW || hDp != sentH)) {
+            sentW = wDp; sentH = hDp
+            v.evaluateJavascript("window.sunpods&&window.sunpods.setSize&&window.sunpods.setSize($wDp, $hDp)", null)
+        }
+        if (centered != sentCentered) {
+            sentCentered = centered
+            v.evaluateJavascript("window.sunpods&&window.sunpods.setCentered&&window.sunpods.setCentered($centered)", null)
+        }
         // The device first: colours are named per device.
         if (device != sentDevice) {
             sentDevice = device
@@ -264,6 +290,11 @@ private fun createHeroWebView(context: Context, state: Hero3DState, onTap: () ->
     web.isVerticalScrollBarEnabled = false
     web.isHorizontalScrollBarEnabled = false
     web.isHapticFeedbackEnabled = true
+    web.addOnLayoutChangeListener { v, l, t, r, b, _, _, _, _ ->
+        val d = v.resources.displayMetrics.density
+        state.wDp = (r - l) / d; state.hDp = (b - t) / d
+        state.sync()
+    }
     // decorative: the Compose parent carries the hero's semantics
     web.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
     with(web.settings) {
@@ -294,7 +325,8 @@ private fun createHeroWebView(context: Context, state: Hero3DState, onTap: () ->
             web.postDelayed({ state.drawn = true }, 120)
             // Keep this exact picture for next launch (once per colour, model and app version).
             val d = state.device; val c = state.color; val m = state.model
-            if (!HeroSnapshots.has(context, d, c, m)) web.postDelayed({
+            // (Not from the centred pages: Home keeps the hero framing.)
+            if (!state.centered && !HeroSnapshots.has(context, d, c, m)) web.postDelayed({
                 if (state.device == d && state.color == c && state.model == m) web.evaluateJavascript("window.sunpods&&window.sunpods.snapshot()") { r ->
                     val url = r?.trim('"')?.takeIf { it.startsWith("data:image/png") } ?: return@evaluateJavascript
                     Thread { HeroSnapshots.save(context.applicationContext, d, c, m, url) }.start()
@@ -339,6 +371,7 @@ private fun createHeroWebView(context: Context, state: Hero3DState, onTap: () ->
             .appendQueryParameter("color", state.color)
             .appendQueryParameter("model", state.model)
             .appendQueryParameter("lid", state.lid.toString())
+            .appendQueryParameter("centered", if (state.centered) "1" else "0")
             .build().toString()
     )
     return web
