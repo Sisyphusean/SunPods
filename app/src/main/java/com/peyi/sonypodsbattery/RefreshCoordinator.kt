@@ -689,37 +689,30 @@ private object SonyCommandCoordinator {
         val t0 = System.currentTimeMillis()
         // Bind A2DP before picking, so the pick can prefer the paired entry that's actually playing.
         A2dpConnectionHelper.ensureBound(app)
-        val picked = command.device ?: client.findEarbuds()
-        var target = picked
-        if (picked != null) {
-            val onA2dp = A2dpConnectionHelper.isConnected(app, picked)
-            val other = if (onA2dp == true) null else A2dpConnectionHelper.connectedNow()
-                .firstOrNull { it.address != picked.address && runCatching { EarbudModel.isSupported(it.name) }.getOrDefault(false) }
-            val (mediaUp, callsUp) = A2dpConnectionHelper.profilesUp(app)
-            // Say how the earbuds are (or aren't) connected, for reports from other phones.
-            if (!command.automatic || onA2dp != true) DiagnosticsStore.add(app, A2dpConnectionHelper.describe(app, picked, onA2dp))
-            when (linkVerdict(onA2dp, other != null, mediaUp, callsUp, manual = !command.automatic)) {
-                LinkVerdict.USE_TARGET ->
-                    EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, picked)
-                LinkVerdict.USE_OTHER_ENTRY -> {
-                    DiagnosticsStore.add(app, "Using the paired entry that's on A2DP (…${other!!.address.takeLast(5)})")
-                    target = other
-                    EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, other)
+        val target = command.device ?: client.findEarbuds()
+        if (target != null) {
+            val onA2dp = A2dpConnectionHelper.isConnected(app, target)
+            val manual = !command.automatic
+            if (onA2dp != true || manual) {
+                // Say how the earbuds are (or aren't) connected, for reports from other phones.
+                val (media, calls) = A2dpConnectionHelper.profilesUp(app)
+                DiagnosticsStore.add(app, A2dpConnectionHelper.describe(target, onA2dp, media, calls, LeAudio.anyConnected(app)))
+                when (linkVerdict(onA2dp, media || calls, manual)) {
+                    LinkVerdict.USE_TARGET -> EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, target)
+                    LinkVerdict.TRY_ANYWAY -> DiagnosticsStore.add(app, "Earbuds not listed on A2DP, but Bluetooth audio is up; trying the control channel")
+                    LinkVerdict.SKIP -> {
+                        DiagnosticsStore.add(app, "A2DP disconnected; refresh skipped")
+                        handleA2dpDisconnected(app, target)
+                        command.onComplete?.invoke()
+                        return persistCheckedState(BatteryStore.load(app))
+                    }
+                    LinkVerdict.UNKNOWN -> {
+                        DiagnosticsStore.add(app, "A2DP state unavailable; refresh skipped")
+                        command.onComplete?.invoke()
+                        return persistCheckedState(previous.copy(status = "Couldn't check your earbuds' connection. Try again."))
+                    }
                 }
-                LinkVerdict.TRY_ANYWAY ->
-                    DiagnosticsStore.add(app, "Earbuds not listed on A2DP, but Bluetooth audio is up; trying the control channel")
-                LinkVerdict.SKIP -> {
-                    DiagnosticsStore.add(app, "A2DP disconnected; refresh skipped (LE Audio ${if (LeAudio.anyConnected(app)) "connected" else "not connected"})")
-                    handleA2dpDisconnected(app, picked)
-                    command.onComplete?.invoke()
-                    return persistCheckedState(BatteryStore.load(app))
-                }
-                LinkVerdict.UNKNOWN -> {
-                    DiagnosticsStore.add(app, "A2DP state unavailable; refresh skipped")
-                    command.onComplete?.invoke()
-                    return persistCheckedState(previous.copy(status = "Couldn't check your earbuds' connection. Try again."))
-                }
-            }
+            } else EarbudConnectionStateStore.markWithDiagnostics(app, EarbudConnectionState.CONNECTED, target)
         }
         if (command.automatic && EarbudConnectionStateStore.current(app) == EarbudConnectionState.DISCONNECTED) {
             DiagnosticsStore.add(app, "Automatic refresh skipped: disconnected")

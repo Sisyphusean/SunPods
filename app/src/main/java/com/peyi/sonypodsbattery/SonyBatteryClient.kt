@@ -428,6 +428,10 @@ class SonyBatteryClient(private val context: Context) {
         @Volatile private var lastPickAt = 0L
 
         fun isTargetModel(name: String): Boolean = EarbudModel.isSupported(name)
+
+        /** A paired entry of supported earbuds; false when Android won't give its name. */
+        @SuppressLint("MissingPermission")
+        fun isSupportedEntry(device: BluetoothDevice): Boolean = runCatching { EarbudModel.isSupported(device.name) }.getOrDefault(false)
     }
 
     data class Result(
@@ -473,29 +477,20 @@ class SonyBatteryClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     private fun pickEarbuds(): BluetoothDevice? {
         val adapter = BluetoothAdapter.getDefaultAdapter() ?: return null
-        lastPick?.let { addr ->
-            if (System.currentTimeMillis() - lastPickAt < 30_000) {
-                runCatching { adapter.getRemoteDevice(addr) }.getOrNull()?.takeIf { it.bondState == BluetoothDevice.BOND_BONDED }?.let { return it }
-            }
-        }
         val bonded = adapter.bondedDevices.filter { device -> EarbudModel.isSupported(device.name) }
-        if (bonded.size <= 1) return bonded.firstOrNull().also { lastPick = it?.address; lastPickAt = System.currentTimeMillis() }
-        // Two different pairs (say a WF-1000XM5 and a WF-C710N): the one playing now wins.
-        val playing = A2dpConnectionHelper.connectedNow().map { it.address }.toSet()
-        bonded.filter { it.address in playing }.takeIf { p -> p.map { EarbudModel.fromName(it.name) }.distinct().size == 1 && bonded.map { EarbudModel.fromName(it.name) }.distinct().size > 1 }
-            ?.first()?.let { lastPick = it.address; lastPickAt = System.currentTimeMillis(); return it }
-        EarbudAddresses.classic(context)?.let { saved ->
-            bonded.firstOrNull { it.address.equals(saved, true) }?.let { lastPick = it.address; lastPickAt = System.currentTimeMillis(); return it }
-        }
-        // Phones that also paired the LE Audio side list the earbuds more than once. Taking the
-        // first entry could pick an LE-only one, which never shows on A2DP and has no Classic
-        // control channel, so every refresh was skipped. Prefer the one playing audio now, then
-        // the Classic entry (public address), and only then anything else.
+        if (bonded.isEmpty()) return null
+        // The entry on A2DP right now is the one Android is using, so it wins over anything
+        // remembered: Classic and LE Audio bond separately, and a remembered entry can go stale
+        // (a WF-1000XM5 on Classic was skipped as disconnected on every refresh because of that).
         val live = A2dpConnectionHelper.connectedNow().map { it.address }.toSet()
         val pick = bonded.firstOrNull { it.address in live }
+            ?: lastPick?.takeIf { System.currentTimeMillis() - lastPickAt < 30_000 }?.let { addr -> bonded.firstOrNull { it.address == addr } }
+            ?: EarbudAddresses.classic(context)?.let { saved -> bonded.firstOrNull { it.address.equals(saved, true) } }
+            // Not playing and nothing remembered: the Classic entry (public address), since an
+            // LE-only entry never shows on A2DP and has no Classic control channel.
             ?: bonded.firstOrNull { it.type != BluetoothDevice.DEVICE_TYPE_LE && !EarbudAddresses.isRandom(it.address) }
             ?: bonded.first()
-        if (lastPick != pick.address) DiagnosticsStore.add(
+        if (bonded.size > 1 && lastPick != pick.address) DiagnosticsStore.add(
             context,
             "Earbuds: ${bonded.size} paired entries, using ${if (pick.address in live) "the one playing" else if (EarbudAddresses.isRandom(pick.address)) "an LE entry" else "the Classic entry"} (…${pick.address.takeLast(5)})"
         )
