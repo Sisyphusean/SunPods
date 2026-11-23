@@ -58,18 +58,7 @@ object SonyControlSessionManager {
 
     @SuppressLint("MissingPermission")
     /** One command at a time on the link, so live checks never interleave with other requests. */
-    private val io = object : java.util.concurrent.locks.ReentrantLock() {
-        // Debug builds: who holds the link, for "link busy" diagnostics.
-        @Volatile var where: String = ""
-        override fun lock() { super.lock(); if (BuildConfig.TOOLS && holdCount == 1) where = holderTrace() }
-        override fun tryLock(): Boolean = super.tryLock().also { ok -> if (ok && BuildConfig.TOOLS && holdCount == 1) where = holderTrace() }
-        override fun tryLock(timeout: Long, unit: java.util.concurrent.TimeUnit): Boolean =
-            super.tryLock(timeout, unit).also { ok -> if (ok && BuildConfig.TOOLS && holdCount == 1) where = holderTrace() }
-        fun ownerName(): String? = owner?.name
-        private fun holderTrace() = Thread.currentThread().name + " " + Thread.currentThread().stackTrace
-            .filter { it.className.startsWith("com.peyi") && !it.className.contains("SonyControlSessionManager\$io") }
-            .take(6).joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
-    }
+    private val io = java.util.concurrent.locks.ReentrantLock()
 
     internal fun <T> withSession(
         context: Context,
@@ -198,10 +187,7 @@ object SonyControlSessionManager {
         waitMs: Long = 0,
         action: (SonyBatteryClient.SonySession) -> T
     ): T? {
-        if (!(if (waitMs > 0) io.tryLock(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS) else io.tryLock())) {
-            if (BuildConfig.TOOLS) android.util.Log.d("SunPods", "Link held by ${io.ownerName()} (${io.where})")
-            return null
-        }
+        if (!(if (waitMs > 0) io.tryLock(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS) else io.tryLock())) return null
         try {
             return withSession(context, device, action)
         } finally {
@@ -427,6 +413,8 @@ object SonyControlSessionManager {
 
 class SonyBatteryClient(private val context: Context) {
     companion object {
+        /** The earbuds whose name last set the model. */
+        @Volatile private var notedAddress: String? = null
         @Volatile private var lastPick: String? = null
         @Volatile private var lastPickAt = 0L
 
@@ -468,7 +456,9 @@ class SonyBatteryClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun findEarbuds(): BluetoothDevice? {
         SimMode.device(context)?.let { device -> SimMode.model(context)?.let { EarbudModel.noteModelName(it.displayName) }; return device }
-        return pickEarbuds()?.also { device -> runCatching { EarbudModel.noteModelName(device.name) } }
+        return pickEarbuds()?.also { device ->
+            if (device.address != notedAddress) { notedAddress = device.address; runCatching { EarbudModel.noteModelName(device.name) } }
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -666,7 +656,7 @@ class SonyBatteryClient(private val context: Context) {
         /** Asks the earbuds which listening mode they're actually in. */
         fun readMode(): ModeReport? {
             // The type these earbuds list for noise control, else the last one that answered, else probe.
-            val listed = functions()?.table1?.firstNotNullOfOrNull { if (it in Fn.NC_ASM) Fn.ncAsmType(it) else null }?.toByte()
+            val listed = functions()?.ncAsmType?.toByte()
             val types = listed?.let { listOf(it) } ?: noiseType?.let { listOf(it) } ?: listOf<Byte>(0x17, 0x15)
             for (t in types) {
                 val p = request(byteArrayOf(0x66, t), 800) ?: continue
@@ -689,7 +679,7 @@ class SonyBatteryClient(private val context: Context) {
         fun setAmbientSoundMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean): String {
             val enabled = if (mode == ListeningMode.OFF) 0 else 1
             val ambient = if (mode == ListeningMode.AMBIENT) 1 else 0
-            val type = functions()?.table1?.firstNotNullOfOrNull { if (it in Fn.NC_ASM) Fn.ncAsmType(it) else null }?.toByte()
+            val type = functions()?.ncAsmType?.toByte()
                 ?: noiseType ?: 0x17.toByte()
             // The XM5 takes noise control on type 0x17; an unknown type is acknowledged but ignored.
             val payload = byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), if (focusOnVoice) 0x01 else 0x00, ambientLevel.coerceIn(1, 20).toByte())

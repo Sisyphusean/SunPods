@@ -68,8 +68,8 @@ internal object C710nProfile {
         confirm = { state, table, p ->
             when {
                 table != SonyProtocol.DATA_MDR || p.size < 2 -> null
-                (p[0].toInt() and 0xff) == 0xd8 && (p[1].toInt() and 0xff) == 0xd1 -> 0x07
-                (p[0].toInt() and 0xff) == 0xf8 && (p[1].toInt() and 0xff) == 0x03 && p.size >= 5 -> 0x0f.takeIf { SimProfiles.movesPlayback(state, p) }
+                SimProfiles.u(p[0]) == 0xd8 && SimProfiles.u(p[1]) == 0xd1 -> 0x07
+                SimProfiles.u(p[0]) == 0xf8 && SimProfiles.u(p[1]) == 0x03 && p.size >= 5 -> 0x0f.takeIf { SimProfiles.movesPlayback(state, p) }
                 else -> null
             }
         },

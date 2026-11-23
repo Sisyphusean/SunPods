@@ -75,6 +75,9 @@ android {
     // Protocol code logs through android.util.Log; in JVM tests those calls are no-ops.
     testOptions { unitTests.isReturnDefaultValues = true }
 
+    // The benchmark build carries the same adb hook as debug builds (one manifest for both)
+    sourceSets["benchmark"].manifest.srcFile("src/debug/AndroidManifest.xml")
+
     buildFeatures {
         compose = true
         aidl = true

@@ -12,6 +12,8 @@ internal data class SupportedFunctions(val table1: Set<Int>, val table2: Set<Int
     /** Table 2 features count as there when the earbuds didn't answer for table 2 (an older pair). */
     fun has2(vararg codes: Int) = table2 == null || codes.any { it in table2 }
     fun has2Any(codes: IntRange) = table2 == null || codes.any { it in table2 }
+    /** The NC/ASM inquired type the listed noise control function is driven on. */
+    val ncAsmType: Int? get() = table1.firstNotNullOfOrNull(Fn::ncAsmType)
 
     /** Sorted hex, for saving with the settings: "29 2a 6b ..." */
     fun encode1(): String = table1.sorted().joinToString(" ") { "%02x".format(it) }

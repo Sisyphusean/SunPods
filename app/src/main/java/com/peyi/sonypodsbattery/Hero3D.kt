@@ -111,7 +111,7 @@ private object HeroSnapshots {
         val first = when {
             model != "buds" -> null
             device == "xm5" && color == "black" -> "turntable/f000.webp"
-            device == "c710n" && color in setOf("black", "white", "pink", "blue") -> "turntable/c710n_$color.webp"
+            device == EarbudModel.WF_C710N.id -> "turntable/c710n_$color.webp"
             else -> null
         } ?: return null
         return runCatching {

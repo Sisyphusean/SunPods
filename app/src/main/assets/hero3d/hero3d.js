@@ -687,7 +687,6 @@ function setModel(m) {
   const ready = deviceTarget === 'c710n' ? loadC7() : want === 'case' ? loadCase() : loadBuds();
   ready.then(() => {
     if (token !== modelToken) return;
-    c7Release();
     if (state.model === want) { requestRender(); return; }
     canvas.style.opacity = '0';
     setTimeout(() => {
@@ -708,40 +707,29 @@ let deviceTarget = state.device;   // the device asked for last; state.device fo
 const colorFor = { xm5: 'black', c710n: 'black' };
 colorFor[state.device] = state.color;
 let finishC7 = null;
-// A WF-C710N start keeps what its first frame doesn't draw out of the scene until that frame is up:
-// the model not shown, and the hidden parts of the other finish (Glass Blue's inner parts, or the
-// opaque ones). compile() would otherwise build programs for all of them first.
-let c7Held = [];
-function c7Hold() {
-  c7Held = [];
-  if (state.device !== 'c710n' || !C7) return;
-  const shown = state.model === 'case' ? C7.kase.root : C7.buds.root;
-  c7Held.push([state.model === 'case' ? C7.buds.root : C7.kase.root, scene]);
-  const off = new Set();
-  shown.traverse((o) => {
-    if (o === shown || o.visible) return;
-    for (let p = o.parent; p; p = p.parent) if (off.has(p)) return;
-    off.add(o);
-  });
-  for (const o of off) c7Held.push([o, o.parent]);
-  for (const [o, parent] of c7Held) parent.remove(o);
+// compile() builds a program for every material under what it's given, shown or not. A WF-C710N start
+// compiles only what is drawn (stand-in meshes sharing the geometry and materials, lit by the real
+// scene), so its first frame doesn't wait for the case or the other finishes; the rest follows idle.
+function compileShown(root) {
+  const ws = new THREE.Scene();
+  const walk = (o) => {
+    if (o !== root && !o.visible) return;
+    if (o.isMesh && o.material) ws.add(new THREE.Mesh(o.geometry, o.material));
+    for (const c of o.children) walk(c);
+  };
+  walk(root);
+  return renderer.compileAsync(ws, camera, scene);
 }
-// The glass programs, built off screen (their meshes are never drawn) while the page is idle.
+// The glass programs, off screen, for switching finishes by hand (tools and demo); real earbuds keep
+// their own colour, so a normal start never needs them.
 function c7Warm() {
-  if (!C7 || !C7.warm || C7.warm.parent) return;
+  if (!C7 || !C7.warm) return;
   const ws = new THREE.Scene(); ws.add(C7.warm);
   renderer.compileAsync(ws, camera, scene).then(() => mark('glass programs ready')).catch(() => {});
 }
-function c7Release() {
-  if (!c7Held.length) return false;
-  for (const [o, parent] of c7Held) parent.add(o);
-  c7Held = [];
-  applyPose(); requestRender();
-  return true;
-}
 function loadC7() {
   c7Promise = c7Promise || import('./c710n.js').then((mod) => {
-    C7 = mod.createC710N({ THREE, patched, lin, spec, coat, SHEEN_K, DEBUG, caseRest: blenderMatrixToThree(CASE_REST) });
+    C7 = mod.createC710N({ THREE, patched, lin, DEBUG, caseRest: blenderMatrixToThree(CASE_REST) });
     scene.add(C7.buds.root, C7.kase.root);
     finishC7 = C7.finishCopy(colorFor.c710n);
     C7.applyFinish(finishC7);
@@ -752,7 +740,6 @@ function loadC7() {
 let colorAnimC7 = null;
 function setColorC7(name, instant) {
   if (!C7_COLORS.includes(name) && !(DEBUG && C7 && C7.FINISHES[name])) return;
-  c7Release();
   colorFor.c710n = name;
   state.color = name;
   if (!C7) { loadC7().then(() => { if (colorFor.c710n === name) setColorC7(name, true); }); return; }
@@ -783,7 +770,6 @@ function setDevice(d) {
   const ready = want === 'c710n' ? loadC7() : state.model === 'case' ? loadCase() : loadBuds();
   ready.then(() => {
     if (token !== deviceToken) return;
-    c7Release();
     if (state.device === want) { requestRender(); return; }
     canvas.style.opacity = '0';
     setTimeout(() => {
@@ -791,7 +777,6 @@ function setDevice(d) {
       state.device = want; state.angle = 0; stopMotion();
       requestRender();
       requestAnimationFrame(() => { canvas.style.opacity = '1'; });
-      if (want === 'c710n') setTimeout(c7Warm, 600);
     }, 170);
   });
 }
@@ -942,10 +927,7 @@ async function start() {
   window.addEventListener('resize', resize);
   resize();
   applyPose();
-  // compile() builds a program for every material in the scene, shown or not; a WF-C710N start
-  // holds the model it isn't showing back until the first frame is up, as the XM5 loads it later
-  c7Hold();
-  await renderer.compileAsync(scene, camera);
+  await (state.device === 'c710n' && C7 ? compileShown(state.model === 'case' ? C7.kase.root : C7.buds.root) : renderer.compileAsync(scene, camera));
   mark('shaders');
   renderer.render(scene, camera);
   mark('first frame, ' + (renderer.info.programs || []).length + ' programs' + (DEBUG ? ': ' + (renderer.info.programs || []).map((p) => p.name).join(' ') : ''));
@@ -956,8 +938,8 @@ async function start() {
   // (a WF-C710N start loads the XM5 files only if setDevice('xm5') asks for them)
   if (state.device === 'c710n') {
     setTimeout(() => {
-      if (c7Release()) renderer.compileAsync(scene, camera).then(() => mark('other model ready')).catch(() => {});
-      c7Warm();
+      compileShown(state.model === 'case' ? C7.buds.root : C7.kase.root).then(() => mark('other model ready')).catch(() => {});
+      if (DEBUG) c7Warm();
     }, 600);
     return;
   }
@@ -985,7 +967,6 @@ api.snapshot = () => {
 if (DEBUG) {
   api.debugShot = async ({ color = 'black', model = 'buds', angle = 0, lid = 0, w = 1000, h = 712, device = state.device } = {}) => {
     await (device === 'c710n' ? loadC7() : model === 'case' ? loadCase() : loadBuds());
-    c7Release();
     stopMotion(); anims.clear();
     deviceToken++; deviceTarget = state.device = device === 'c710n' ? 'c710n' : 'xm5';
     setColor(color, true);
@@ -1003,7 +984,6 @@ if (DEBUG) {
   // WF-C710N tools (branding/render/c710n/tools): scene access for fitted-camera boards and clips
   api.debugC7 = async (load = true) => {
     if (load) await loadC7();
-    c7Release();
     return { THREE, scene, camera, renderer, canvas, C7, state, applyPose, fitCamera, resize, stopMotion, anims, setColor,
       setDeviceNow: (d) => { deviceToken++; deviceTarget = state.device = d; } };
   };
@@ -1013,7 +993,7 @@ if (DEBUG) {
     await loadC7();
     const mod = await import('./c710n.js');
     scene.remove(C7.buds.root, C7.kase.root);
-    C7 = mod.createC710N({ THREE, patched, lin, spec, coat, SHEEN_K, DEBUG, overrides, caseRest: blenderMatrixToThree(CASE_REST) });
+    C7 = mod.createC710N({ THREE, patched, lin, DEBUG, overrides, caseRest: blenderMatrixToThree(CASE_REST) });
     scene.add(C7.buds.root, C7.kase.root);
     finishC7 = C7.finishCopy(colorFor.c710n);
     C7.applyFinish(finishC7);

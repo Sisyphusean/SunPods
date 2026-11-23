@@ -87,10 +87,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         StartupLog.mark("setContent done")
-        window.decorView.viewTreeObserver.addOnDrawListener(object : android.view.ViewTreeObserver.OnDrawListener {
-            var done = false
-            override fun onDraw() { if (!done) { done = true; StartupLog.mark("first draw") } }
-        })
+        if (BuildConfig.TOOLS) androidx.core.view.OneShotPreDrawListener.add(window.decorView) { StartupLog.mark("first draw") }
         // First run: setup asks for everything with explanations, so don't fire bare prompts.
         if (!onboarding) { if (!hasPermission) askForPermissions() else BackgroundAccess.askOnce(this) }
     }

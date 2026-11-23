@@ -52,8 +52,8 @@ enum class EarbudModel(
         }
 
         /** Names to look for when scanning for or picking earbuds to set up. */
-        val scanPattern: java.util.regex.Pattern =
-            java.util.regex.Pattern.compile(".*WF[- ]?(1000XM5|C710N).*", java.util.regex.Pattern.CASE_INSENSITIVE)
+        val scanPattern: java.util.regex.Pattern = java.util.regex.Pattern.compile(
+            ".*(" + entries.joinToString("|") { it.pattern.pattern } + ").*", java.util.regex.Pattern.CASE_INSENSITIVE)
 
         /** "WF-1000XM5 or WF-C710N", for copy written before a pair is known. */
         val anyName: String get() = entries.joinToString(" or ") { it.displayName }
