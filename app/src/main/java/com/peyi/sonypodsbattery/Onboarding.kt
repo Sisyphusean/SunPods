@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -444,7 +445,6 @@ private fun DeviceStep(onNext: () -> Unit) {
     }
     val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = start) { models.size }
     val model = models[pager.currentPage]
-    val next = models[(pager.currentPage + 1) % models.size]
     var showMore by rememberSaveable { mutableStateOf(false) }
     fun goTo(i: Int) { scope.launch { if (reduceMotion) pager.scrollToPage(i) else pager.animateScrollToPage(i) } }
 
@@ -459,12 +459,15 @@ private fun DeviceStep(onNext: () -> Unit) {
             "Swipe to find yours.", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant,
             textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.fillMaxWidth()
         )
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            // The hero stays put and the pager lays over it, so a swipe anywhere changes the device.
-            Box(Modifier.fillMaxSize().padding(bottom = 128.dp), contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+          val heroH = minOf(320.dp, maxHeight - 120.dp).coerceAtLeast(200.dp)
+          Box(Modifier.fillMaxWidth().height(heroH + 100.dp)) {
+            // The hero stays put (wider than the screen, so the earbuds are big) and the pager lays over
+            // it, so a swipe anywhere changes the device. The name sits right under the earbuds.
+            Box(Modifier.align(Alignment.TopCenter).requiredWidth(heroH * 1.4f).height(heroH)) {
                 Hero3D(
-                    device = model.id, color = "black", softSwap = true, preload = next.id,
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).fillMaxHeight()
+                    device = model.id, color = "black", softSwap = true, preload = models.map { it.id },
+                    modifier = Modifier.fillMaxSize()
                 )
             }
             androidx.compose.foundation.pager.HorizontalPager(
@@ -489,7 +492,7 @@ private fun DeviceStep(onNext: () -> Unit) {
                         m.titleNoun, style = MaterialTheme.typography.titleMedium, color = colors.onSurfaceVariant,
                         textAlign = TextAlign.Center, maxLines = 1
                     )
-                    Spacer(Modifier.height(56.dp))
+                    Spacer(Modifier.height(48.dp))
                 }
             }
             // Page dots; each is a 48dp target that jumps to its device.
@@ -512,6 +515,7 @@ private fun DeviceStep(onNext: () -> Unit) {
                 }
             }
         }
+    }
         Button(
             onClick = { EarbudModel.choose(context, model); onNext() },
             modifier = Modifier.fillMaxWidth().height(56.dp)
@@ -527,8 +531,17 @@ private fun DeviceStep(onNext: () -> Unit) {
                 Text("Supported Devices", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
                 Spacer(Modifier.height(8.dp))
                 models.forEach { m ->
-                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconTile(Icons.Rounded.Headphones)
+                    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // The model's own black picture on the same tonal cookie as every other icon.
+                        Box(
+                            Modifier.size(56.dp).clip(CookieShape()).background(colors.secondaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                painterResource(budArt(0x01, m).pair), contentDescription = null,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.size(42.dp)
+                            )
+                        }
                         Spacer(Modifier.width(14.dp))
                         Column {
                             Text(m.displayName, style = MaterialTheme.typography.titleSmall)

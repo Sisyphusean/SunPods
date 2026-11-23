@@ -47,7 +47,7 @@ import kotlin.math.abs
  *   once the first has drawn. Not with reduced motion (animator duration scale 0): the first one stays.
  *
  * @param softSwap a change of [device] fades across (the device picker); not with reduced motion.
- * @param preload a device to warm up in the background, so the next swap is instant.
+ * @param preload devices to warm up in the background (all of them, for the device picker), so no swap lands on an empty hero.
  *
  * Horizontal drags spin the earbuds (fling, then they ease home 2.5 s after the finger lifts,
  * with a haptic tick); vertical drags are left to the scrolling parent.
@@ -62,7 +62,7 @@ internal fun Hero3D(
     device: String = "xm5",
     cycleDevices: List<String>? = null,
     softSwap: Boolean = false,
-    preload: String? = null,
+    preload: List<String> = emptyList(),
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val cycle = cycleDevices?.takeIf { it.size > 1 }
@@ -70,7 +70,7 @@ internal fun Hero3D(
     val cycling = cycle != null && !reduceMotion
     var step by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val shownDevice = if (cycle != null) cycle[step % cycle.size] else device
-    val nextDevice = if (cycling) cycle!![(step + 1) % cycle.size] else preload
+    val nextDevice = if (cycling) listOf(cycle!![(step + 1) % cycle.size]) else preload
     // One hero view for the whole screen, kept alive while you move between tabs and pages, so
     // coming back to Home doesn't reload the 3D scene (which showed as the earbuds vanishing).
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
@@ -209,8 +209,8 @@ private class Hero3DState {
     var lid = 0f
     /** Slow fade for device swaps (the Welcome cycle), and the device to warm up next. */
     var soft = false
-    var preload: String? = null
-    private var sentPreload: String? = null
+    var preload: List<String> = emptyList()
+    private val sentPreloads = mutableSetOf<String>()
     private var sentDevice: String? = null
     private var sentColor: String? = null
     private var sentModel: String? = null
@@ -229,11 +229,8 @@ private class Hero3DState {
             sentColor = null
             v.evaluateJavascript("window.sunpods&&window.sunpods.setDevice&&window.sunpods.setDevice(${js(device)}${if (soft) ", $SOFT_FADE_MS" else ""})", null)
         }
-        preload?.let { p ->
-            if (p != sentPreload) {
-                sentPreload = p
-                v.evaluateJavascript("window.sunpods&&window.sunpods.preload&&window.sunpods.preload(${js(p)})", null)
-            }
+        for (p in preload) if (sentPreloads.add(p)) {
+            v.evaluateJavascript("window.sunpods&&window.sunpods.preload&&window.sunpods.preload(${js(p)})", null)
         }
         if (color != sentColor) {
             sentColor = color
