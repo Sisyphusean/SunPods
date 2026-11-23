@@ -36,3 +36,8 @@
 /SunPods-*.zip
 /SunPods-*.apk
 hs_err_pid*.log
+
+# Sony product photos used only as colour references; not ours to publish.
+branding/render/ref_*/
+branding/render/ref360/
+branding/render/hero3d_preview/_sheet_vs_current_and_sony.jpg
