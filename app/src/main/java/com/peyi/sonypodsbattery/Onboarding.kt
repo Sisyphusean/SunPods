@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -76,11 +77,14 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -427,8 +431,9 @@ private fun Feature(icon: ImageVector, title: String, body: String) {
 // -------------------------------------------------------------------------------- 2 choose your device
 
 /**
- * One device at a time, big and centred, in the live 3D hero. Swipe to change it: the name and kind
- * move with your finger, and the hero fades across to the one you land on.
+ * Everyone picks their own device; nothing is guessed or suggested here. An Earbuds | Headphones switch
+ * chooses the family, then one device at a time in the live 3D hero: swipe to change it, and the hero
+ * fades across to the one you land on. "See All" lists every model by series, with search.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -436,17 +441,22 @@ private fun DeviceStep(onNext: () -> Unit) {
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
-    val models = EarbudModel.entries
     val reduceMotion = remember { Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) <= 0f }
-    // Start on what they picked before, or what their earbuds said they are, or the first.
-    val start = remember {
-        (EarbudModel.chosen(context) ?: EarbudModel.fromName(SettingsStore.modelName(context)))
-            ?.let { models.indexOf(it) }?.coerceAtLeast(0) ?: 0
-    }
-    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = start) { models.size }
-    val model = models[pager.currentPage]
-    var showMore by rememberSaveable { mutableStateOf(false) }
+    var headphones by rememberSaveable { mutableStateOf(false) }
+    val models = remember(headphones) { EarbudModel.entries.filter { it.headphones == headphones } }
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = 0) { models.size }
+    val model = models[pager.currentPage.coerceIn(0, models.lastIndex)]
+    var showAll by rememberSaveable { mutableStateOf(false) }
+    var jumpTo by remember { mutableStateOf<EarbudModel?>(null) }
     fun goTo(i: Int) { scope.launch { if (reduceMotion) pager.scrollToPage(i) else pager.animateScrollToPage(i) } }
+    // A pick from the full list: switch family if needed, then land on that model.
+    LaunchedEffect(jumpTo) {
+        val target = jumpTo ?: return@LaunchedEffect
+        pager.scrollToPage(models.indexOf(target).coerceAtLeast(0))
+        jumpTo = null
+    }
+    // Warm up this family's models and the first of the other, so no swipe lands on an empty hero.
+    val warm = remember(models) { models.take(6).map { it.id } + EarbudModel.entries.first { it.headphones != headphones }.id }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
         Spacer(Modifier.height(32.dp))
@@ -454,19 +464,25 @@ private fun DeviceStep(onNext: () -> Unit) {
             "Choose Your Device", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center,
             maxLines = 1, modifier = Modifier.fillMaxWidth().semantics { heading() }
         )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Swipe to find yours.", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant,
-            textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.fillMaxWidth()
-        )
+        Spacer(Modifier.height(16.dp))
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            listOf(false to "Earbuds", true to "Headphones").forEachIndexed { i, (hp, label) ->
+                SegmentedButton(
+                    selected = headphones == hp,
+                    onClick = { if (headphones != hp) { headphones = hp; scope.launch { pager.scrollToPage(0) } } },
+                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, 2),
+                    modifier = Modifier.height(48.dp)
+                ) { Text(label, maxLines = 1) }
+            }
+        }
         androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
           val heroH = minOf(320.dp, maxHeight - 120.dp).coerceAtLeast(200.dp)
           Box(Modifier.fillMaxWidth().height(heroH + 100.dp)) {
-            // The hero stays put (wider than the screen, so the earbuds are big) and the pager lays over
-            // it, so a swipe anywhere changes the device. The name sits right under the earbuds.
+            // The hero stays put (wider than the screen, so it is big) and the pager lays over it, so a
+            // swipe anywhere changes the device. The name sits right under the picture.
             Box(Modifier.align(Alignment.TopCenter).requiredWidth(heroH * 1.4f).height(heroH)) {
                 Hero3D(
-                    device = model.id, color = "black", softSwap = true, preload = models.map { it.id },
+                    device = model.id, color = "black", softSwap = true, preload = warm,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -496,7 +512,7 @@ private fun DeviceStep(onNext: () -> Unit) {
                 }
             }
             // Page dots; each is a 48dp target that jumps to its device.
-            Row(Modifier.align(Alignment.BottomCenter), verticalAlignment = Alignment.CenterVertically) {
+            if (models.size > 1) Row(Modifier.align(Alignment.BottomCenter), verticalAlignment = Alignment.CenterVertically) {
                 models.forEachIndexed { i, m ->
                     val on = i == pager.currentPage
                     val w by androidx.compose.animation.core.animateDpAsState(
@@ -514,45 +530,86 @@ private fun DeviceStep(onNext: () -> Unit) {
                     }
                 }
             }
+          }
         }
-    }
         Button(
             onClick = { EarbudModel.choose(context, model); onNext() },
             modifier = Modifier.fillMaxWidth().height(56.dp)
         ) { Text("Continue") }
-        TextButton(onClick = { showMore = true }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Don't See Yours?") }
+        TextButton(onClick = { showAll = true }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("See All") }
     }
-    if (showMore) {
-        androidx.compose.material3.ModalBottomSheet(
-            onDismissRequest = { showMore = false },
-            sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
-                Text("Supported Devices", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
-                Spacer(Modifier.height(8.dp))
-                models.forEach { m ->
-                    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
-                        // The model's own black picture on the same tonal cookie as every other icon.
-                        Box(
-                            Modifier.size(56.dp).clip(CookieShape()).background(colors.secondaryContainer),
-                            contentAlignment = Alignment.Center
+    if (showAll) AllDevicesSheet(
+        onPick = { m -> showAll = false; headphones = m.headphones; jumpTo = m },
+        onDismiss = { showAll = false }
+    )
+}
+
+/** Every supported model by series, with search. Everything comes from [EarbudModel.entries]. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun AllDevicesSheet(onPick: (EarbudModel) -> Unit, onDismiss: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    var query by rememberSaveable { mutableStateOf("") }
+    val groups = remember(query) { groupBySeries(query) }
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).imePadding().padding(horizontal = 24.dp)) {
+            Text("All Devices", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+            Spacer(Modifier.height(12.dp))
+            androidx.compose.material3.OutlinedTextField(
+                value = query, onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                singleLine = true, shape = CircleShape,
+                placeholder = { Text("Search") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                trailingIcon = if (query.isNotEmpty()) ({
+                    androidx.compose.material3.IconButton(onClick = { query = "" }) { Icon(Icons.Rounded.Close, contentDescription = "Clear search") }
+                }) else null
+            )
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
+                if (groups.isEmpty()) item {
+                    Text("Nothing matches that.", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant, modifier = Modifier.padding(vertical = 24.dp))
+                }
+                groups.forEach { g ->
+                    item(key = "series-" + g.series) {
+                        Text(
+                            g.series, style = MaterialTheme.typography.titleSmall, color = colors.primary,
+                            modifier = Modifier.padding(top = 20.dp, bottom = 4.dp).semantics { heading() }
+                        )
+                    }
+                    items(g.models.size, key = { g.models[it].id }) { i ->
+                        val m = g.models[i]
+                        Row(
+                            Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp)).clickable(role = Role.Button) { onPick(m) }
+                                .semantics(mergeDescendants = true) { contentDescription = "${m.displayName}, ${m.noun}" },
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Image(
-                                painterResource(budArt(0x01, m).pair), contentDescription = null,
-                                contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.size(42.dp)
-                            )
-                        }
-                        Spacer(Modifier.width(14.dp))
-                        Column {
-                            Text(m.displayName, style = MaterialTheme.typography.titleSmall)
-                            Text(m.titleNoun, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                            // The model's own black picture on the same tonal cookie as every other icon.
+                            Box(
+                                Modifier.size(56.dp).clip(CookieShape()).background(colors.secondaryContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Image(
+                                    painterResource(budArt(0x01, m).pair), contentDescription = null,
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.size(42.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text(m.displayName, style = MaterialTheme.typography.titleSmall)
+                                Text(m.titleNoun, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                            }
                         }
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-                Text("More Sony models are coming.", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
-                Spacer(Modifier.height(16.dp))
-                FilledTonalButton(onClick = { showMore = false }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Done") }
+                item {
+                    Text(
+                        "More Sony models are coming.", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 24.dp)
+                    )
+                }
             }
         }
     }

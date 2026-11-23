@@ -18,12 +18,14 @@ enum class EarbudModel(
     val caseCharges: Double,
     /** Over-ear headphones: one battery, no charging case, buttons and a touch panel instead of per-side touch. */
     val headphones: Boolean = false,
+    /** The product line it belongs to, for grouping in the device picker: "1000X", "WF-C", "LinkBuds", "ULT"... */
+    val series: String = "",
 ) {
-    WF_1000XM5("xm5", "WF-1000XM5", Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE), 8.0, 12.0, 2.0),
+    WF_1000XM5("xm5", "WF-1000XM5", Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE), 8.0, 12.0, 2.0, series = "1000X"),
     // Sony: 8.5 h NC on / 12 h off, about 30 h in total with the case (21.5 h in the case).
-    WF_C710N("c710n", "WF-C710N", Regex("WF[- ]?C710N", RegexOption.IGNORE_CASE), 8.5, 12.0, 2.5),
+    WF_C710N("c710n", "WF-C710N", Regex("WF[- ]?C710N", RegexOption.IGNORE_CASE), 8.5, 12.0, 2.5, series = "WF-C"),
     // Sony: 30 h with noise cancelling, 40 h without; no charging case.
-    WH_1000XM5("wh1000xm5", "WH-1000XM5", Regex("WH[- ]?1000XM5", RegexOption.IGNORE_CASE), 30.0, 40.0, 0.0, headphones = true);
+    WH_1000XM5("wh1000xm5", "WH-1000XM5", Regex("WH[- ]?1000XM5", RegexOption.IGNORE_CASE), 30.0, 40.0, 0.0, headphones = true, series = "1000X");
 
     /** What to call them in copy: "earbuds" or "headphones". */
     val noun: String get() = if (headphones) "headphones" else "earbuds"
@@ -131,3 +133,22 @@ enum class BatteryPart(val label: String, val short: String, val missing: String
 private val EARBUD_BATTERIES = listOf(BatteryPart.LEFT, BatteryPart.RIGHT, BatteryPart.CASE)
 private val EARBUD_BUDS = listOf(BatteryPart.LEFT, BatteryPart.RIGHT)
 private val HEADPHONE_BATTERIES = listOf(BatteryPart.MAIN)
+
+/** One series in the device picker's full list. */
+internal data class SeriesGroup(val series: String, val models: List<EarbudModel>)
+
+/** Whether [model] matches what was typed: name, series or kind, ignoring case, spaces and dashes ("xm4", "wf c7", "headphones"). */
+internal fun EarbudModel.matchesQuery(query: String): Boolean {
+    fun flat(s: String) = s.filter { it.isLetterOrDigit() }.lowercase()
+    val q = flat(query)
+    return q.isEmpty() || listOf(displayName, series, titleNoun).any { flat(it).contains(q) }
+}
+
+/**
+ * Every model that matches [query], grouped by series in the order the models are declared, so a
+ * new model needs no list code. [family]: null for all, true for headphones only, false for earbuds only.
+ */
+internal fun groupBySeries(query: String = "", family: Boolean? = null, models: List<EarbudModel> = EarbudModel.entries): List<SeriesGroup> =
+    models.filter { (family == null || it.headphones == family) && it.matchesQuery(query) }
+        .groupBy { it.series }
+        .map { (s, m) -> SeriesGroup(s, m) }
