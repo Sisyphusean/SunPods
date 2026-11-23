@@ -54,22 +54,26 @@ object A2dpConnectionHelper {
             (adapter?.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothProfile.STATE_CONNECTED)
     }.getOrDefault(false to false)
 
+    /** Whether Android has any Bluetooth media or call audio up, whatever the device. */
+    fun audioUp(context: Context): Boolean = profilesUp(context).let { (media, calls) -> media || calls }
+
     /** One line for diagnostics: which entry was picked and what each audio profile says. */
     @SuppressLint("MissingPermission")
-    fun describe(context: Context, target: BluetoothDevice, onA2dp: Boolean?): String {
+    fun describe(target: BluetoothDevice, onA2dp: Boolean?, media: Boolean, calls: Boolean, le: Boolean): String {
         val kind = runCatching {
             when (target.type) { BluetoothDevice.DEVICE_TYPE_CLASSIC -> "Classic"; BluetoothDevice.DEVICE_TYPE_DUAL -> "dual"; BluetoothDevice.DEVICE_TYPE_LE -> "LE only"; else -> "unknown type" }
         }.getOrDefault("type hidden")
-        val listed = connectedNow().joinToString(", ") { d ->
-            "…" + d.address.takeLast(5) + (if (runCatching { EarbudModel.isSupported(d.name) }.getOrDefault(false)) " (Sony)" else "")
-        }.ifEmpty { "none" }
-        val (a2dp, calls) = profilesUp(context)
+        val listed = connectedNow().joinToString(", ") { d -> "…" + d.address.takeLast(5) + (if (SonyBatteryClient.isSupportedEntry(d)) " (Sony)" else "") }.ifEmpty { "none" }
         return "Link: using …${target.address.takeLast(5)} ($kind, ${if (EarbudAddresses.isRandom(target.address)) "random" else "public"} address), " +
-            "on A2DP ${onA2dp ?: "unknown"}; A2DP lists $listed; media ${if (a2dp) "up" else "down"}, calls ${if (calls) "up" else "down"}, " +
-            "LE Audio ${if (LeAudio.anyConnected(context)) "up" else "down"}"
+            "on A2DP ${onA2dp ?: "unknown"}; A2DP lists $listed; media ${if (media) "up" else "down"}, calls ${if (calls) "up" else "down"}, " +
+            "LE Audio ${if (le) "up" else "down"}"
     }
 
+    @Volatile private var bindFailedAt = 0L
+
     private suspend fun bind(context: Context): BluetoothA2dp? {
+        // A bind that just failed isn't retried within the same refresh (it costs up to 0.8 s).
+        if (System.currentTimeMillis() - bindFailedAt < 5_000) return null
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: return null
         val result = CompletableDeferred<BluetoothA2dp?>()
         val listener = object : BluetoothProfile.ServiceListener {
@@ -91,8 +95,8 @@ object A2dpConnectionHelper {
         } catch (_: IllegalArgumentException) {
             return null
         }
-        if (!requested) return null
-        return withTimeoutOrNull(PROFILE_QUERY_TIMEOUT_MS) { result.await() }
+        if (!requested) { bindFailedAt = System.currentTimeMillis(); return null }
+        return withTimeoutOrNull(PROFILE_QUERY_TIMEOUT_MS) { result.await() }.also { if (it == null) bindFailedAt = System.currentTimeMillis() }
     }
 
     private const val PROFILE_QUERY_TIMEOUT_MS = 800L
