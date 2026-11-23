@@ -395,6 +395,7 @@ object SonyControlSessionManager {
 class SonyBatteryClient(private val context: Context) {
     companion object {
         private val MODEL = Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE)
+        @Volatile private var lastPick: String? = null
 
         fun isTargetModel(name: String): Boolean = MODEL.containsMatchIn(name)
     }
@@ -430,7 +431,22 @@ class SonyBatteryClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun findEarbuds(): BluetoothDevice? {
         val adapter = BluetoothAdapter.getDefaultAdapter() ?: return null
-        return adapter.bondedDevices.firstOrNull { device -> MODEL.containsMatchIn(device.name.orEmpty()) }
+        val bonded = adapter.bondedDevices.filter { device -> MODEL.containsMatchIn(device.name.orEmpty()) }
+        if (bonded.size <= 1) return bonded.firstOrNull()
+        // Phones that also paired the LE Audio side list the earbuds more than once. Taking the
+        // first entry could pick an LE-only one, which never shows on A2DP and has no Classic
+        // control channel, so every refresh was skipped. Prefer the one playing audio now, then
+        // the Classic entry (public address), and only then anything else.
+        val live = A2dpConnectionHelper.connectedNow().map { it.address }.toSet()
+        val pick = bonded.firstOrNull { it.address in live }
+            ?: bonded.firstOrNull { it.type != BluetoothDevice.DEVICE_TYPE_LE && !EarbudAddresses.isRandom(it.address) }
+            ?: bonded.first()
+        if (lastPick != pick.address) DiagnosticsStore.add(
+            context,
+            "Earbuds: ${bonded.size} paired entries, using ${if (pick.address in live) "the one playing" else if (EarbudAddresses.isRandom(pick.address)) "an LE entry" else "the Classic entry"} (…${pick.address.takeLast(5)})"
+        )
+        lastPick = pick.address
+        return pick
     }
 
     @SuppressLint("MissingPermission")

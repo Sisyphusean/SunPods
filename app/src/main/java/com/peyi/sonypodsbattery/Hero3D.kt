@@ -16,6 +16,10 @@ import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -73,15 +77,56 @@ internal fun Hero3D(
     // push changes after every recomposition (each is a no-op unless a value changed)
     SideEffect { state.sync() }
 
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            state.view?.also { (it.parent as? android.view.ViewGroup)?.removeView(it) }
-                ?: createHeroWebView(context, state) { HeroCache.onTap?.invoke() }
-        },
-        // Not destroyed here: the next Home screen picks the same view up again.
-        onRelease = { view -> (view.parent as? android.view.ViewGroup)?.removeView(view) },
+    // Until the 3D page has drawn, show the picture it left last time (same size, same pose), then
+    // fade across. Opening the app shows the earbuds at once instead of them popping in.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val placeholder = remember(color, model) { HeroSnapshots.load(context, color, model) }
+    val cover by androidx.compose.animation.core.animateFloatAsState(
+        if (state.drawn) 0f else 1f, androidx.compose.animation.core.tween(240), label = "heroCover"
     )
+    androidx.compose.foundation.layout.Box(modifier) {
+        AndroidView(
+            modifier = Modifier.matchParentSize(),
+            factory = { ctx ->
+                state.view?.also { (it.parent as? android.view.ViewGroup)?.removeView(it) }
+                    ?: createHeroWebView(ctx, state) { HeroCache.onTap?.invoke() }
+            },
+            // Not destroyed here: the next Home screen picks the same view up again.
+            onRelease = { view -> (view.parent as? android.view.ViewGroup)?.removeView(view) },
+        )
+        if (placeholder != null && cover > 0f) androidx.compose.foundation.Image(
+            placeholder, contentDescription = null,
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+            modifier = Modifier.matchParentSize().graphicsLayer { alpha = cover }
+        )
+    }
+}
+
+/** The hero's last frame per colour and model, kept in the app's files. */
+private object HeroSnapshots {
+    private fun file(context: Context, color: String, model: String) =
+        java.io.File(java.io.File(context.filesDir, "hero3d"), "${color}_${model}_${BuildConfig.VERSION_CODE}.png")
+
+    fun load(context: Context, color: String, model: String): androidx.compose.ui.graphics.ImageBitmap? {
+        val f = file(context, color, model)
+        if (f.exists()) return runCatching { android.graphics.BitmapFactory.decodeFile(f.path)?.asImageBitmap() }.getOrNull()
+        // First launch ever: the pre-rendered hero frame is the same pose for black earbuds.
+        if (color == "black" && model == "buds") return runCatching {
+            context.assets.open("turntable/f000.webp").use { android.graphics.BitmapFactory.decodeStream(it)?.asImageBitmap() }
+        }.getOrNull()
+        return null
+    }
+
+    fun save(context: Context, color: String, model: String, dataUrl: String) {
+        val b64 = dataUrl.substringAfter("base64,", "").ifEmpty { return }
+        val bytes = runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull() ?: return
+        val f = file(context, color, model)
+        f.parentFile?.listFiles()?.filter { it.name.startsWith("${color}_${model}_") && it != f }?.forEach { it.delete() }
+        f.parentFile?.mkdirs()
+        runCatching { f.writeBytes(bytes) }
+    }
+
+    fun has(context: Context, color: String, model: String) = file(context, color, model).exists()
 }
 
 /** Holds the hero's view and state for one screen (activity) lifetime. */
@@ -122,6 +167,8 @@ private const val HERO3D_PAGE = "https://$HERO3D_HOST/assets/hero3d/index.html"
 private class Hero3DState {
     var view: WebView? = null
     var ready = false
+    /** The live view has drawn its first frame; the placeholder can go. */
+    var drawn by androidx.compose.runtime.mutableStateOf(false)
     var color = "black"
     var model = "buds"
     var lid = 0f
@@ -191,6 +238,16 @@ private fun createHeroWebView(context: Context, state: Hero3DState, onTap: () ->
         fun ready() = web.post {
             state.ready = true
             state.sync()
+            // One frame for the GPU to put it on screen, then drop the placeholder.
+            web.postDelayed({ state.drawn = true }, 120)
+            // Keep this exact picture for next launch (once per colour, model and app version).
+            val c = state.color; val m = state.model
+            if (!HeroSnapshots.has(context, c, m)) web.postDelayed({
+                if (state.color == c && state.model == m) web.evaluateJavascript("window.sunpods&&window.sunpods.snapshot()") { r ->
+                    val url = r?.trim('"')?.takeIf { it.startsWith("data:image/png") } ?: return@evaluateJavascript
+                    Thread { HeroSnapshots.save(context.applicationContext, c, m, url) }.start()
+                }
+            }, 900)
         }
 
         @JavascriptInterface

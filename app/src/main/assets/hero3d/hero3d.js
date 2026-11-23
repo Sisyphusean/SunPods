@@ -853,6 +853,12 @@ async function start() {
 }
 start().catch((e) => { console.error('hero3d', e); });
 
+// The frame on screen as a PNG (transparent background), so the app can show it instantly on its
+// next launch while this page loads, then fade across to the live view without a pop.
+api.snapshot = () => {
+  try { renderer.render(scene, camera); return canvas.toDataURL('image/png'); } catch (e) { return null; }
+};
+
 // ---------------------------------------------------------------------------------------------
 // Preview captures for branding/render/hero3d_preview (only with ?debug).
 if (DEBUG) {

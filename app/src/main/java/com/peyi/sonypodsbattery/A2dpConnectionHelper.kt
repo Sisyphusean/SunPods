@@ -37,6 +37,9 @@ object A2dpConnectionHelper {
         }
     }
 
+    /** Devices on A2DP right now, from the already-bound proxy; empty if it isn't bound yet. */
+    fun connectedNow(): List<BluetoothDevice> = runCatching { proxy?.connectedDevices }.getOrNull().orEmpty()
+
     private suspend fun bind(context: Context): BluetoothA2dp? {
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: return null
         val result = CompletableDeferred<BluetoothA2dp?>()
