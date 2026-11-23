@@ -19,6 +19,7 @@ object A2dpConnectionHelper {
 
     @SuppressLint("MissingPermission")
     suspend fun isConnected(context: Context, device: BluetoothDevice): Boolean? {
+        if (SimMode.active(context)) return true
         // In LE Audio mode the earbuds aren't on A2DP at all. Look them up off the main thread:
         // binding the LE Audio profile waits for a callback that's delivered on the main thread.
         if (LeAudio.anyConnected(context)) {

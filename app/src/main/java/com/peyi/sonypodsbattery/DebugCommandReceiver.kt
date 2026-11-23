@@ -19,6 +19,20 @@ import kotlinx.coroutines.launch
  */
 class DebugCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // --es sim xm5|c710n|off: run against simulated earbuds (setup is marked done); takes effect
+        // on the next start, so the process ends itself.
+        intent.getStringExtra("sim")?.let { model ->
+            val ui = context.getSharedPreferences("sunpods_ui", Context.MODE_PRIVATE).edit()
+            if (EarbudModel.fromId(model) != null) ui.putString("sim_model", model).putBoolean("onboarding_done", true) else ui.remove("sim_model")
+            // --ei color 5: the simulated earbuds' colour code.
+            if (intent.hasExtra("color")) ui.putInt("sim_color", intent.getIntExtra("color", 1))
+            ui.commit()
+            // A different pair: start without the last pair's saved settings and battery.
+            context.getSharedPreferences("device_settings", Context.MODE_PRIVATE).edit().clear().commit()
+            Log.i("SunPods", "Debug: simulated earbuds ${if (EarbudModel.fromId(model) != null) model else "off"}")
+            android.os.Process.killProcess(android.os.Process.myPid())
+            return
+        }
         // --es run repair: runs the Classic repair as if a switch to Classic had just been confirmed.
         if (intent.getStringExtra("run") == "repair") {
             val app = context.applicationContext

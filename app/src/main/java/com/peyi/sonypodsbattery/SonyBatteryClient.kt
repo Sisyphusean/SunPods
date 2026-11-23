@@ -58,7 +58,18 @@ object SonyControlSessionManager {
 
     @SuppressLint("MissingPermission")
     /** One command at a time on the link, so live checks never interleave with other requests. */
-    private val io = java.util.concurrent.locks.ReentrantLock()
+    private val io = object : java.util.concurrent.locks.ReentrantLock() {
+        // Debug builds: who holds the link, for "link busy" diagnostics.
+        @Volatile var where: String = ""
+        override fun lock() { super.lock(); if (BuildConfig.TOOLS && holdCount == 1) where = holderTrace() }
+        override fun tryLock(): Boolean = super.tryLock().also { ok -> if (ok && BuildConfig.TOOLS && holdCount == 1) where = holderTrace() }
+        override fun tryLock(timeout: Long, unit: java.util.concurrent.TimeUnit): Boolean =
+            super.tryLock(timeout, unit).also { ok -> if (ok && BuildConfig.TOOLS && holdCount == 1) where = holderTrace() }
+        fun ownerName(): String? = owner?.name
+        private fun holderTrace() = Thread.currentThread().name + " " + Thread.currentThread().stackTrace
+            .filter { it.className.startsWith("com.peyi") && !it.className.contains("SonyControlSessionManager\$io") }
+            .take(6).joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+    }
 
     internal fun <T> withSession(
         context: Context,
@@ -177,13 +188,20 @@ object SonyControlSessionManager {
         }
     }
 
-    /** Like [withSession], but returns null at once if another command is using the link. */
+    /**
+     * Like [withSession], but returns null if another command is still using the link after
+     * [waitMs] (at once by default).
+     */
     internal fun <T> withSessionIfFree(
         context: Context,
         device: BluetoothDevice,
+        waitMs: Long = 0,
         action: (SonyBatteryClient.SonySession) -> T
     ): T? {
-        if (!io.tryLock()) return null
+        if (!(if (waitMs > 0) io.tryLock(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS) else io.tryLock())) {
+            if (BuildConfig.TOOLS) android.util.Log.d("SunPods", "Link held by ${io.ownerName()} (${io.where})")
+            return null
+        }
         try {
             return withSession(context, device, action)
         } finally {
@@ -230,6 +248,7 @@ object SonyControlSessionManager {
 
     @SuppressLint("MissingPermission")
     private fun getOrOpen(context: Context, device: BluetoothDevice): SonyBatteryClient.SonySession {
+        ProtocolCapture.attach(context)
         val address = device.address
         val idle = synchronized(this) {
             val session = activeSession
@@ -253,6 +272,20 @@ object SonyControlSessionManager {
             connectionGeneration
         }
         var lastError: Exception? = null
+        // Debug builds can run against simulated earbuds (SimMode).
+        SimMode.link(context)?.let { link ->
+            val session = SonyBatteryClient.SonySession(link)
+            session.initialize()
+            synchronized(this) {
+                connectingSocket = null
+                activeSocket = link
+                activeAddress = address
+                activeSession = session
+                updateStateLocked(context, SonySessionState.CONNECTED)
+            }
+            DiagnosticsStore.add(context, "Simulated earbuds session opened")
+            return session
+        }
         // In LE Audio mode there's no Classic link to open; go straight to the LE control channel.
         if (LeAudio.anyConnected(context)) {
             if (classicOnly(context)) {
@@ -394,11 +427,10 @@ object SonyControlSessionManager {
 
 class SonyBatteryClient(private val context: Context) {
     companion object {
-        private val MODEL = Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE)
         @Volatile private var lastPick: String? = null
         @Volatile private var lastPickAt = 0L
 
-        fun isTargetModel(name: String): Boolean = MODEL.containsMatchIn(name)
+        fun isTargetModel(name: String): Boolean = EarbudModel.isSupported(name)
     }
 
     data class Result(
@@ -429,16 +461,30 @@ class SonyBatteryClient(private val context: Context) {
         }
     }
 
+    /**
+     * The earbuds to talk to. Their Bluetooth name also tells which model they are, so the right
+     * name and pictures show before the first full read of their settings.
+     */
     @SuppressLint("MissingPermission")
     fun findEarbuds(): BluetoothDevice? {
+        SimMode.device(context)?.let { device -> SimMode.model(context)?.let { EarbudModel.noteModelName(it.displayName) }; return device }
+        return pickEarbuds()?.also { device -> runCatching { EarbudModel.noteModelName(device.name) } }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun pickEarbuds(): BluetoothDevice? {
         val adapter = BluetoothAdapter.getDefaultAdapter() ?: return null
         lastPick?.let { addr ->
             if (System.currentTimeMillis() - lastPickAt < 30_000) {
                 runCatching { adapter.getRemoteDevice(addr) }.getOrNull()?.takeIf { it.bondState == BluetoothDevice.BOND_BONDED }?.let { return it }
             }
         }
-        val bonded = adapter.bondedDevices.filter { device -> MODEL.containsMatchIn(device.name.orEmpty()) }
+        val bonded = adapter.bondedDevices.filter { device -> EarbudModel.isSupported(device.name) }
         if (bonded.size <= 1) return bonded.firstOrNull().also { lastPick = it?.address; lastPickAt = System.currentTimeMillis() }
+        // Two different pairs (say a WF-1000XM5 and a WF-C710N): the one playing now wins.
+        val playing = A2dpConnectionHelper.connectedNow().map { it.address }.toSet()
+        bonded.filter { it.address in playing }.takeIf { p -> p.map { EarbudModel.fromName(it.name) }.distinct().size == 1 && bonded.map { EarbudModel.fromName(it.name) }.distinct().size > 1 }
+            ?.first()?.let { lastPick = it.address; lastPickAt = System.currentTimeMillis(); return it }
         EarbudAddresses.classic(context)?.let { saved ->
             bonded.firstOrNull { it.address.equals(saved, true) }?.let { lastPick = it.address; lastPickAt = System.currentTimeMillis(); return it }
         }
@@ -471,8 +517,12 @@ class SonyBatteryClient(private val context: Context) {
 
     /** Levels, case and mode only, for live updates. Null if another command is using the link. */
     @SuppressLint("MissingPermission")
+    /**
+     * The quick check while the app is open. It waits a moment for the link rather than skipping,
+     * because the now-playing read polls on the same beat and would otherwise win every time.
+     */
     fun readLive(device: BluetoothDevice): Result? =
-        SonyControlSessionManager.withSessionIfFree(context, device) { s ->
+        SonyControlSessionManager.withSessionIfFree(context, device, waitMs = 1_500) { s ->
             s.readBattery().copy(mode = runCatching { s.readMode() }.getOrNull())
         }
 
@@ -498,10 +548,21 @@ class SonyBatteryClient(private val context: Context) {
             sequence = 1 - sequence
         }
 
+        /**
+         * Frames already read but not yet looked at: one read can carry several (an ACK and the
+         * alert after it, say), and the ones after a match belong to the next wait.
+         */
+        private val backlog = ArrayDeque<SonyFrame>()
+
         internal fun waitFor(timeoutMs: Long, match: (SonyFrame) -> Boolean): SonyFrame? {
             val deadline = System.currentTimeMillis() + timeoutMs
             val buffer = ByteArray(1024)
-            while (System.currentTimeMillis() < deadline) {
+            while (true) {
+                while (backlog.isNotEmpty()) {
+                    val frame = backlog.removeFirst()
+                    if (match(frame)) return frame
+                }
+                if (System.currentTimeMillis() >= deadline) return null
                 val available = input.available()
                 if (available > 0) {
                     val count = input.read(buffer, 0, minOf(buffer.size, available))
@@ -509,7 +570,10 @@ class SonyBatteryClient(private val context: Context) {
                     if (count > 0) lastHeard = System.currentTimeMillis()
                     if (count > 0) for (frame in decoder.feed(buffer.copyOf(count))) {
                         if (frame.type == SonyProtocol.ACK) sequence = frame.sequence
-                        else if (BuildConfig.DEBUG) android.util.Log.d("SunPods", "rx ${frame.type}: ${hex(frame.payload)}")
+                        else {
+                            if (BuildConfig.DEBUG) android.util.Log.d("SunPods", "rx ${frame.type}: ${hex(frame.payload)}")
+                            ProtocolCapture.record(frame.type, frame.payload)
+                        }
                         if (!socket.acksItself && (frame.type == SonyProtocol.DATA_MDR || frame.type == SonyProtocol.DATA_MDR_NO2)) {
                             output.write(SonyProtocol.encode(SonyProtocol.ACK, 1 - frame.sequence, byteArrayOf()))
                             output.flush()
@@ -518,14 +582,13 @@ class SonyBatteryClient(private val context: Context) {
                         if (frame.type == SonyProtocol.DATA_MDR) ModeReport.parse(frame.payload)?.let { reportedMode = it }
                         // A confirmation alert the earbuds want answered (see withConfirmation).
                         if (frame.type == SonyProtocol.DATA_MDR && frame.payload.size >= 3 && frame.payload[0] == ALERT_NOTIFY) lastAlert = frame.payload
-                        if (match(frame)) return frame
+                        backlog.addLast(frame)
                     }
                 } else {
                     if (!socket.isConnected) throw EOFException("Sony control channel disconnected")
                     Thread.sleep(20)
                 }
             }
-            return null
         }
 
         @Volatile private var lastAlert: ByteArray? = null
@@ -556,16 +619,36 @@ class SonyBatteryClient(private val context: Context) {
                 ?: throw IOException("Sony handshake did not answer")
         }
 
+        /** What these earbuds support, asked once per connection (it can differ between Classic and LE). */
+        private var supported: SupportedFunctions? = null
+        private var supportedAsked = false
+
+        fun functions(): SupportedFunctions? {
+            if (!supportedAsked) { supportedAsked = true; supported = SupportedFunctions.read(this) }
+            return supported
+        }
+
         fun readBattery(): Result {
-            send(byteArrayOf(0x22, 0x09))
+            // Both earbuds and the case, on the inquired types these earbuds list: with thresholds
+            // (0x09, 0x0a; the WF-1000XM5) or without (0x01, 0x02). Same fields either way.
+            val f = functions()
+            val budsType: Byte = if (f != null && !f.has1(Fn.LR_BATTERY_THRESHOLD) && f.has1(Fn.LR_BATTERY)) 0x01 else 0x09
+            val caseType: Byte? = when {
+                f == null || f.has1(Fn.CRADLE_BATTERY_THRESHOLD) -> 0x0a
+                f.has1(Fn.CRADLE_BATTERY) -> 0x02
+                else -> null
+            }
+            send(byteArrayOf(0x22, budsType))
             val buds = waitFor(3_000) { frame ->
                 frame.type == SonyProtocol.DATA_MDR && frame.payload.size >= 6 &&
-                    frame.payload[0] == 0x23.toByte() && frame.payload[1] == 0x09.toByte()
+                    frame.payload[0] == 0x23.toByte() && frame.payload[1] == budsType
             } ?: throw IOException("Earbud battery was not reported")
-            send(byteArrayOf(0x22, 0x0a))
-            val caseFrame = waitFor(700) { frame ->
-                frame.type == SonyProtocol.DATA_MDR && frame.payload.size >= 4 &&
-                    frame.payload[0] == 0x23.toByte() && frame.payload[1] == 0x0a.toByte()
+            val caseFrame = caseType?.let { t ->
+                send(byteArrayOf(0x22, t))
+                waitFor(700) { frame ->
+                    frame.type == SonyProtocol.DATA_MDR && frame.payload.size >= 4 &&
+                        frame.payload[0] == 0x23.toByte() && frame.payload[1] == t
+                }
             }
             return Result(
                 left = percent(buds.payload[2]), right = percent(buds.payload[4]),
@@ -582,7 +665,9 @@ class SonyBatteryClient(private val context: Context) {
 
         /** Asks the earbuds which listening mode they're actually in. */
         fun readMode(): ModeReport? {
-            val types = noiseType?.let { listOf(it) } ?: listOf<Byte>(0x17, 0x15)
+            // The type these earbuds list for noise control, else the last one that answered, else probe.
+            val listed = functions()?.table1?.firstNotNullOfOrNull { if (it in Fn.NC_ASM) Fn.ncAsmType(it) else null }?.toByte()
+            val types = listed?.let { listOf(it) } ?: noiseType?.let { listOf(it) } ?: listOf<Byte>(0x17, 0x15)
             for (t in types) {
                 val p = request(byteArrayOf(0x66, t), 800) ?: continue
                 android.util.Log.i("SunPods", "Noise control reply for type ${"%02x".format(t)}: ${hex(p)}")
@@ -604,7 +689,8 @@ class SonyBatteryClient(private val context: Context) {
         fun setAmbientSoundMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean): String {
             val enabled = if (mode == ListeningMode.OFF) 0 else 1
             val ambient = if (mode == ListeningMode.AMBIENT) 1 else 0
-            val type = noiseType ?: 0x17.toByte()
+            val type = functions()?.table1?.firstNotNullOfOrNull { if (it in Fn.NC_ASM) Fn.ncAsmType(it) else null }?.toByte()
+                ?: noiseType ?: 0x17.toByte()
             // The XM5 takes noise control on type 0x17; an unknown type is acknowledged but ignored.
             val payload = byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), if (focusOnVoice) 0x01 else 0x00, ambientLevel.coerceIn(1, 20).toByte())
             val seen = StringBuilder()

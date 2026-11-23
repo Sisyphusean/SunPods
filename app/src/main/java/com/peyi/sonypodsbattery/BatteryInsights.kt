@@ -142,8 +142,8 @@ data class BatteryOutlook(
 )
 
 object BatteryInsights {
-    /** WF-1000XM5 rating: about 8 h with noise cancelling, so ~12.5 %/h before we have data. */
-    private const val RATED_DRAIN_PER_HOUR = 12.5
+    /** Sony's rating with noise cancelling (8 h on the WF-1000XM5: 12.5 %/h), until we have data. */
+    private val RATED_DRAIN_PER_HOUR get() = 100.0 / EarbudModel.active.ratedHoursNc
     private const val MAX_GAP_MS = 15L * 60 * 1000
 
     fun outlook(samples: List<BatterySample>, now: BatteryState): BatteryOutlook {

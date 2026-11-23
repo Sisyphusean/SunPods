@@ -247,7 +247,7 @@ private fun PairRow(pairing: Boolean, enabled: Boolean, onChange: (Boolean) -> U
         }
         AnimatedVisibility(pairing, enter = revealIn(), exit = revealOut()) {
             Text(
-                "Your earbuds are ready to pair. On the other device, open Bluetooth settings and choose WF-1000XM5.",
+                "Your earbuds are ready to pair. On the other device, open Bluetooth settings and choose ${EarbudModel.active.displayName}.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 76.dp, end = 20.dp, bottom = 14.dp)

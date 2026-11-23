@@ -139,6 +139,7 @@ internal fun SolarHero(
     connected: Boolean,
     model: String,
     color: String = "black",
+    device: String = "xm5",
     onCycle: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
@@ -250,6 +251,7 @@ internal fun SolarHero(
                 }
             }
             Hero3D(
+                device = device,
                 color = color,
                 model = if (showCase) "case" else "buds",
                 lid = if (phase == HeroPhase.CASE || phase == HeroPhase.CLOSING) 0f else 1f,

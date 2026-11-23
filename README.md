@@ -1,7 +1,7 @@
 # SunPods
 
-An unofficial, free and open source companion app for the Sony WF-1000XM5 on Android. Not made by or
-affiliated with Sony.
+An unofficial, free and open source companion app for the Sony WF-1000XM5 and WF-C710N on Android.
+Not made by or affiliated with Sony.
 
 [![Build](https://github.com/Sisyphusean/SunPods/actions/workflows/android.yml/badge.svg)](https://github.com/Sisyphusean/SunPods/actions/workflows/android.yml)
 [![Latest release](https://img.shields.io/github/v/release/Sisyphusean/SunPods)](https://github.com/Sisyphusean/SunPods/releases/latest)
@@ -54,13 +54,17 @@ new version, and you can turn that off.
 | Earbuds | Status | Notes |
 | --- | --- | --- |
 | **WF-1000XM5** | ✅ Works | Classic and LE Audio, firmware 6.1.0 tested |
+| **WF-C710N** | 🧪 Testing | Built from Sony's own app and tested on simulated earbuds; [needs a tester](https://github.com/Sisyphusean/SunPods/issues/2) |
 | WF-1000XM4 | ⏳ Not yet | |
 | WH-1000XM5, WH-1000XM6 | ⏳ Not yet | |
 | LinkBuds, LinkBuds S, Fit, Open | ⏳ Not yet | |
 | Earbuds from other brands | ❌ Not supported | Sony only |
 
 SunPods grows one model at a time. Sony's earbuds share most of their commands, but each model has
-its own quirks, so a model is only switched on once someone has tested it. Own one of the models
+its own quirks, so a model is only marked as working once someone has tested it. SunPods asks the
+earbuds what they support, the way Sony's app does, and shows only that. Send Diagnostics (Device >
+Help and About) includes the earbuds' replies, with nothing personal in them, so a tester's report
+is enough to fix a model. Own one of the models
 above and want to help? [Tell us](https://github.com/Sisyphusean/SunPods/issues/new?template=earbuds_request.yml).
 
 ## Switching between Classic and LE Audio

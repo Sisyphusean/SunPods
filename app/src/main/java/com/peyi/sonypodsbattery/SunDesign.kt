@@ -140,14 +140,37 @@ internal fun rememberBuzz(): (Buzz) -> Unit {
 internal data class BudArt(
     val left: Int, val right: Int, val case: Int, val pair: Int, val hero3d: String,
     /** Setup clips: the case button held until the light flashes blue, and the case opening. */
-    val pairClip: Int, val openClip: Int
+    val pairClip: Int, val openClip: Int,
+    /** The 3D hero's model: "xm5" or "c710n". */
+    val device: String = "xm5",
 )
 
-/** Sony's colour codes: 0x01 Black, 0x03 Platinum Silver, 0x06 Smoky Pink. Anything else shows black. */
-internal fun budArt(colorCode: Int?): BudArt = when (colorCode) {
-    0x03 -> BudArt(R.drawable.bud_left_silver, R.drawable.bud_right_silver, R.drawable.bud_case_silver, R.drawable.buds_pair_silver, "silver", R.raw.anim_pair_silver, R.raw.anim_open_silver)
-    0x06 -> BudArt(R.drawable.bud_left_pink, R.drawable.bud_right_pink, R.drawable.bud_case_pink, R.drawable.buds_pair_pink, "pink", R.raw.anim_pair_pink, R.raw.anim_open_pink)
-    else -> BudArt(R.drawable.bud_left, R.drawable.bud_right, R.drawable.bud_case, R.drawable.buds_pair, "black", R.raw.anim_pair, R.raw.anim_open)
+/**
+ * The pictures for these earbuds, from their model and the colour code they report (Sony's
+ * ModelColor; the "-I" codes 0x11 to 0x1e are the same colours). Unknown colours show black.
+ *  WF-1000XM5: 0x01 Black, 0x03 Platinum Silver, 0x06 Smoky Pink.
+ *  WF-C710N: 0x01 Black, 0x02 White, 0x05 Glass Blue, 0x06 Pink.
+ */
+internal fun budArt(colorCode: Int?, model: EarbudModel = EarbudModel.active): BudArt {
+    val c = colorCode?.let { if (it in 0x11..0x1e) it - 0x10 else it }
+    return when (model) {
+        EarbudModel.WF_C710N -> c710nArt(c)
+        EarbudModel.WF_1000XM5 -> when (c) {
+            0x03 -> BudArt(R.drawable.bud_left_silver, R.drawable.bud_right_silver, R.drawable.bud_case_silver, R.drawable.buds_pair_silver, "silver", R.raw.anim_pair_silver, R.raw.anim_open_silver)
+            0x06 -> BudArt(R.drawable.bud_left_pink, R.drawable.bud_right_pink, R.drawable.bud_case_pink, R.drawable.buds_pair_pink, "pink", R.raw.anim_pair_pink, R.raw.anim_open_pink)
+            else -> BudArt(R.drawable.bud_left, R.drawable.bud_right, R.drawable.bud_case, R.drawable.buds_pair, "black", R.raw.anim_pair, R.raw.anim_open)
+        }
+    }
+}
+
+internal fun budArt(settings: DeviceSettings): BudArt = budArt(settings.colorCode, EarbudModel.fromName(settings.modelName) ?: EarbudModel.active)
+
+/** WF-C710N finishes; the 3D hero names them black, white, blue and pink. */
+private fun c710nArt(c: Int?): BudArt = when (c) {
+    0x02 -> BudArt(R.drawable.c710n_bud_left_white, R.drawable.c710n_bud_right_white, R.drawable.c710n_bud_case_white, R.drawable.c710n_buds_pair_white, "white", R.raw.c710n_anim_pair_white, R.raw.c710n_anim_open_white, device = "c710n")
+    0x05 -> BudArt(R.drawable.c710n_bud_left_blue, R.drawable.c710n_bud_right_blue, R.drawable.c710n_bud_case_blue, R.drawable.c710n_buds_pair_blue, "blue", R.raw.c710n_anim_pair_blue, R.raw.c710n_anim_open_blue, device = "c710n")
+    0x06 -> BudArt(R.drawable.c710n_bud_left_pink, R.drawable.c710n_bud_right_pink, R.drawable.c710n_bud_case_pink, R.drawable.c710n_buds_pair_pink, "pink", R.raw.c710n_anim_pair_pink, R.raw.c710n_anim_open_pink, device = "c710n")
+    else -> BudArt(R.drawable.c710n_bud_left_black, R.drawable.c710n_bud_right_black, R.drawable.c710n_bud_case_black, R.drawable.c710n_buds_pair_black, "black", R.raw.c710n_anim_pair_black, R.raw.c710n_anim_open_black, device = "c710n")
 }
 
 /** The current earbuds' pictures; provided by the app shell from the colour the earbuds report. */

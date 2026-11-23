@@ -18,6 +18,7 @@ import kotlin.coroutines.resume
  */
 @SuppressLint("MissingPermission")
 internal fun audioLinkUp(context: Context): Boolean {
+    if (SimMode.active(context)) return true
     val adapter = context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter ?: return false
     return try {
         if (!adapter.isEnabled) return false
