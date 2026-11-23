@@ -357,14 +357,12 @@ private fun WelcomeStep(onStart: () -> Unit) {
     Page(
         progress = null,
         art = {
-            // The one live 3D hero. Before the user's own model is known it steps through every supported
-            // model (EarbudModel.entries, so new models join by themselves), each in black.
-            val known = remember { EarbudModel.fromName(SettingsStore.load(context).modelName) }
-            val art = remember { budArt(SettingsStore.load(context)) }
+            // The one live 3D hero: it steps through every supported model (EarbudModel.entries, so new
+            // models join by themselves), each in black, even when the user's own model is already known.
             Hero3D(
-                device = if (known != null) art.device else EarbudModel.entries.first().id,
-                color = if (known != null) art.hero3d else "black",
-                cycleDevices = if (known == null) EarbudModel.entries.map { it.id } else null,
+                device = EarbudModel.entries.first().id,
+                color = "black",
+                cycleDevices = EarbudModel.entries.map { it.id },
                 modifier = Modifier.fillMaxWidth(0.8f).height(200.dp)
                     .semantics { contentDescription = "Sony earbuds and headphones" }
                     .drawBehind {
