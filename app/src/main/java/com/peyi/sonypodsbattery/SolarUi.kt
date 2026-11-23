@@ -172,27 +172,8 @@ private fun modeTitle(mode: ListeningMode?, connected: Boolean, ambient: Int): S
     else -> "Connected"
 }
 
-internal const val TURNTABLE_FRAMES = 72
-
 /** What the Home hero is showing: the closed case, the buds, or a clip between them. */
 internal enum class HeroPhase { CASE, OPENING, BUDS, CLOSING }
-
-/** Frame index (0 until TURNTABLE_FRAMES) for a spin angle in degrees; frame k = k * 5 degrees. */
-internal fun turntableFrameFor(angleDeg: Float): Int =
-    Math.floorMod((angleDeg / (360f / TURNTABLE_FRAMES)).roundToInt(), TURNTABLE_FRAMES)
-
-/** Decodes turntable frames from assets/turntable on demand, keeping a small LRU of recent ones. */
-internal class TurntableFrames(private val context: android.content.Context) {
-    private val cache = android.util.LruCache<Int, ImageBitmap>(14)
-    private fun decode(i: Int): ImageBitmap? = runCatching {
-        context.assets.open("turntable/f%03d.webp".format(i)).use {
-            android.graphics.BitmapFactory.decodeStream(it)?.asImageBitmap()
-        }
-    }.getOrNull()?.also { cache.put(i, it) }
-
-    fun loadNow(i: Int): ImageBitmap? = cache.get(i) ?: decode(i)
-    suspend fun load(i: Int): ImageBitmap? = cache.get(i) ?: withContext(Dispatchers.IO) { decode(i) }
-}
 
 @Composable
 internal fun SolarHero(
@@ -226,49 +207,11 @@ internal fun SolarHero(
     }
     val title = modeTitle(mode, connected, ambientLevel)
 
-    // Turntable: drag sideways to spin both buds (pre-rendered frames), fling for momentum,
-    // and they ease back to the hero pose after a short idle. Tap still cycles noise mode.
     val context = LocalContext.current
-    val frames = remember { TurntableFrames(context.applicationContext) }
-    val angle = remember { Animatable(0f) }
-    var shown by remember { mutableStateOf(frames.loadNow(0)) }
-    val scope = rememberCoroutineScope()
-    val haptics = LocalHapticFeedback.current
-    val degPerPx = with(LocalDensity.current) { 360f / 320.dp.toPx() }
-    var settle by remember { mutableStateOf<Job?>(null) }
-    val target = turntableFrameFor(angle.value)
-    LaunchedEffect(target) {
-        frames.load(target)?.let { shown = it }
-        for (d in intArrayOf(1, -1, 2, -2, 3, -3)) frames.load(Math.floorMod(target + d, TURNTABLE_FRAMES))
-    }
-    fun settleHome(velocity: Float) {
-        settle?.cancel()
-        settle = scope.launch {
-            angle.animateDecay(velocity.coerceIn(-1440f, 1440f), exponentialDecay(frictionMultiplier = 2.2f))
-            delay(2500)
-            val home = (angle.value / 360f).roundToInt() * 360f
-            angle.animateTo(home, spring(dampingRatio = 0.82f, stiffness = 60f))
-            angle.snapTo(0f)
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        }
-    }
-    LaunchedEffect(Unit) {
-        val prefs = context.getSharedPreferences("sunpods_ui", android.content.Context.MODE_PRIVATE)
-        val animationsOn = android.provider.Settings.Global.getFloat(
-            context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f
-        ) > 0f
-        if (animationsOn && !prefs.getBoolean("turntable_hint_shown", false)) {
-            delay(900)
-            angle.animateTo(-40f, tween(700, easing = FastOutSlowInEasing))
-            angle.animateTo(0f, spring(dampingRatio = 0.6f, stiffness = 90f))
-            prefs.edit().putBoolean("turntable_hint_shown", true).apply()
-        }
-    }
 
-    // While the earbuds are away the hero shows the closed case. When they connect, the lid opens
-    // and the buds fly out to the hero pose; when they disconnect, the buds turn to face front and
-    // fly back in as the lid closes. Each clip starts and ends on the exact frame it replaces, so
-    // the cuts between clip and turntable are invisible.
+    // While the earbuds are away the hero shows the closed case. When they connect the lid opens
+    // and the view moves to the buds; when they disconnect it goes back to the case as the lid
+    // closes. All of it is the one live 3D view, in the earbuds' own colour.
     var phase by remember { mutableStateOf(if (connected) HeroPhase.BUDS else HeroPhase.CASE) }
     LaunchedEffect(connected) {
         val animationsOn = android.provider.Settings.Global.getFloat(
@@ -285,16 +228,10 @@ internal fun SolarHero(
             }
             phase = HeroPhase.BUDS
         } else if (!connected && phase == HeroPhase.BUDS) {
-            settle?.cancel()
             if (animationsOn) {
-                val home = (angle.value / 360f).roundToInt() * 360f
-                if (angle.value != home) angle.animateTo(home, tween(380, easing = FastOutSlowInEasing))
-                angle.snapTo(0f)
-                shown = frames.load(0) ?: shown
                 phase = HeroPhase.CLOSING
                 withTimeoutOrNull(4000) { snapshotFlow { phase }.first { it == HeroPhase.CASE } }
             }
-            angle.snapTo(0f)
             phase = HeroPhase.CASE
         }
     }
@@ -330,42 +267,10 @@ internal fun SolarHero(
                         )
                     }
                 }
-                .pointerInput(Unit) {
-                    if (true) return@pointerInput // the live 3D view spins itself
-                    val tracker = VelocityTracker()
-                    detectHorizontalDragGestures(
-                        onDragStart = {
-                            if (!showCase) {
-                                settle?.cancel()
-                                tracker.resetTracking()
-                                scope.launch { angle.stop() }
-                            }
-                        },
-                        onHorizontalDrag = { change, dx ->
-                            if (!showCase) {
-                                change.consume()
-                                tracker.addPosition(change.uptimeMillis, change.position)
-                                scope.launch { angle.snapTo(angle.value + dx * degPerPx) }
-                            }
-                        },
-                        onDragEnd = { if (!showCase) settleHome(tracker.calculateVelocity().x * degPerPx) },
-                        onDragCancel = { if (!showCase) settleHome(0f) }
-                    )
-                }
                 .semantics {
                     if (connected) onClick(label = "Change Noise Control") { onCycle(); true }
                 }
-                .semantics {
-                    contentDescription = "$model. $title"
-                    customActions = listOf(CustomAccessibilityAction("Spin earbuds") {
-                        settle?.cancel()
-                        settle = scope.launch {
-                            angle.animateTo(angle.value + 360f, tween(1600, easing = FastOutSlowInEasing))
-                            angle.snapTo(0f)
-                        }
-                        true
-                    })
-                }
+                .semantics { contentDescription = "$model. $title" }
         ) {
             // The connect clip ends on the hero pose itself, so the cut to the interactive buds
             // is invisible: both share one layout and the same float, tilt and bump.
