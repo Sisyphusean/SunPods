@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.1
+
+**Fixes**
+- "Can't reach your earbuds" on some phones while the earbuds were connected and playing. When your earbuds are paired more than once (Classic and LE Audio), SunPods now uses the entry that's actually connected, and a pull to refresh tries to reach them whenever your phone reports Bluetooth audio, instead of giving up
+- When the earbuds really can't be reached, you find out about 10 seconds sooner
+- Send Diagnostics says which paired entry SunPods used and how your phone reports the connection, so problems on new phones can be fixed from one report
+
 ## 3.1.0
 
 The WF-C710N joins the WF-1000XM5, in testing: own a pair? Tell us how it goes.
