@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -45,6 +46,9 @@ import kotlin.math.abs
  *   WebView, every [CYCLE_MS] with a soft fade, each in [color]; the next is preloaded. The timer starts
  *   once the first has drawn. Not with reduced motion (animator duration scale 0): the first one stays.
  *
+ * @param softSwap a change of [device] fades across (the device picker); not with reduced motion.
+ * @param preload a device to warm up in the background, so the next swap is instant.
+ *
  * Horizontal drags spin the earbuds (fling, then they ease home 2.5 s after the finger lifts,
  * with a haptic tick); vertical drags are left to the scrolling parent.
  */
@@ -57,6 +61,8 @@ internal fun Hero3D(
     onTap: (() -> Unit)? = null,
     device: String = "xm5",
     cycleDevices: List<String>? = null,
+    softSwap: Boolean = false,
+    preload: String? = null,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val cycle = cycleDevices?.takeIf { it.size > 1 }
@@ -64,14 +70,14 @@ internal fun Hero3D(
     val cycling = cycle != null && !reduceMotion
     var step by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val shownDevice = if (cycle != null) cycle[step % cycle.size] else device
-    val nextDevice = if (cycling) cycle!![(step + 1) % cycle.size] else null
+    val nextDevice = if (cycling) cycle!![(step + 1) % cycle.size] else preload
     // One hero view for the whole screen, kept alive while you move between tabs and pages, so
     // coming back to Home doesn't reload the 3D scene (which showed as the earbuds vanishing).
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     val state = remember(lifecycle) { HeroCache.stateFor(lifecycle) }
     SideEffect { HeroCache.onTap = onTap }
     state.device = shownDevice
-    state.soft = cycling
+    state.soft = cycling || (softSwap && !reduceMotion)
     state.preload = nextDevice
     state.color = color
     state.model = model
@@ -96,13 +102,15 @@ internal fun Hero3D(
     if (!mountWeb) LaunchedEffect(Unit) { withFrameNanos { }; mountWeb = true }
     androidx.compose.foundation.layout.Box(modifier) {
         if (mountWeb) AndroidView(
-            modifier = Modifier.matchParentSize(),
+            modifier = Modifier.matchParentSize().onSizeChanged { _ -> state.view?.postDelayed({ state.view?.evaluateJavascript("window.dispatchEvent(new Event('resize'))", null) }, 80) },
             factory = { ctx ->
+                state.hosts++
                 state.view?.also { (it.parent as? android.view.ViewGroup)?.removeView(it) }
                     ?: createHeroWebView(ctx, state) { HeroCache.onTap?.invoke() }
             },
             // Not destroyed here: the next Home screen picks the same view up again.
-            onRelease = { view -> (view.parent as? android.view.ViewGroup)?.removeView(view) },
+            // A page change can build the next screen's hero before this one is released; only the last host lets go.
+            onRelease = { view -> if (--state.hosts <= 0) (view.parent as? android.view.ViewGroup)?.removeView(view) },
         )
         if (placeholder != null && cover > 0f) androidx.compose.foundation.Image(
             placeholder, contentDescription = null,
@@ -190,6 +198,8 @@ private const val HERO3D_PAGE = "https://$HERO3D_HOST/assets/hero3d/index.html"
 /** What the page should show, and what it was last told, so only changes cross the bridge. */
 private class Hero3DState {
     var view: WebView? = null
+    /** How many on-screen hosts currently hold the view. */
+    var hosts = 0
     var ready = false
     /** The live view has drawn its first frame; the placeholder can go. */
     var drawn by androidx.compose.runtime.mutableStateOf(false)

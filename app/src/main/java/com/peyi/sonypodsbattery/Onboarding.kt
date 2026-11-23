@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -114,6 +115,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -420,58 +423,124 @@ private fun Feature(icon: ImageVector, title: String, body: String) {
     }
 }
 
-// -------------------------------------------------------------------------------- 2 which device
+// -------------------------------------------------------------------------------- 2 choose your device
 
-/** Everyone picks what they have, so pairing steps, pictures and wording match from the start. */
+/**
+ * One device at a time, big and centred, in the live 3D hero. Swipe to change it: the name and kind
+ * move with your finger, and the hero fades across to the one you land on.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun DeviceStep(onNext: () -> Unit) {
     val context = LocalContext.current
-    var picked by rememberSaveable {
-        mutableStateOf((EarbudModel.chosen(context) ?: EarbudModel.fromName(SettingsStore.modelName(context)))?.id)
+    val colors = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
+    val models = EarbudModel.entries
+    val reduceMotion = remember { Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) <= 0f }
+    // Start on what they picked before, or what their earbuds said they are, or the first.
+    val start = remember {
+        (EarbudModel.chosen(context) ?: EarbudModel.fromName(SettingsStore.modelName(context)))
+            ?.let { models.indexOf(it) }?.coerceAtLeast(0) ?: 0
     }
-    val model = EarbudModel.fromId(picked)
-    Page(
-        progressOf(Step.DEVICE), icon = Icons.Rounded.Headphones,
-        title = "Which Do You Have?",
-        body = "Pick your Sony earbuds or headphones. Pairing steps and pictures will match.",
-        primary = "Continue", primaryEnabled = model != null,
-        onPrimary = { model?.let { EarbudModel.choose(context, it); onNext() } }
-    ) {
-        Column(Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            EarbudModel.entries.chunked(2).forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    row.forEach { m -> DeviceCard(m, selected = m == model, onClick = { picked = m.id }, Modifier.weight(1f)) }
-                    if (row.size == 1) Spacer(Modifier.weight(1f))
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = start) { models.size }
+    val model = models[pager.currentPage]
+    val next = models[(pager.currentPage + 1) % models.size]
+    var showMore by rememberSaveable { mutableStateOf(false) }
+    fun goTo(i: Int) { scope.launch { if (reduceMotion) pager.scrollToPage(i) else pager.animateScrollToPage(i) } }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
+        Spacer(Modifier.height(32.dp))
+        Text(
+            "Choose Your Device", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center,
+            maxLines = 1, modifier = Modifier.fillMaxWidth().semantics { heading() }
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Swipe to find yours.", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant,
+            textAlign = TextAlign.Center, maxLines = 1, modifier = Modifier.fillMaxWidth()
+        )
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            // The hero stays put and the pager lays over it, so a swipe anywhere changes the device.
+            Box(Modifier.fillMaxSize().padding(bottom = 128.dp), contentAlignment = Alignment.Center) {
+                Hero3D(
+                    device = model.id, color = "black", softSwap = true, preload = next.id,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).fillMaxHeight()
+                )
+            }
+            androidx.compose.foundation.pager.HorizontalPager(
+                state = pager, modifier = Modifier.fillMaxSize(), key = { models[it].id }
+            ) { page ->
+                val m = models[page]
+                Column(
+                    Modifier.fillMaxSize().semantics(mergeDescendants = true) {
+                        contentDescription = "${m.displayName}, ${m.noun}. ${page + 1} of ${models.size}"
+                        val actions = mutableListOf<CustomAccessibilityAction>()
+                        if (page > 0) actions += CustomAccessibilityAction("Previous device") { goTo(page - 1); true }
+                        if (page < models.size - 1) actions += CustomAccessibilityAction("Next device") { goTo(page + 1); true }
+                        customActions = actions
+                    },
+                    verticalArrangement = Arrangement.Bottom, horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        m.displayName, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center, maxLines = 1
+                    )
+                    Text(
+                        m.titleNoun, style = MaterialTheme.typography.titleMedium, color = colors.onSurfaceVariant,
+                        textAlign = TextAlign.Center, maxLines = 1
+                    )
+                    Spacer(Modifier.height(56.dp))
+                }
+            }
+            // Page dots; each is a 48dp target that jumps to its device.
+            Row(Modifier.align(Alignment.BottomCenter), verticalAlignment = Alignment.CenterVertically) {
+                models.forEachIndexed { i, m ->
+                    val on = i == pager.currentPage
+                    val w by androidx.compose.animation.core.animateDpAsState(
+                        if (on) 20.dp else 8.dp,
+                        if (reduceMotion) androidx.compose.animation.core.snap() else androidx.compose.animation.core.tween(200, easing = Motion.Arrive),
+                        label = "dot"
+                    )
+                    Box(
+                        Modifier.size(48.dp)
+                            .selectable(selected = on, role = Role.Tab, onClick = { goTo(i) })
+                            .semantics { contentDescription = "Show ${m.displayName}" },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(Modifier.size(width = w, height = 8.dp).clip(CircleShape).background(if (on) colors.primary else colors.outlineVariant))
+                    }
                 }
             }
         }
+        Button(
+            onClick = { EarbudModel.choose(context, model); onNext() },
+            modifier = Modifier.fillMaxWidth().height(56.dp)
+        ) { Text("Continue") }
+        TextButton(onClick = { showMore = true }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Don't See Yours?") }
     }
-}
-
-@Composable
-private fun DeviceCard(model: EarbudModel, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val colors = MaterialTheme.colorScheme
-    Surface(
-        color = if (selected) colors.secondaryContainer else colors.surfaceContainerHigh,
-        shape = RoundedCornerShape(24.dp),
-        border = if (selected) androidx.compose.foundation.BorderStroke(2.dp, colors.primary) else null,
-        modifier = modifier.heightIn(min = 48.dp).selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
-            .semantics { contentDescription = "${model.displayName}, ${model.noun}" }
-    ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Image(
-                painterResource(budArt(0x01, model).pair), contentDescription = null,
-                contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxWidth().height(112.dp)
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                model.displayName, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center,
-                color = if (selected) colors.onSecondaryContainer else colors.onSurface
-            )
-            Text(
-                model.titleNoun, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center,
-                color = if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant
-            )
+    if (showMore) {
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { showMore = false },
+            sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
+                Text("Supported Devices", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+                Spacer(Modifier.height(8.dp))
+                models.forEach { m ->
+                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconTile(Icons.Rounded.Headphones)
+                        Spacer(Modifier.width(14.dp))
+                        Column {
+                            Text(m.displayName, style = MaterialTheme.typography.titleSmall)
+                            Text(m.titleNoun, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("More Sony models are coming.", style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant)
+                Spacer(Modifier.height(16.dp))
+                FilledTonalButton(onClick = { showMore = false }, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Done") }
+            }
         }
     }
 }
