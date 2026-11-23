@@ -1,0 +1,363 @@
+{
+ "_doc": "Review angles: Sony image (relative to branding/render/c710n), crop box [x0,y0,x1,y1] around one subject, subject (budR, budL, case), colour, lid (case), initial pose guess (yaw, pitch, roll in degrees: the subject's own frame turned towards the camera). mask: alpha (transparent PNG) or white (white background).",
+ "buds": [
+  {
+   "id": "spin03",
+   "img": "ref_blue/spin360/s360_03-54.png",
+   "mask": "white",
+   "subject": "budR",
+   "color": "blue",
+   "init": [
+    10,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "spin04",
+   "img": "ref_blue/spin360/s360_04-53.png",
+   "mask": "white",
+   "subject": "budR",
+   "color": "blue",
+   "init": [
+    48,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "spin05",
+   "img": "ref_blue/spin360/s360_05-52.png",
+   "mask": "white",
+   "subject": "budR",
+   "color": "blue",
+   "init": [
+    90,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "spin06",
+   "img": "ref_blue/spin360/s360_06-48.png",
+   "mask": "white",
+   "subject": "budR",
+   "color": "blue",
+   "init": [
+    134,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "spin07",
+   "img": "ref_blue/spin360/s360_07-42.png",
+   "mask": "white",
+   "subject": "budR",
+   "color": "blue",
+   "init": [
+    170,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "spin08",
+   "img": "ref_blue/spin360/s360_08-44.png",
+   "mask": "white",
+   "subject": "budR",
+   "color": "blue",
+   "init": [
+    209,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "spin09",
+   "img": "ref_blue/spin360/s360_09-40.png",
+   "mask": "white",
+   "subject": "budR",
+   "color": "blue",
+   "init": [
+    250,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "spin10",
+   "img": "ref_blue/spin360/s360_10-46.png",
+   "mask": "white",
+   "subject": "budR",
+   "color": "blue",
+   "init": [
+    290,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "spin11",
+   "img": "ref_blue/spin360/s360_11-43.png",
+   "mask": "white",
+   "subject": "budR",
+   "color": "blue",
+   "init": [
+    328,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "front_R",
+   "img": "ref_black/sonyus_buds_front.png",
+   "crop": [
+    0,
+    250,
+    600,
+    800
+   ],
+   "mask": "alpha",
+   "subject": "budR",
+   "color": "black",
+   "init": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "front_L",
+   "img": "ref_black/sonyus_buds_front.png",
+   "crop": [
+    600,
+    250,
+    1200,
+    800
+   ],
+   "mask": "alpha",
+   "subject": "budL",
+   "color": "black",
+   "init": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "side_R",
+   "img": "ref_black/sonyus_buds_side.png",
+   "crop": [
+    0,
+    250,
+    560,
+    800
+   ],
+   "mask": "alpha",
+   "subject": "budR",
+   "color": "black",
+   "init": [
+    -15,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "side_L",
+   "img": "ref_black/sonyus_buds_side.png",
+   "crop": [
+    560,
+    250,
+    1200,
+    800
+   ],
+   "mask": "alpha",
+   "subject": "budL",
+   "color": "black",
+   "init": [
+    -60,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "front_R_white",
+   "img": "ref_white/sonyus_buds_front.png",
+   "crop": [
+    0,
+    250,
+    600,
+    800
+   ],
+   "mask": "alpha",
+   "subject": "budR",
+   "color": "white",
+   "init": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "id": "side_L_pink",
+   "img": "ref_pink/sonyus_buds_side.png",
+   "crop": [
+    560,
+    250,
+    1200,
+    800
+   ],
+   "mask": "alpha",
+   "subject": "budL",
+   "color": "pink",
+   "init": [
+    35,
+    5,
+    0
+   ]
+  }
+ ],
+ "case": [
+  {
+   "id": "closed_front",
+   "img": "ref_black/sonyus_case_closed.png",
+   "mask": "alpha",
+   "subject": "case",
+   "lid": 0,
+   "color": "black",
+   "init": [
+    0,
+    18,
+    0
+   ]
+  },
+  {
+   "id": "open_front",
+   "img": "ref_black/sonyus_case_open.png",
+   "mask": "alpha",
+   "subject": "case",
+   "lid": 1,
+   "color": "black",
+   "init": [
+    0,
+    6,
+    0
+   ],
+   "lockPitch": 6
+  },
+  {
+   "id": "closed_box",
+   "img": "ref_black/sonyuk_10-black-min.png",
+   "crop": [
+    150,
+    1060,
+    920,
+    1460
+   ],
+   "mask": "white",
+   "subject": "case",
+   "lid": 0,
+   "color": "black",
+   "init": [
+    0,
+    22,
+    0
+   ]
+  },
+  {
+   "id": "open_diag",
+   "img": "ref_black/sonyuk_09-black-min.png",
+   "crop": [
+    300,
+    940,
+    1500,
+    1660
+   ],
+   "mask": "white",
+   "subject": "case",
+   "lid": 1,
+   "color": "black",
+   "init": [
+    0,
+    6,
+    0
+   ],
+   "lockPitch": 6
+  },
+  {
+   "id": "open_hero",
+   "img": "ref_black/sonyuk_01-black-min.png",
+   "crop": [
+    90,
+    650,
+    1100,
+    1390
+   ],
+   "mask": "white",
+   "subject": "case",
+   "lid": 1,
+   "color": "black",
+   "init": [
+    0,
+    6,
+    0
+   ],
+   "lockPitch": 6
+  },
+  {
+   "id": "closed_blue",
+   "img": "ref_blue/sonyus_case_closed.png",
+   "mask": "alpha",
+   "subject": "case",
+   "lid": 0,
+   "color": "blue",
+   "init": [
+    0,
+    18,
+    0
+   ]
+  },
+  {
+   "id": "open_blue",
+   "img": "ref_blue/sonyus_case_open.png",
+   "mask": "alpha",
+   "subject": "case",
+   "lid": 1,
+   "color": "blue",
+   "init": [
+    0,
+    6,
+    0
+   ],
+   "lockPitch": 6
+  },
+  {
+   "id": "open_white",
+   "img": "ref_white/sonyus_case_open.png",
+   "mask": "alpha",
+   "subject": "case",
+   "lid": 1,
+   "color": "white",
+   "init": [
+    0,
+    6,
+    0
+   ],
+   "lockPitch": 6
+  },
+  {
+   "id": "closed_pink",
+   "img": "ref_pink/sonyus_case_closed.png",
+   "mask": "alpha",
+   "subject": "case",
+   "lid": 0,
+   "color": "pink",
+   "init": [
+    0,
+    2,
+    0
+   ]
+  }
+ ]
+}

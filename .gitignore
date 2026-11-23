@@ -42,3 +42,6 @@ branding/render/ref_*/
 branding/render/ref360/
 branding/render/hero3d_preview/_sheet_vs_current_and_sony.jpg
 branding/render/anim/colours/
+# WF-C710N: the boards and previews contain Sony's photos and the frames are huge; keep only the tools
+branding/render/c710n/*
+!branding/render/c710n/tools/

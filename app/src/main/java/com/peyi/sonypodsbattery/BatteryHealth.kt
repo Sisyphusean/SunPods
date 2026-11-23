@@ -64,8 +64,8 @@ internal object BatteryHealth {
     /** Shared time is compared in chunks of up to an hour. */
     private const val CHUNK_HOURS = 1.0
 
-    /** Sony's WF-1000XM5 ratings; ambient isn't rated separately. */
-    fun ratedHours(mode: Char): Double? = when (mode) { 'N' -> 8.0; 'O' -> 12.0; else -> null }
+    /** Sony's ratings for these earbuds; ambient isn't rated separately. */
+    fun ratedHours(mode: Char): Double? = when (mode) { 'N' -> EarbudModel.active.ratedHoursNc; 'O' -> EarbudModel.active.ratedHoursOff; else -> null }
 
     data class Stretch(
         val start: Long, val end: Long, val side: Int, val mode: Char, val hours: Double, val drop: Double, val rate: Double,

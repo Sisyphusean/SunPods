@@ -1,0 +1,53 @@
+# Close-up board (tools only): Sony (full-resolution photo) beside the model (1536-px render) at the same
+# fitted camera, cropped round the ear tip and the mic grille, about 3x the review board's scale.
+#   python closeup.py <renderDir> <out.jpg> [label]
+import os, sys, json
+from PIL import Image, ImageDraw, ImageFont
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+C7 = os.path.normpath(os.path.join(HERE, '..'))
+rd, out = sys.argv[1], sys.argv[2]
+label = sys.argv[3] if len(sys.argv) > 3 else ''
+meta = json.load(open(os.path.join(C7, '_fit', 'refs', 'meta.json')))
+where = json.load(open(os.path.join(rd, 'where.json')))
+try:
+    F = ImageFont.truetype('arial.ttf', 18); FS = ImageFont.truetype('arial.ttf', 15)
+except OSError:
+    F = FS = None
+T = 420          # tile size
+HALF = 85        # crop half-size in 512-px board space (170 px -> 420 px: about 2.5x the board)
+
+def sony_crop(k, cx, cy):
+    m = meta[k]
+    im = Image.open(os.path.join(C7, m['img'])).convert('RGBA')
+    if 'crop' in m: im = im.crop(tuple(m['crop']))
+    b = Image.new('RGBA', im.size, (255, 255, 255, 255)); b.alpha_composite(im); im = b.convert('RGB')
+    x0, y0, x1, y1 = m['box']; s = (x1 - x0) / 512
+    box = (x0 + (cx - HALF) * s, y0 + (cy - HALF) * s, x0 + (cx + HALF) * s, y0 + (cy + HALF) * s)
+    pad = Image.new('RGB', (im.width + 4000, im.height + 4000), (255, 255, 255)); pad.paste(im, (2000, 2000))
+    return pad.crop(tuple(int(round(v + 2000)) for v in box)).resize((T, T), Image.LANCZOS)
+
+def model_crop(k, cx, cy):
+    im = Image.open(os.path.join(rd, f'{k}_model.png')).convert('RGBA')
+    b = Image.new('RGBA', im.size, (255, 255, 255, 255)); b.alpha_composite(im); im = b.convert('RGB')
+    s = im.width / 512
+    pad = Image.new('RGB', (im.width + 2000, im.height + 2000), (255, 255, 255)); pad.paste(im, (1000, 1000))
+    box = ((cx - HALF) * s + 1000, (cy - HALF) * s + 1000, (cx + HALF) * s + 1000, (cy + HALF) * s + 1000)
+    return pad.crop(tuple(int(round(v)) for v in box)).resize((T, T), Image.LANCZOS)
+
+rows = []
+for k, (tip, gr) in where.items():
+    rows.append((k, 'ear tip', tip))
+    if k in ('front_R_white', 'side_L', 'side_L_pink', 'front_R', 'front_L', 'spin10'): rows.append((k, 'grille', gr))
+cols = 2
+nr = (len(rows) + cols - 1) // cols
+sheet = Image.new('RGB', (cols * (2 * T + 30), nr * (T + 30) + 40), (235, 235, 235))
+d = ImageDraw.Draw(sheet)
+d.text((8, 8), f'{label} close-ups, about 3x the board: Sony (left) | model at the same fitted camera (right)', fill=(0, 0, 0), font=F)
+for n, (k, what, c) in enumerate(rows):
+    r, q = n // cols, n % cols
+    x, y = q * (2 * T + 30), 40 + r * (T + 30)
+    sheet.paste(sony_crop(k, *c), (x, y + 24)); sheet.paste(model_crop(k, *c), (x + T + 6, y + 24))
+    d.text((x + 4, y + 4), f"{k} ({meta[k]['color']}): {what}", fill=(0, 0, 0), font=FS)
+sheet.save(out, quality=90)
+print(out, sheet.size)

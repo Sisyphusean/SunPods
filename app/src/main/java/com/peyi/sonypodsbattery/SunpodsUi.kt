@@ -511,7 +511,7 @@ fun SunpodsApp(
         ) {
             androidx.compose.runtime.CompositionLocalProvider(
                 LocalOpenPage provides { go(tab, it) },
-                LocalBudArt provides budArt(settings.colorCode)
+                LocalBudArt provides budArt(settings)
             ) {
                 navTransition.AnimatedContent(
                     modifier = Modifier.fillMaxSize(),
@@ -907,8 +907,9 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
                 mode = battery.listeningMode,
                 ambientLevel = battery.ambientLevel,
                 connected = connected,
-                model = settings.modelName ?: "WF-1000XM5",
-                color = LocalBudArt.current.hero3d
+                model = settings.modelName ?: EarbudModel.active.displayName,
+                color = LocalBudArt.current.hero3d,
+                device = LocalBudArt.current.device
             ) {
                 val next = when (battery.listeningMode) {
                     ListeningMode.NOISE_CANCELLING -> ListeningMode.AMBIENT
@@ -1575,9 +1576,9 @@ private fun SoundScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
     Group(
         null,
         footer = settings.codec?.let { "Playing over $it." },
-        rows = listOf(
-            { ToggleRow(Icons.Rounded.AutoAwesome, "DSEE Extreme", "", settings.dseeOn, leOffNote(settings), vm::setDsee) },
-            {
+        rows = buildList {
+            if (settings.has(Feature.DSEE)) add { ToggleRow(Icons.Rounded.AutoAwesome, settings.dseeName, "", settings.dseeOn, leOffNote(settings), vm::setDsee) }
+            add {
                 var open by remember { mutableStateOf(false) }
                 NavRow(Icons.Rounded.BluetoothAudio, "Connection Priority", settings.priority?.short ?: "—") { open = true }
                 if (open) {
@@ -1586,14 +1587,14 @@ private fun SoundScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
                         ConnectionPriority.entries.toList(),
                         settings.priority,
                         label = { it.label },
-                        detail = { it.detail },
+                        detail = { it.detailFor(EarbudModel.active) },
                         onDismiss = { open = false },
                         onPick = vm::setPriority
                     )
                 }
-            },
-            { PageRow(Icons.Rounded.HealthAndSafety, Page.SAFE_LISTENING, if (safe.first) "On" else "Off") }
-        )
+            }
+            if (settings.has(Feature.SAFE_LISTENING)) add { PageRow(Icons.Rounded.HealthAndSafety, Page.SAFE_LISTENING, if (safe.first) "On" else "Off") }
+        }
     )
 }
 
@@ -1879,8 +1880,8 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
         null,
         rows = buildList {
             add { PageRow(Icons.Rounded.AutoMode, Page.AUTOMATIONS, if (automations == 0) "Off" else "$automations on") }
-            add { PageRow(Icons.Rounded.RecordVoiceOver, Page.SPEAK_TO_CHAT, onOff(settings.speakToChat)) }
-            add { PageRow(Icons.Rounded.Sensors, Page.WEARING) }
+            if (settings.has(Feature.SPEAK_TO_CHAT)) add { PageRow(Icons.Rounded.RecordVoiceOver, Page.SPEAK_TO_CHAT, onOff(settings.speakToChat)) }
+            if (settings.has(Feature.WEARING)) add { PageRow(Icons.Rounded.Sensors, Page.WEARING) }
             if (settings.promptsOn != null || settings.promptVolume != null) add { PageRow(Icons.Rounded.Campaign, Page.VOICE_PROMPTS, onOff(settings.promptsOn)) }
         }
     )
@@ -1931,10 +1932,21 @@ private fun WearingPage(settings: DeviceSettings, vm: SunpodsViewModel) {
     Group(
         null,
         footer = "Your earbuds sense when you take them out.",
-        rows = listOf(
-            { ToggleRow(Icons.Rounded.Sensors, "Pause When Removed", "", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) },
-            { ToggleRow(Icons.Rounded.PowerSettingsNew, "Power Off When Removed", "", settings.autoOffWhenRemoved, vm::setAutoOff) }
-        )
+        rows = buildList {
+            if (settings.has(Feature.PAUSE_WHEN_REMOVED)) add { ToggleRow(Icons.Rounded.Sensors, "Pause When Removed", "", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) }
+            if (settings.has(Feature.AUTO_OFF_WHEN_REMOVED)) {
+                val options = settings.autoOffOptions
+                if (AutoOff.hasTimes(options)) add {
+                    // Earbuds that offer times (the WF-C710N): one choice, like Sound Connect's.
+                    var open by remember { mutableStateOf(false) }
+                    NavRow(Icons.Rounded.PowerSettingsNew, "Turn Off Automatically", settings.autoOffCode?.let(AutoOff::short) ?: "—") { open = true }
+                    if (open) {
+                        ChoiceSheet("Turn Off Automatically", AutoOff.ordered(options!!), settings.autoOffCode,
+                            label = { AutoOff.label(it) }, onDismiss = { open = false }, onPick = vm::setAutoOffOption)
+                    }
+                } else add { ToggleRow(Icons.Rounded.PowerSettingsNew, "Power Off When Removed", "", settings.autoOffWhenRemoved, vm::setAutoOff) }
+            }
+        }
     )
 }
 
@@ -2100,7 +2112,7 @@ private fun DeviceScreen(settings: DeviceSettings) {
                 }
         )
         Spacer(Modifier.height(4.dp))
-        Text(settings.modelName ?: "WF-1000XM5", style = MaterialTheme.typography.titleLarge)
+        Text(settings.modelName ?: EarbudModel.active.displayName, style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(2.dp))
         Text(
             listOfNotNull(settings.firmware?.let { "Firmware $it" }, settings.codec).joinToString("  ·  ").ifEmpty { "Sony wireless earbuds" },
@@ -2187,7 +2199,7 @@ private fun EarbudsGroup(settings: DeviceSettings) {
     var note by remember { mutableStateOf<String?>(null) }
     val rows = mutableListOf<@Composable () -> Unit>()
     val a = assistant
-    if (a != null) rows += {
+    if (a != null && settings.has(Feature.VOICE_ASSISTANT)) rows += {
         NavRow(Icons.Rounded.RecordVoiceOver, "Voice Assistant", if (le) LE_OFF_NOTE else a.first?.let(VoiceAssistantSetting::short) ?: "—") {
             if (!le) choosing = true
         }
@@ -2197,9 +2209,9 @@ private fun EarbudsGroup(settings: DeviceSettings) {
                 onDismiss = { choosing = false }, onPick = { vm.setAssistant(it) })
         }
     }
-    rows += { NavRow(Icons.Rounded.Hearing, "Ear Tip Fit Test", null) { fitting = true } }
-    rows += { NavRow(Icons.Rounded.PowerSettingsNew, "Turn Off Earbuds", null) { confirmOff = true } }
-    rows += { NavRow(Icons.Rounded.RestartAlt, "Reset Earbud Settings", null) { confirmReset = true } }
+    if (settings.has(Feature.FIT_TEST)) rows += { NavRow(Icons.Rounded.Hearing, "Ear Tip Fit Test", null) { fitting = true } }
+    if (settings.has(Feature.POWER_OFF)) rows += { NavRow(Icons.Rounded.PowerSettingsNew, "Turn Off Earbuds", null) { confirmOff = true } }
+    if (settings.has(Feature.RESET)) rows += { NavRow(Icons.Rounded.RestartAlt, "Reset Earbud Settings", null) { confirmReset = true } }
     Group("Your Earbuds", rows = rows, footer = note)
 
     if (fitting) FitTestSheet(vm) { fitting = false }

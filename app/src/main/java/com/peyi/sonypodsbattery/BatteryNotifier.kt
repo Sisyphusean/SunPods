@@ -26,7 +26,7 @@ object BatteryNotifier {
         val open = PendingIntent.getActivity(context, 20, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = android.app.Notification.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_sunpods_mark)
-            .setContentTitle("WF-1000XM5")
+            .setContentTitle(EarbudModel.current(context).displayName)
             .setContentText(content)
             .setContentIntent(open)
             .setOnlyAlertOnce(true)

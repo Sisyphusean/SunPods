@@ -571,7 +571,7 @@ private object SonyCommandCoordinator {
         val app = command.context.applicationContext
         val client = SonyBatteryClient(app)
         val target = client.findEarbuds()
-            ?: return Result.failure(EarbudsUnavailableException("Pair your WF-1000XM5 in Bluetooth settings, then try again."))
+            ?: return Result.failure(EarbudsUnavailableException("Pair your earbuds in Bluetooth settings, then try again."))
         if (A2dpConnectionHelper.isConnected(app, target) == false) {
             return Result.failure(EarbudsUnavailableException("Your earbuds aren't connected. Open the case near your phone and try again."))
         }
@@ -726,7 +726,7 @@ private object SonyCommandCoordinator {
             return persistCheckedState(previous)
         }
         val state = if (target == null) {
-            persistCheckedState(previous.copy(status = "Pair your WF-1000XM5 in Bluetooth settings first."))
+            persistCheckedState(previous.copy(status = "Pair your earbuds in Bluetooth settings first."))
         } else try {
             val wasConnected = SonyControlSessionManager.currentState() == SonySessionState.CONNECTED
             val tRead = System.currentTimeMillis()
@@ -813,7 +813,7 @@ private object SonyCommandCoordinator {
             }
         }
         val state = if (target == null) {
-            previous.copy(status = "Pair your WF-1000XM5 in Bluetooth settings first.")
+            previous.copy(status = "Pair your earbuds in Bluetooth settings first.")
         } else try {
             executeConfirmedControlCommand(
                 app,
@@ -872,7 +872,7 @@ private object SonyCommandCoordinator {
             }
         }
         val state = if (target == null) {
-            previous.copy(status = "Pair your WF-1000XM5 in Bluetooth settings first.")
+            previous.copy(status = "Pair your earbuds in Bluetooth settings first.")
         } else try {
             executeConfirmedControlCommand(
                 app,

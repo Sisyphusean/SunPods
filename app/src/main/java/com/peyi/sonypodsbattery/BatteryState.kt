@@ -106,6 +106,9 @@ object DiagnosticsStore {
         appendLine("Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})")
         appendLine("App ${SunpodsInfo.VERSION}")
         appendLine("Phone LE Audio: ${LeAudio.support(context)}")
-        append(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "No events yet"))
+        SettingsStore.load(context).let { s -> appendLine("Earbuds: ${s.modelName ?: "unknown"} ${s.firmware.orEmpty()}") }
+        appendLine(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, "No events yet"))
+        ProtocolCapture.attach(context)
+        append(ProtocolCapture.text())
     }
 }

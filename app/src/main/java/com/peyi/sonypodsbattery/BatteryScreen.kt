@@ -125,8 +125,11 @@ internal fun BatteryAlertsPage() = AlertsCard()
 
 // ---------------------------------------------------------------------- estimate
 
-private enum class EstimateMode(val label: String, val ratedHours: Double) {
-    NC("Cancelling", 8.0), AMBIENT("Ambient", 8.0), OFF("Off", 12.0)
+private enum class EstimateMode(val label: String) {
+    NC("Cancelling"), AMBIENT("Ambient"), OFF("Off");
+
+    /** Sony rates ambient like noise cancelling. */
+    val ratedHours: Double get() = if (this == OFF) EarbudModel.active.ratedHoursOff else EarbudModel.active.ratedHoursNc
 }
 
 @Composable
@@ -142,7 +145,7 @@ private fun ListeningLeftCard(battery: BatteryState, outlook: BatteryOutlook) {
         )
     }
     // The measured rate reflects how you really listen; scale it by Sony's rating for the chosen mode.
-    val rate = outlook.drainPerHour * (8.0 / mode.ratedHours)
+    val rate = outlook.drainPerHour * (EarbudModel.active.ratedHoursNc / mode.ratedHours)
     val buds = listOfNotNull(
         battery.left?.takeIf { it in 1..100 && !battery.leftCharging },
         battery.right?.takeIf { it in 1..100 && !battery.rightCharging }
@@ -556,9 +559,9 @@ private fun StatsGrid(battery: BatteryState, samples: List<BatterySample>, outlo
         ),
         Stat(
             "Case Reserve",
-            case?.let { "%.1f charges".format(it / 100.0 * 2) } ?: "Unknown",
+            case?.let { "%.1f charges".format(it / 100.0 * EarbudModel.active.caseCharges) } ?: "Unknown",
             case?.let { "Case at $it%" } ?: "Open the case to check",
-            "A full WF-1000XM5 case recharges both earbuds about twice. This shows how many charges it has left."
+            "A full ${EarbudModel.active.displayName} case recharges both earbuds about ${if (EarbudModel.active.caseCharges == 2.0) "twice" else "%.1f times".format(EarbudModel.active.caseCharges)}. This shows how many charges it has left."
         )
     )
     var open by rememberSaveable { mutableIntStateOf(-1) }

@@ -83,6 +83,7 @@ internal object EarbudAddresses {
 @Composable
 internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess: Boolean = false, onDone: () -> Unit) {
     val context = LocalContext.current
+    val model = remember(settings.modelName) { EarbudModel.fromName(settings.modelName) ?: EarbudModel.current(context) }
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<Switch>(Switch.Working("Updating your earbuds…")) }
     var flow by remember { mutableStateOf<Job?>(null) }
@@ -286,7 +287,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 if (!sh.waitForAdvert(le.first(), 5 * 60_000L)) return@use false
                 // Old pairings stop the LE side pairing cleanly. Remove them and wait until they're gone.
                 val old = sh.bonded().lines().map { it.split("|") }
-                    .filter { it.size >= 2 && (it[0].startsWith("LE_WF-1000XM5") || it[1].equals(classic, true) || le.any { a -> a.equals(it[1], true) }) }
+                    .filter { it.size >= 2 && (EarbudModel.current(context).matchesLe(it[0]) || it[1].equals(classic, true) || le.any { a -> a.equals(it[1], true) }) }
                     .map { it[1] }
                 old.forEach { log("remove $it: ${sh.removeBond(it)}") }
                 var waited = 0
@@ -438,7 +439,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 }
                 Switch.PairLe -> {
                     RenderClip(
-                        budArt(settings.colorCode).pairClip,
+                        budArt(settings).pairClip,
                         "The case turns round, the button on the back is held down, then the light on the front flashes blue.",
                         Modifier.fillMaxWidth().height(200.dp)
                     )
@@ -458,7 +459,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                             PairingStatus(pairStatus)
                         }
                     } else {
-                        Step(1, "Open Bluetooth settings. Tap the settings icon next to WF-1000XM5, then tap Unpair. Unpair LE_WF-1000XM5 too if it's there.")
+                        Step(1, "Open Bluetooth settings. Tap the settings icon next to ${model.displayName}, then tap Unpair. Unpair LE_${model.displayName} too if it's there.")
                         Step(2, "Put both earbuds in the case and keep the lid open. Hold the button on the back of the case until the light flashes blue.")
                         Step(3, "Come back here and tap Pair Now. If your phone asks to pair, tap Pair.")
                         PairingStatus(if (pairing) "Pairing your earbuds" else "Waiting for LE Audio")
@@ -473,7 +474,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 }
                 Switch.PairClassic -> {
                     RenderClip(
-                        budArt(settings.colorCode).pairClip,
+                        budArt(settings).pairClip,
                         "The case turns round, the button on the back is held down, then the light on the front flashes blue.",
                         Modifier.fillMaxWidth().height(200.dp)
                     )
@@ -487,9 +488,9 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                         Spacer(Modifier.height(20.dp))
                         Button(onClick = { pairClassic() }, enabled = !pairing, modifier = Modifier.fillMaxWidth()) { Text("Pair Now") }
                     } else {
-                        Step(1, "Open Bluetooth settings. Unpair every WF-1000XM5 in the list.")
+                        Step(1, "Open Bluetooth settings. Unpair every ${model.displayName} in the list.")
                         Step(2, "Put both earbuds in the case and keep the lid open. Hold the button on the back of the case until the light flashes blue.")
-                        Step(3, "Under Available devices, tap WF-1000XM5.")
+                        Step(3, "Under Available devices, tap ${model.displayName}.")
                         PairingStatus("Waiting for your earbuds")
                         Spacer(Modifier.height(20.dp))
                         Button(onClick = openBluetooth, modifier = Modifier.fillMaxWidth()) { Text("Open Bluetooth Settings") }
@@ -597,6 +598,8 @@ internal object LePairing {
     suspend fun alsoPairLe(context: Context, log: (String) -> Unit): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         if (ShizukuBluetooth.state() != ShizukuBluetooth.State.READY) return@withContext false
         if (LeAudio.support(context) == LeAudio.Support.NOT_SUPPORTED) return@withContext false
+        // Earbuds without LE Audio (the WF-C710N) have no LE side; saved addresses may be another pair's.
+        if (SettingsStore.load(context).leModeSupported == false) return@withContext false
         val le = EarbudAddresses.le(context).filter { EarbudAddresses.isRandom(it) }
         if (le.isEmpty()) return@withContext false
         ShizukuBluetooth.use(context) { sh ->

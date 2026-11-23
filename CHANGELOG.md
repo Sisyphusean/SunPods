@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.1.0
+
+The WF-C710N joins the WF-1000XM5, in testing: own a pair? Tell us how it goes.
+
+**New**
+- WF-C710N support: battery for each earbud and the case, noise cancelling and Ambient Sound with Focus on Voice, the equaliser, DSEE, sound quality mode, touch controls, wearing detection with a choice of when to turn off, voice prompts, two devices at once, turn off and reset
+- SunPods asks your earbuds what they can do, the way Sony's app does, and only shows that
+- Send Diagnostics now includes your earbuds' replies (nothing personal), so a model can be fixed from one report
+
+**Fixes**
+- A change that the earbuds confirm with a prompt, like moving a touch control, could be lost when their answer arrived together with another message
+- Undoing a touch control the earbuds refuse now goes through, even when they ask to confirm it
+- The noise control cycle is written back the way your earbuds report it
+- Battery and noise control on Home follow your earbuds live again as soon as you open the app. A check for what's playing kept getting in the way for up to a minute
+- Home shows up sooner: the 3D earbuds load just after it appears, with a picture of them in the meantime
+
 ## 3.0.0
 
 A new SunPods: redesigned from top to bottom, your earbuds in 3D and in their own colour, nearly everything Sony's app can do (not yet: voice guidance language and firmware updates), and it can update itself.

@@ -64,12 +64,14 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     }
 
     init {
+        StartupLog.mark("viewmodel init")
         ShizukuWatch.start(application)
         Updates.schedule(application)
         // Opening the app also checks the connection, so a problem left from earlier gets fixed.
         ClassicRepair.check(application, "SunPods opened")
         BatteryStore.prefs(application).registerOnSharedPreferenceChangeListener(batteryListener)
         EarbudConnectionStateStore.prefs(application).registerOnSharedPreferenceChangeListener(connectionListener)
+        StartupLog.mark("viewmodel init done")
     }
 
     private var liveJob: Job? = null
@@ -97,11 +99,14 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         EarbudConnectionStateStore.prefs(app).unregisterOnSharedPreferenceChangeListener(connectionListener)
     }
 
-    /** On opening the app: read the earbuds if they're connected and the numbers are over a minute old. */
+    /**
+     * On opening the app: read the earbuds if they're connected and the numbers are over a minute
+     * old, or their settings were never read (then the app doesn't know which model it has yet).
+     */
     fun refreshIfStale() {
         val b = _battery.value
         val age = System.currentTimeMillis() - maxOf(b.updatedAt, b.lastCheckedAt)
-        if (age > 60_000 && audioLinkUp(app)) refreshAll()
+        if ((age > 60_000 || _settings.value.modelName == null) && audioLinkUp(app)) refreshAll()
     }
 
     fun consumeMessage() {
@@ -183,6 +188,10 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
 
     fun setPauseWhenRemoved(on: Boolean) = change("Pause When Removed", { it.copy(pauseWhenRemoved = on) }) { s, r ->
         SonyFeatures.setPauseWhenRemoved(s, r, on)
+    }
+
+    fun setAutoOffOption(code: Int) = change("Automatic Power Off", { it.copy(autoOffCode = code, autoOffWhenRemoved = code == AutoOff.WHEN_REMOVED) }) { s, r ->
+        SonyFeatures.setAutoOffOption(s, r, code)
     }
 
     fun setAutoOff(whenRemoved: Boolean) = change("Automatic Power Off", { it.copy(autoOffWhenRemoved = whenRemoved) }) { s, r ->

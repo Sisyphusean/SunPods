@@ -22,8 +22,8 @@ android {
         applicationId = "com.peyi.sonypodsbattery"
         minSdk = 29
         targetSdk = 35
-        versionCode = 97
-        versionName = "3.0.0"
+        versionCode = 98
+        versionName = "3.1.0"
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
     }
 
@@ -43,6 +43,8 @@ android {
             if (hasLocalSigning) {
                 signingConfig = signingConfigs.getByName("localStable")
             }
+            // Simulated earbuds, the adb hook and start-up timing marks (never in releases)
+            buildConfigField("boolean", "TOOLS", "true")
         }
         release {
             isMinifyEnabled = true
@@ -51,6 +53,16 @@ android {
                 signingConfig = signingConfigs.getByName("localStable")
             }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            buildConfigField("boolean", "TOOLS", "false")
+        }
+        // Release code and speed with the tools on, installed beside the app: for timing start-up
+        // and screens honestly (debug builds run Compose several times slower).
+        create("benchmark") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".bench"
+            signingConfig = signingConfigs.getByName(if (hasLocalSigning) "localStable" else "debug")
+            matchingFallbacks += listOf("release")
+            buildConfigField("boolean", "TOOLS", "true")
         }
     }
 
@@ -59,6 +71,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    // Protocol code logs through android.util.Log; in JVM tests those calls are no-ops.
+    testOptions { unitTests.isReturnDefaultValues = true }
 
     buildFeatures {
         compose = true

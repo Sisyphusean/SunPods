@@ -357,8 +357,8 @@ private fun WelcomeStep(onStart: () -> Unit) {
         progress = null,
         art = {
             Image(
-                painter = painterResource(remember { budArt(SettingsStore.load(context).colorCode).pair }),
-                contentDescription = "WF-1000XM5 earbuds",
+                painter = painterResource(remember { budArt(SettingsStore.load(context)).pair }),
+                contentDescription = "Sony earbuds",
                 modifier = Modifier.fillMaxWidth(0.8f).height(200.dp).drawBehind {
                     drawCircle(
                         Brush.radialGradient(listOf(colors.primary.copy(alpha = 0.25f), Color.Transparent), center, size.height / 1.6f),
@@ -368,7 +368,7 @@ private fun WelcomeStep(onStart: () -> Unit) {
             )
         },
         title = "Welcome to SunPods",
-        body = "Everything your WF-1000XM5 can do, without the clutter.",
+        body = "Everything your Sony earbuds can do, without the clutter.",
         primary = "Get Started",
         onPrimary = onStart,
         secondary = "Restore from Backup",
@@ -552,7 +552,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         if (cdm == null) { state = Buds.Failed("SunPods can't search for earbuds on this phone. Pair them in Bluetooth settings instead."); return }
         state = Buds.Searching
         val filter = BluetoothDeviceFilter.Builder()
-            .setNamePattern(Pattern.compile(".*WF[- ]?1000XM5.*", Pattern.CASE_INSENSITIVE))
+            .setNamePattern(EarbudModel.scanPattern)
             .build()
         val request = AssociationRequest.Builder().addDeviceFilter(filter).setSingleDevice(false).build()
         val callback = object : CompanionDeviceManager.Callback() {
@@ -592,7 +592,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         Buds.NotPaired -> Page(
             progress, art = {
                 RenderClip(
-                    remember { budArt(SettingsStore.load(context).colorCode).pairClip },
+                    remember { budArt(SettingsStore.load(context)).pairClip },
                     "The case turns round, the button on the back is held down, then the light on the front flashes blue.",
                     Modifier.fillMaxWidth().height(260.dp)
                 )
@@ -612,7 +612,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
             }
         }
-        Buds.Searching -> Page(progress, icon = Icons.Rounded.BluetoothSearching, title = "Searching for Earbuds", body = "Choose WF-1000XM5 when it appears. Keep the case open, near your phone.", primary = null) {
+        Buds.Searching -> Page(progress, icon = Icons.Rounded.BluetoothSearching, title = "Searching for Earbuds", body = "Choose your ${EarbudModel.anyName} when it appears. Keep the case open, near your phone.", primary = null) {
             CircularProgressIndicator()
         }
         Buds.Pairing -> Page(progress, icon = Icons.Rounded.BluetoothSearching, title = "Pairing Your Earbuds", body = "If Android asks you to confirm, tap Pair.", primary = null) {
@@ -620,7 +620,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         }
         Buds.Waiting -> Page(
             progress, art = {
-                RenderClip(remember { budArt(SettingsStore.load(context).colorCode).openClip }, "The case opens and both earbuds lift out.", Modifier.fillMaxWidth().height(260.dp))
+                RenderClip(remember { budArt(SettingsStore.load(context)).openClip }, "The case opens and both earbuds lift out.", Modifier.fillMaxWidth().height(260.dp))
             },
             title = "Open the Case Near Your Phone",
             body = "Your earbuds are paired. Open the lid or take them out, and they'll connect.",

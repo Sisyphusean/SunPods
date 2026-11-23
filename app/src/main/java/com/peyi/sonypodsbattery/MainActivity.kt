@@ -38,6 +38,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        StartupLog.mark("activity onCreate")
+        StartupLog.watchMainThread()
         if (ShizukuWatch.onNotificationTap(this, intent)) { super.onCreate(savedInstanceState); return }
         // Splash exit: the mark grows and fades as the page fades through to SunPods.
         // Fast phones are ready before the logo finishes assembling, so wait out the rest of
@@ -84,6 +86,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+        StartupLog.mark("setContent done")
+        window.decorView.viewTreeObserver.addOnDrawListener(object : android.view.ViewTreeObserver.OnDrawListener {
+            var done = false
+            override fun onDraw() { if (!done) { done = true; StartupLog.mark("first draw") } }
+        })
         // First run: setup asks for everything with explanations, so don't fire bare prompts.
         if (!onboarding) { if (!hasPermission) askForPermissions() else BackgroundAccess.askOnce(this) }
     }
@@ -100,9 +107,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        StartupLog.mark("resume")
         hasPermission = hasBluetoothPermission()
         vm.reloadCached()
         if (hasPermission) vm.refreshIfStale()
+        StartupLog.mark("resume done")
     }
 
     private fun hasBluetoothPermission() = Build.VERSION.SDK_INT < 31 ||
