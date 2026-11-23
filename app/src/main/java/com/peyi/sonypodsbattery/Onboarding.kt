@@ -109,6 +109,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -356,19 +357,26 @@ private fun WelcomeStep(onStart: () -> Unit) {
     Page(
         progress = null,
         art = {
-            Image(
-                painter = painterResource(remember { budArt(SettingsStore.load(context)).pair }),
-                contentDescription = "Sony earbuds",
-                modifier = Modifier.fillMaxWidth(0.8f).height(200.dp).drawBehind {
-                    drawCircle(
-                        Brush.radialGradient(listOf(colors.primary.copy(alpha = 0.25f), Color.Transparent), center, size.height / 1.6f),
-                        radius = size.height / 1.6f
-                    )
-                }
+            // The one live 3D hero. Before the user's own model is known it steps through every supported
+            // model (EarbudModel.entries, so new models join by themselves), each in black.
+            val known = remember { EarbudModel.fromName(SettingsStore.load(context).modelName) }
+            val art = remember { budArt(SettingsStore.load(context)) }
+            Hero3D(
+                device = if (known != null) art.device else EarbudModel.entries.first().id,
+                color = if (known != null) art.hero3d else "black",
+                cycleDevices = if (known == null) EarbudModel.entries.map { it.id } else null,
+                modifier = Modifier.fillMaxWidth(0.8f).height(200.dp)
+                    .semantics { contentDescription = "Sony earbuds and headphones" }
+                    .drawBehind {
+                        drawCircle(
+                            Brush.radialGradient(listOf(colors.primary.copy(alpha = 0.25f), Color.Transparent), center, size.height / 1.6f),
+                            radius = size.height / 1.6f
+                        )
+                    }
             )
         },
         title = "Welcome to SunPods",
-        body = "Everything your Sony earbuds can do, without the clutter.",
+        body = "Everything your Sony earbuds and headphones can do, without the clutter.",
         primary = "Get Started",
         onPrimary = onStart,
         secondary = "Restore from Backup",
@@ -420,14 +428,14 @@ private fun NearbyStep(tick: Int, onNext: () -> Unit) {
     when (gate.state) {
         Perm.ASK, Perm.GRANTED -> Page(
             progress = progressOf(Step.NEARBY), icon = Icons.Rounded.Bluetooth,
-            title = "Connect to Your Earbuds",
-            body = "SunPods uses Bluetooth to talk to your ${EarbudModel.active.noun}. Android calls this Nearby devices.",
+            title = "Connect to Your Earbuds or Headphones",
+            body = "SunPods uses Bluetooth to talk to your earbuds or headphones. Android calls this Nearby devices.",
             primary = "Allow", onPrimary = gate.request
         )
         Perm.DENIED -> Page(
             progress = progressOf(Step.NEARBY), icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
             title = "SunPods Needs Nearby Devices",
-            body = "Without it, SunPods can't show battery levels or change settings. It's only used to connect to your ${EarbudModel.active.noun}.",
+            body = "Without it, SunPods can't show battery levels or change settings. It's only used to connect to your earbuds or headphones.",
             primary = "Allow", onPrimary = gate.request,
             secondary = "Open Settings", onSecondary = { openAppSettings(context) }
         )
@@ -512,7 +520,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         note = null
         pairNew = false
         val device = pickedDevice(context, result.data)
-        if (device == null) { state = Buds.Failed("Couldn't recognise those earbuds. Try again."); return@rememberLauncherForActivityResult }
+        if (device == null) { state = Buds.Failed("Couldn't recognise that device. Try again."); return@rememberLauncherForActivityResult }
         state = if (device.bondState == BluetoothDevice.BOND_BONDED) Buds.Waiting
         else if (device.createBond()) Buds.Pairing else Buds.Failed("Pairing didn't start. Make sure the case light is flashing blue, then try again.")
     }
@@ -549,7 +557,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
     fun search() {
         note = null
         val cdm = context.getSystemService(CompanionDeviceManager::class.java)
-        if (cdm == null) { state = Buds.Failed("SunPods can't search for earbuds on this phone. Pair them in Bluetooth settings instead."); return }
+        if (cdm == null) { state = Buds.Failed("SunPods can't search for earbuds or headphones on this phone. Pair them in Bluetooth settings instead."); return }
         state = Buds.Searching
         val filter = BluetoothDeviceFilter.Builder()
             .setNamePattern(EarbudModel.scanPattern)
@@ -581,12 +589,12 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         label = "earbuds"
     ) { s ->
     when (s) {
-        Buds.Checking -> Page(progress, icon = Icons.Rounded.Headphones, title = "Looking for Your Earbuds", body = "One moment.", primary = null) {
+        Buds.Checking -> Page(progress, icon = Icons.Rounded.Headphones, title = "Looking for Your Earbuds or Headphones", body = "One moment.", primary = null) {
             CircularProgressIndicator()
         }
         Buds.BluetoothOff -> Page(
             progress, icon = Icons.Rounded.BluetoothDisabled,
-            title = "Bluetooth Is Off", body = "Turn on Bluetooth to connect to your ${EarbudModel.active.noun}.",
+            title = "Bluetooth Is Off", body = "Turn on Bluetooth to connect to your earbuds or headphones.",
             primary = "Turn On Bluetooth",
             onPrimary = { runCatching { context.startActivity(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }.onFailure { openBluetoothSettings(context) } },
             secondary = "Not Now", onSecondary = onNext

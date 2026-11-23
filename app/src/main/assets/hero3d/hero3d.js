@@ -8,6 +8,8 @@
 //   setColor('black' | 'silver' | 'pink', instant?)   short crossfade between finishes
 //   setModel('buds' | 'case')                           earbuds hero or charging case
 //   setLid(0..1, instant?)                              case lid, 0 closed, 1 open (Sony's -116 deg)
+//   preload('xm5' | 'c710n' | 'wh1000xm5' | ...)        load and warm a device ahead of setDevice (no visible change)
+//   setDevice(id, fadeMs?)  fadeMs: a slower fade for the Welcome page's cycle
 //   wiggle()  spin()                                     the one-time hint and the TalkBack spin
 //   setDevice('xm5' | 'c710n')                          which earbuds: WF-1000XM5 (default) or WF-C710N
 //     On the WF-C710N (c710n.js, built in code) setColor takes 'black' | 'white' | 'pink' | 'blue'
@@ -770,7 +772,20 @@ function setColorMod(id, name, instant) {
   anims.add(slot.colorAnim); requestRender();
 }
 let deviceToken = 0;
-function setDevice(d) {
+// Warm a device that is likely to be shown next (the Welcome page's cycle): load its module and compile
+// the shaders of what is drawn, off screen, so the swap itself is only the fade. No-op once done.
+const warmed = new Set();
+function preload(d) {
+  const id = DEVICES[d] ? d : 'xm5';
+  if (warmed.has(id)) return;
+  warmed.add(id);
+  if (id === 'xm5') {
+    loadBuds().then(() => compileShown(buds.root)).catch(() => {});
+  } else {
+    loadMod(id).then(() => compileShown(mods[id].m.buds.root)).catch(() => {});
+  }
+}
+function setDevice(d, fadeMs) {
   const want = DEVICES[d] ? d : 'xm5';
   if (want !== deviceTarget) {
     colorFor[deviceTarget] = state.color;
@@ -778,17 +793,19 @@ function setDevice(d) {
     state.color = colorFor[want];
   }
   const token = ++deviceToken;
+  const fade = fadeMs > 0 ? Math.min(1000, fadeMs) : 0;   // a slower, softer fade for the Welcome page's cycle
   const ready = want !== 'xm5' ? loadMod(want) : state.model === 'case' ? loadCase() : loadBuds();
   ready.then(() => {
     if (token !== deviceToken) return;
     if (state.device === want) { requestRender(); return; }
+    canvas.style.transitionDuration = fade ? fade + 'ms' : '';
     canvas.style.opacity = '0';
     setTimeout(() => {
       if (token !== deviceToken) return;
       state.device = want; state.angle = 0; stopMotion();
       requestRender();
       requestAnimationFrame(() => { canvas.style.opacity = '1'; });
-    }, 170);
+    }, fade ? fade + 20 : 170);
   });
 }
 
@@ -909,7 +926,8 @@ const api = {
   setColor: (c, instant) => setColor(String(c), !!instant),
   setModel: (m) => setModel(String(m)),
   setLid: (v, instant) => setLid(v, !!instant),
-  setDevice: (d) => setDevice(String(d)),
+  setDevice: (d, fadeMs) => setDevice(String(d), Number(fadeMs) || 0),
+  preload: (d) => preload(String(d)),
   wiggle, spin,
   get state() { return { ...state }; },
 };

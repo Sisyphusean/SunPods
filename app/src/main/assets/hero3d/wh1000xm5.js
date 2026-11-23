@@ -95,8 +95,8 @@ const CASE0 = {
   phones: { pos: [0, 0.04, -0.4], scale: 1.0, ext: 0.35, squeeze: 14 },   // folded headphones on the base's floor: offset of their middle
 };
 
-// The hero: the headphones turned and tilted so they fill the frame like the WF-1000XM5 pair
-const HERO0 = { rot: [-55, 10, -92], scale: 0.236, pos: [0.05, 0.10, 0], ext: 1.10 };
+// The hero: the headphones upright like Sony's product shots (band on top, cups hanging), turned three-quarter and a little above eye level
+const HERO0 = { rot: [10, -30, 0], scale: 0.222, pos: [0.08, -0.03, 0], ext: 1.10 };
 const CASEREST0 = { yaw: -22, tilt: 46, scale: 0.168, pos: [0.0, -0.02, 0] };
 
 function merge(a, b) {

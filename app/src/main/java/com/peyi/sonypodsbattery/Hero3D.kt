@@ -41,6 +41,9 @@ import kotlin.math.abs
  * @param lid case lid, 0 closed to 1 open; animates when it changes.
  * @param onTap a tap on the hero (the page tells taps from spins).
  * @param device which earbuds: "xm5" (WF-1000XM5) or "c710n" (WF-C710N); each has its own finishes.
+ * @param cycleDevices when given (at least two device ids), the hero steps through them in the one
+ *   WebView, every [CYCLE_MS] with a soft fade, each in [color]; the next is preloaded. The timer starts
+ *   once the first has drawn. Not with reduced motion (animator duration scale 0): the first one stays.
  *
  * Horizontal drags spin the earbuds (fling, then they ease home 2.5 s after the finger lifts,
  * with a haptic tick); vertical drags are left to the scrolling parent.
@@ -53,13 +56,23 @@ internal fun Hero3D(
     lid: Float = 0f,
     onTap: (() -> Unit)? = null,
     device: String = "xm5",
+    cycleDevices: List<String>? = null,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val cycle = cycleDevices?.takeIf { it.size > 1 }
+    val reduceMotion = remember { android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) <= 0f }
+    val cycling = cycle != null && !reduceMotion
+    var step by androidx.compose.runtime.mutableIntStateOf(0)
+    val shownDevice = if (cycle != null) cycle[step % cycle.size] else device
+    val nextDevice = if (cycling) cycle!![(step + 1) % cycle.size] else null
     // One hero view for the whole screen, kept alive while you move between tabs and pages, so
     // coming back to Home doesn't reload the 3D scene (which showed as the earbuds vanishing).
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     val state = remember(lifecycle) { HeroCache.stateFor(lifecycle) }
     SideEffect { HeroCache.onTap = onTap }
-    state.device = device
+    state.device = shownDevice
+    state.soft = cycling
+    state.preload = nextDevice
     state.color = color
     state.model = model
     state.lid = lid.coerceIn(0f, 1f)
@@ -69,8 +82,11 @@ internal fun Hero3D(
 
     // Until the 3D page has drawn, show the picture it left last time (same size, same pose), then
     // fade across. Opening the app shows the earbuds at once instead of them popping in.
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val placeholder = if (state.drawn) null else remember(device, color, model) { HeroSnapshots.load(context, device, color, model) }
+    val placeholder = if (state.drawn) null else remember(shownDevice, color, model) { HeroSnapshots.load(context, shownDevice, color, model) }
+    if (cycling) LaunchedEffect(state.drawn) {
+        if (!state.drawn) return@LaunchedEffect
+        while (true) { kotlinx.coroutines.delay(CYCLE_MS); step++ }
+    }
     val cover by androidx.compose.animation.core.animateFloatAsState(
         if (state.drawn) 0f else 1f, androidx.compose.animation.core.tween(240), label = "heroCover"
     )
@@ -111,7 +127,7 @@ private object HeroSnapshots {
         val first = when {
             model != "buds" -> null
             device == "xm5" && color == "black" -> "turntable/f000.webp"
-            device == EarbudModel.WF_C710N.id -> "turntable/c710n_$color.webp"
+            device != "xm5" -> "turntable/${device}_$color.webp"   // every other model's first-launch picture
             else -> null
         } ?: return null
         return runCatching {
@@ -164,6 +180,10 @@ private object HeroCache {
 }
 
 
+/** The Welcome page cycle: time on each model, and the fade out and in of a swap. */
+private const val CYCLE_MS = 4000L
+private const val SOFT_FADE_MS = 320
+
 private const val HERO3D_HOST = "appassets.androidplatform.net"
 private const val HERO3D_PAGE = "https://$HERO3D_HOST/assets/hero3d/index.html"
 
@@ -177,6 +197,10 @@ private class Hero3DState {
     var color = "black"
     var model = "buds"
     var lid = 0f
+    /** Slow fade for device swaps (the Welcome cycle), and the device to warm up next. */
+    var soft = false
+    var preload: String? = null
+    private var sentPreload: String? = null
     private var sentDevice: String? = null
     private var sentColor: String? = null
     private var sentModel: String? = null
@@ -193,7 +217,13 @@ private class Hero3DState {
         if (device != sentDevice) {
             sentDevice = device
             sentColor = null
-            v.evaluateJavascript("window.sunpods&&window.sunpods.setDevice&&window.sunpods.setDevice(${js(device)})", null)
+            v.evaluateJavascript("window.sunpods&&window.sunpods.setDevice&&window.sunpods.setDevice(${js(device)}${if (soft) ", $SOFT_FADE_MS" else ""})", null)
+        }
+        preload?.let { p ->
+            if (p != sentPreload) {
+                sentPreload = p
+                v.evaluateJavascript("window.sunpods&&window.sunpods.preload&&window.sunpods.preload(${js(p)})", null)
+            }
         }
         if (color != sentColor) {
             sentColor = color

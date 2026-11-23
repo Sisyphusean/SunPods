@@ -12,7 +12,7 @@ fs.mkdirSync(outDir, { recursive: true });
 // Sony's own studio angles (the side and front views of y_WH-1000XM5_021), and a raised three-quarter
 // view of the closed case. [subject, lid, rig pose]; the scale is set from the subject's size.
 const POSE = {
-  side: ['phones', 0, [-84, 6, 0, 0, 0, 1.0]],
+  side: ['phones', 0, [8, -34, 0, 0, 0, 1.0]],   // the battery-ring picture: the upright three-quarter view, band on top
   front: ['phones', 0, [0, 8, 0, 0, 0, 1.0]],
   case: ['case', 0, [-24, 38, 0, 0, 0, 1.0]],
 };
