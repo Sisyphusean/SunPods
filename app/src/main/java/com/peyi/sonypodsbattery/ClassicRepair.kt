@@ -93,8 +93,9 @@ internal object ClassicRepair {
         status("Pairing your earbuds")
         val bonded = withContext(Dispatchers.IO) {
             ShizukuBluetooth.use(app) { sh ->
+                val model = EarbudModel.current(app)
                 val old = sh.bonded().lines().map { it.split("|") }
-                    .filter { it.size >= 2 && (EarbudModel.current(app).matches(it[0]) || it[1].equals(classic, true) || le.any { a -> a.equals(it[1], true) }) }
+                    .filter { it.size >= 2 && (model.matches(it[0]) || it[1].equals(classic, true) || le.any { a -> a.equals(it[1], true) }) }
                     .map { it[1] }
                 old.forEach { log(app, "remove $it: ${sh.removeBond(it)}") }
                 var waited = 0

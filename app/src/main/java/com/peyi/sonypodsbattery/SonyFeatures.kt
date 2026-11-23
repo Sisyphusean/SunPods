@@ -245,8 +245,9 @@ data class DeviceSettings(
     val eqPreset: EqPreset? get() = EqPreset.from(eqPresetCode)
 
     /** What the earbuds said they support; null until they've been asked. */
-    internal val functions: SupportedFunctions?
-        get() = SupportedFunctions.decode(functions1)?.let { SupportedFunctions(it, SupportedFunctions.decode(functions2)) }
+    internal val functions: SupportedFunctions? by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        SupportedFunctions.decode(functions1)?.let { SupportedFunctions(it, SupportedFunctions.decode(functions2)) }
+    }
 
     /** Sony's name for the upscaler: DSEE Extreme on the WF-1000XM5, DSEE on the WF-C710N. */
     val dseeName: String get() = if (EarbudModel.fromName(modelName) == EarbudModel.WF_C710N) "DSEE" else "DSEE Extreme"

@@ -8,9 +8,8 @@
 // 360 viewer (branding/render/c710n/reference_analysis.md) and refined against them.
 //
 // createC710N(ctx) returns { buds, kase, FINISHES, KEYS, finishCopy, applyFinish, applyPose, LID_OPEN }
-// for hero3d.js; ctx carries hero3d's THREE, patched() (rim light, specular AA), lin(), spec(), coat().
+// for hero3d.js; ctx carries hero3d's THREE, patched() (rim light, specular AA) and lin().
 
-export const C710N_COLORS = ['black', 'white', 'pink', 'blue'];
 
 // ---------------------------------------------------------------------------------------------
 // Finishes. Linear RGB, solved against Sony's product shots of the four colours (one shoot, same
@@ -98,7 +97,7 @@ const BUD0 = {
   // shape from Sony's side views (side_L black: the tip is 1.38x wider than long, widest at its crisp
   // rear lip, a convex face with a big rounded rim) and the end-on 360 frames (a small round opening,
   // the lighter nozzle mouth seen through the silicone round it)
-  nozzle: { from: [0.34, -0.28, -0.50], dir: [0.6589, 0.174, -0.7318], r: 0.085, mouthR: 0.150 },
+  nozzle: { from: [0.34, -0.28, -0.50], dir: [0.6589, 0.174, -0.7318], r: 0.085 },
   tip: { seatCap: 0.07, lip: 0.214, len: 0.426, r: 0.280, flare: 1.03, rim: 0.70, sag: 0.05, bore: 0.33, depth: 0.055, thick: 0.030 },
   // features on the face side, as face-on (x, y) positions; the patches are projected onto the shell
   // mic grille: projected half-way between the earbud's axis and the surface normal, so it reads as Sony's
@@ -125,7 +124,6 @@ const CASE0 = {
   bottom: { v: 1.50, hx: 1.10, hz: 0.78, dish: 0.04 },        // base round-over: height, reach across, reach in depth
   top: { v: 1.20, hx: 1.45, hz: 0.92, dome: 0.02 }, // lid round-over and top dome
   lidGrow: 0.040,                                   // the lid's plan is a hair larger than the base's
-  lidWall: 0.0,
   wall: 0.11, gap: 0.006,
   deck: 0.42,                         // depth of the earbud deck below the base rim
   slot: { w: 2.50, h: 0.16, y: 1.49, depth: 0.075 },   // finger slot on the base front
@@ -166,8 +164,9 @@ export function createC710N(ctx) {
   // rays. Testing every shell triangle for each ray took over 20 s, so each target is split once into
   // spatial chunks, and a ray is only tested against the chunks whose bounds it crosses. three's own
   // Mesh.raycast still does every hit test, so points and normals come out exactly as before.
-  const chunkCache = new WeakMap();
+  let chunkCache = new WeakMap();   // cleared once the model is built
   function chunksOf(target) {
+    if (!chunkCache) return null;
     const geo = target.geometry, pos = geo && geo.attributes.position;
     if (!pos || Array.isArray(target.material) || geo.morphAttributes.position) return null;
     const cached = chunkCache.get(target);
@@ -351,7 +350,6 @@ float seamMask() {
   M.faceSmoke = P({ envMap: studioEnv, roughness: 0.06, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.02,
     transparent: true, opacity: 0.84 });
   M.faceCase = plastic(0.55);
-  M.faceGlass = glassMat('c7-face-glass', { roughness: 0.05, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.02 }, glassU(0.38, 0.88, 2.5));   // (unused)
 
   // custom shaders that need the mesh uv without a texture map
   function withUv(mat) {
@@ -372,7 +370,7 @@ float seamMask() {
   float r = length(p);
   if (r > 1.0) discard;                       // an oval on its patch
   vec2 q = p * vec2(${(BUD.mic.w / BUD.mic.h).toFixed(4)}, 1.0);   // round holes on the oval
-  const float pitch = ${(BUD.mic.pitch || 0.17).toFixed(4)};   // hole spacing, in half-heights of the oval
+  const float pitch = ${BUD.mic.pitch.toFixed(4)};   // hole spacing, in half-heights of the oval
   float rowH = pitch * 0.8660254;
   float j0 = floor(q.y / rowH + 0.5);
   float d = 9.0;
@@ -387,11 +385,11 @@ float seamMask() {
   }
   float w = max(fwidth(d), 1e-5), rw = max(fwidth(r), 1e-5);
   // whole holes only: a hole is kept when its centre lies inside the perforated circle
-  float inside = step(length(cBest / vec2(${(BUD.mic.w / BUD.mic.h).toFixed(4)}, 1.0)), ${(BUD.mic.field || 0.76).toFixed(4)});
-  gHole = (1.0 - smoothstep(${(BUD.mic.hole || 0.033).toFixed(4)} - w, ${(BUD.mic.hole || 0.033).toFixed(4)} + w, d)) * inside;
-  gRing = 1.0 - smoothstep(${(BUD.mic.ringW || 0.016).toFixed(4)} - rw, ${(BUD.mic.ringW || 0.016).toFixed(4)} + rw, abs(r - 0.945));
+  float inside = step(length(cBest / vec2(${(BUD.mic.w / BUD.mic.h).toFixed(4)}, 1.0)), ${BUD.mic.field.toFixed(4)});
+  gHole = (1.0 - smoothstep(${BUD.mic.hole.toFixed(4)} - w, ${BUD.mic.hole.toFixed(4)} + w, d)) * inside;
+  gRing = 1.0 - smoothstep(${BUD.mic.ringW.toFixed(4)} - rw, ${BUD.mic.ringW.toFixed(4)} + rw, abs(r - 0.945));
   gEdge = 1.0 - smoothstep(0.014 - rw, 0.014 + rw, abs(r - 0.978));   // the groove's lit edge
-  diffuseColor.rgb *= (1.0 - 0.85 * gHole) * (1.0 - ${(BUD.mic.ringK || 0.55).toFixed(4)} * gRing) * (1.0 + 0.22 * gEdge);
+  diffuseColor.rgb *= (1.0 - 0.85 * gHole) * (1.0 - ${BUD.mic.ringK.toFixed(4)} * gRing) * (1.0 + 0.22 * gEdge);
 }`;
   M.grille = withUv(patched(P({ roughness: 0.6, metalness: 0, specularIntensity: 0.76, sheen: 1, sheenRoughness: 0.8,
     sheenColor: new THREE.Color(0.1, 0.1, 0.1) }), 'c7-grille-' + JSON.stringify([BUD.mic.w, BUD.mic.h, BUD.mic.pitch, BUD.mic.hole, BUD.mic.field, BUD.mic.ringW, BUD.mic.ringK]), {}, {
@@ -553,7 +551,6 @@ if (gl_FrontFacing) {
   // pairing button: a disc in the case colour inside a fine dark groove
   M.button = shapeMat({ roughness: 0.5, emissive: new THREE.Color(0, 0, 0) }, 'button', 'disc', CASE.button.d + 0.07, CASE.button.d + 0.07,
     'float r = length(p); shRing = 1.0 - smoothstep(0.012, 0.02, abs(r - 0.5 * uSz.x + 0.022)); diffuseColor.rgb *= 1.0 - 0.9 * shRing;');
-  M.hingeGap = shapeMat({ color: lin([0.004, 0.004, 0.004]), roughness: 0.7 }, 'hinge', 'rbox', CASE.hinge.w, CASE.hinge.h);
   M.caseContact = M.contact;
   M.magnet = P({ color: lin([0.45, 0.46, 0.48]), metalness: 1, roughness: 0.35 });
 
@@ -724,7 +721,6 @@ if (gl_FrontFacing) {
       for (let i = 0; i <= N; i++) {
         const u = i / N, v = j / N;
         let lx = (u - 0.5) * w, ly = (v - 0.5) * h;
-        if (opts.round) { /* keep square grid; round shapes come from the shader/alpha */ }
         const p = center.clone().addScaledVector(xA, lx).addScaledVector(yA, ly);
         const o = p.clone().addScaledVector(n, 0.6 * BH);
         ray.set(o, n.clone().negate());
@@ -749,10 +745,6 @@ if (gl_FrontFacing) {
     g.setIndex(idx);
     g.computeVertexNormals();
     return g;
-  }
-  // a small raised round insert (grille, contacts, tactile dot) conforming to the shell
-  function roundInsert(target, center, n, up, d, opts = {}) {
-    return conformal(target, center, n, up, d, d, { n: 24, ...opts });
   }
   function surfacePoint(target, xy, dirZ) {
     // point on the shell seen along z (face side: dirZ = -1 looks from +z; inner side: +1 from -z)
@@ -846,15 +838,14 @@ if (gl_FrontFacing) {
     g.add(shell, shellBack, face);
     // patches are projected onto the unmirrored shell; the group mirrors afterwards
     const target = shell;
-    const z = new THREE.Vector3(0, 0, 1), up = new THREE.Vector3(0, 1, 0);
+    const up = new THREE.Vector3(0, 1, 0);
     // mic grille
     const mic = surfacePoint(target, BUD.mic.at, -1);
     // drawn face-on (as seen along the earbud's axis) and laid onto the shell, so that from the front
     // it reads as the level oval Sony's photos show (mic.faceOn); otherwise in the surface's own plane
     const zF = new THREE.Vector3(0, 0, 1);
-    // proj (tools): 0 projects along the earbud's axis (face-on), 1 along the surface normal
-    const projT = BUD.mic.proj ?? (BUD.mic.faceOn ? 0 : 1);
-    const micN = projT === 0 ? zF : zF.clone().lerp(mic.n.clone().normalize(), projT).normalize();
+    // proj: 0 projects along the earbud's axis (face-on), 1 along the surface normal
+    const micN = zF.clone().lerp(mic.n.clone().normalize(), BUD.mic.proj).normalize();
     const grilleGeo = conformal(target, mic.p, micN, up.clone().applyAxisAngle(micN, rad(BUD.mic.rot || 0)), BUD.mic.w * BH, BUD.mic.h * BH, { n: 28, off: 0.0035 });
     const grille = new THREE.Mesh(grilleGeo, M.grille);
     grille.name = 'C7_Grille';
@@ -1384,6 +1375,7 @@ if (gl_FrontFacing) {
     kase.root.visible = active && st.model === 'case';
   }
 
+  chunkCache = null;
   return {
     buds: { root: budsRoot, pivotL, pivotR, budL, budR },
     kase,

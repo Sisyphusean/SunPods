@@ -23,7 +23,7 @@ class DebugCommandReceiver : BroadcastReceiver() {
         // on the next start, so the process ends itself.
         intent.getStringExtra("sim")?.let { model ->
             val ui = context.getSharedPreferences("sunpods_ui", Context.MODE_PRIVATE).edit()
-            if (EarbudModel.fromId(model) != null) ui.putString("sim_model", model).putBoolean("onboarding_done", true) else ui.remove("sim_model")
+            if (EarbudModel.fromId(model) != null) { ui.putString("sim_model", model); OnboardingStore.setDone(context, true) } else ui.remove("sim_model")
             // --ei color 5: the simulated earbuds' colour code.
             if (intent.hasExtra("color")) ui.putInt("sim_color", intent.getIntExtra("color", 1))
             ui.commit()

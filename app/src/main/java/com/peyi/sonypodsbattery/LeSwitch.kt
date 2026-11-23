@@ -287,7 +287,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 if (!sh.waitForAdvert(le.first(), 5 * 60_000L)) return@use false
                 // Old pairings stop the LE side pairing cleanly. Remove them and wait until they're gone.
                 val old = sh.bonded().lines().map { it.split("|") }
-                    .filter { it.size >= 2 && (EarbudModel.current(context).matchesLe(it[0]) || it[1].equals(classic, true) || le.any { a -> a.equals(it[1], true) }) }
+                    .filter { it.size >= 2 && (model.matchesLe(it[0]) || it[1].equals(classic, true) || le.any { a -> a.equals(it[1], true) }) }
                     .map { it[1] }
                 old.forEach { log("remove $it: ${sh.removeBond(it)}") }
                 var waited = 0

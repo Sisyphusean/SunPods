@@ -167,10 +167,10 @@ internal fun budArt(settings: DeviceSettings): BudArt = budArt(settings.colorCod
 
 /** WF-C710N finishes; the 3D hero names them black, white, blue and pink. */
 private fun c710nArt(c: Int?): BudArt = when (c) {
-    0x02 -> BudArt(R.drawable.c710n_bud_left_white, R.drawable.c710n_bud_right_white, R.drawable.c710n_bud_case_white, R.drawable.c710n_buds_pair_white, "white", R.raw.c710n_anim_pair_white, R.raw.c710n_anim_open_white, device = "c710n")
-    0x05 -> BudArt(R.drawable.c710n_bud_left_blue, R.drawable.c710n_bud_right_blue, R.drawable.c710n_bud_case_blue, R.drawable.c710n_buds_pair_blue, "blue", R.raw.c710n_anim_pair_blue, R.raw.c710n_anim_open_blue, device = "c710n")
-    0x06 -> BudArt(R.drawable.c710n_bud_left_pink, R.drawable.c710n_bud_right_pink, R.drawable.c710n_bud_case_pink, R.drawable.c710n_buds_pair_pink, "pink", R.raw.c710n_anim_pair_pink, R.raw.c710n_anim_open_pink, device = "c710n")
-    else -> BudArt(R.drawable.c710n_bud_left_black, R.drawable.c710n_bud_right_black, R.drawable.c710n_bud_case_black, R.drawable.c710n_buds_pair_black, "black", R.raw.c710n_anim_pair_black, R.raw.c710n_anim_open_black, device = "c710n")
+    0x02 -> BudArt(R.drawable.c710n_bud_left_white, R.drawable.c710n_bud_right_white, R.drawable.c710n_bud_case_white, R.drawable.c710n_buds_pair_white, "white", R.raw.c710n_anim_pair_white, R.raw.c710n_anim_open_white, device = EarbudModel.WF_C710N.id)
+    0x05 -> BudArt(R.drawable.c710n_bud_left_blue, R.drawable.c710n_bud_right_blue, R.drawable.c710n_bud_case_blue, R.drawable.c710n_buds_pair_blue, "blue", R.raw.c710n_anim_pair_blue, R.raw.c710n_anim_open_blue, device = EarbudModel.WF_C710N.id)
+    0x06 -> BudArt(R.drawable.c710n_bud_left_pink, R.drawable.c710n_bud_right_pink, R.drawable.c710n_bud_case_pink, R.drawable.c710n_buds_pair_pink, "pink", R.raw.c710n_anim_pair_pink, R.raw.c710n_anim_open_pink, device = EarbudModel.WF_C710N.id)
+    else -> BudArt(R.drawable.c710n_bud_left_black, R.drawable.c710n_bud_right_black, R.drawable.c710n_bud_case_black, R.drawable.c710n_buds_pair_black, "black", R.raw.c710n_anim_pair_black, R.raw.c710n_anim_open_black, device = EarbudModel.WF_C710N.id)
 }
 
 /** The current earbuds' pictures; provided by the app shell from the colour the earbuds report. */

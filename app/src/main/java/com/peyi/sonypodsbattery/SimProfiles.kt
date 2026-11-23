@@ -11,7 +11,7 @@ internal object SimProfiles {
     private const val T1 = SonyProtocol.DATA_MDR
     private const val T2 = SonyProtocol.DATA_MDR_NO2
 
-    private fun u(b: Byte) = b.toInt() and 0xff
+    internal fun u(b: Byte) = b.toInt() and 0xff
 
     /** EQ: a preset-only SET (58 00 preset 00) keeps the bands the earbuds hold. */
     internal fun eqSet(state: SimState, table: Int, p: ByteArray): Boolean {
@@ -28,9 +28,9 @@ internal object SimProfiles {
         return (u(now[3]) == 0x20 && u(p[3]) != 0x20) || (u(now[4]) == 0x20 && u(p[4]) != 0x20)
     }
 
-    fun forModel(model: EarbudModel, color: Int? = null): SimProfile = when (model) {
+    fun forModel(model: EarbudModel, color: Int): SimProfile = when (model) {
         EarbudModel.WF_1000XM5 -> XM5
-        EarbudModel.WF_C710N -> if (color != null) C710nProfile.build(color) else C710N
+        EarbudModel.WF_C710N -> C710nProfile.build(color)
     }
 
     val XM5 = SimProfile(
@@ -183,6 +183,4 @@ internal object SimProfiles {
         }
     )
 
-    /** Reconstructed from Sound Connect's layouts; see [C710nProfile]. */
-    val C710N: SimProfile by lazy { C710nProfile.build() }
 }

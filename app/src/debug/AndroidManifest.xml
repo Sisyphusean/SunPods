@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Debug builds only: the adb hook for protocol work (see DebugCommandReceiver). Never in releases. -->
+<!-- Debug and benchmark builds only: the adb hook for protocol work (see DebugCommandReceiver). Never in releases. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <receiver
