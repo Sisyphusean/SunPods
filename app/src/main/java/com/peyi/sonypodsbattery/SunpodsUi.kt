@@ -2,6 +2,8 @@
 
 package com.peyi.sonypodsbattery
 
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.animation.core.animateDp
 import android.os.Build
 import android.text.format.DateUtils
 import androidx.compose.material3.Button
@@ -55,6 +57,7 @@ import androidx.compose.material.icons.rounded.LocationOff
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -80,6 +83,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -303,46 +307,52 @@ private enum class Tab(val label: String, val icon: ImageVector, val selectedIco
     DEVICE("Device", androidx.compose.material.icons.Icons.Outlined.Info, Icons.Rounded.Info)
 }
 
+/** Height of the floating tab bar, and the gap under it; content leaves room for both. */
+internal val TabBarHeight = 64.dp
+internal val TabBarGap = 12.dp
+
 /**
- * The tab bar, Material 3 with some life: the indicator pill springs across to the new tab, the
- * chosen icon fills in with a small bounce, and the label tints. A light tick on each switch.
+ * The tab bar, after One UI 8 (Samsung Members): a floating capsule over the content, the chosen
+ * tab sitting in a lighter pill that springs across, its icon filling in. Wider than Members' so
+ * five tabs breathe. A light tick on each switch.
  */
 @Composable
-private fun SunTabBar(selected: Tab, onSelect: (Tab) -> Unit) {
+private fun SunTabBar(selected: Tab, modifier: Modifier = Modifier, onSelect: (Tab) -> Unit) {
     val colors = MaterialTheme.colorScheme
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
-    Column(Modifier.background(pageColor)) {
-        HorizontalDivider(thickness = 0.5.dp, color = dividerColor)
+    androidx.compose.material3.Surface(
+        modifier = modifier.padding(horizontal = 16.dp).widthIn(max = 520.dp).fillMaxWidth().height(TabBarHeight),
+        shape = CircleShape,
+        color = colors.surfaceContainerHigh.copy(alpha = 0.96f),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, colors.outlineVariant.copy(alpha = 0.5f)),
+        shadowElevation = 8.dp
+    ) {
         androidx.compose.foundation.layout.BoxWithConstraints(
-            Modifier.fillMaxWidth().navigationBarsPadding().height(68.dp).semantics { this.contentDescription = "Tabs" }
+            Modifier.fillMaxSize().padding(5.dp).semantics { this.contentDescription = "Tabs" }
         ) {
             val itemW = maxWidth / Tab.entries.size
-            val pillW = 60.dp
             val x by androidx.compose.animation.core.animateDpAsState(
-                itemW * selected.ordinal + (itemW - pillW) / 2,
-                spring(dampingRatio = 0.72f, stiffness = 380f),
+                itemW * selected.ordinal,
+                spring(dampingRatio = 0.78f, stiffness = 420f),
                 label = "pill"
             )
-            // Stretches a little while it travels, like Material 3 Expressive indicators.
-            val stretch by animateFloatAsState(1f, spring(dampingRatio = 0.5f, stiffness = 300f), label = "stretch")
             Box(
                 Modifier
-                    .offset(x = x, y = 8.dp)
-                    .size(pillW, 32.dp)
-                    .graphicsLayer { scaleX = stretch }
+                    .offset(x = x)
+                    .width(itemW)
+                    .fillMaxHeight()
                     .clip(CircleShape)
-                    .background(colors.secondaryContainer)
+                    .background(colors.onSurface.copy(alpha = 0.13f))
             )
             Row(Modifier.fillMaxSize()) {
                 Tab.entries.forEach { t ->
                     val on = t == selected
-                    val bounce by animateFloatAsState(if (on) 1.12f else 1f, spring(dampingRatio = 0.35f, stiffness = 600f), label = "bounce")
-                    val tint by animateColorAsState(if (on) colors.onSecondaryContainer else colors.onSurfaceVariant, label = "tint")
-                    val text by animateColorAsState(if (on) colors.onSurface else colors.onSurfaceVariant, label = "text")
+                    val tint by animateColorAsState(if (on) colors.onSurface else colors.onSurfaceVariant, label = "tint")
                     Column(
                         Modifier
                             .weight(1f)
                             .fillMaxHeight()
+                            .clip(CircleShape)
                             .selectable(
                                 selected = on,
                                 role = Role.Tab,
@@ -352,24 +362,19 @@ private fun SunTabBar(selected: Tab, onSelect: (Tab) -> Unit) {
                                 if (!on) haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
                                 onSelect(t)
                             },
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        Spacer(Modifier.height(8.dp))
-                        Box(Modifier.size(pillW, 32.dp), contentAlignment = Alignment.Center) {
-                            androidx.compose.animation.Crossfade(on, animationSpec = tween(160), label = "icon") { filled ->
-                                Icon(
-                                    if (filled) t.selectedIcon else t.icon,
-                                    contentDescription = null,
-                                    tint = tint,
-                                    modifier = Modifier.size(24.dp).graphicsLayer { scaleX = bounce; scaleY = bounce }
-                                )
-                            }
+                        androidx.compose.animation.Crossfade(on, animationSpec = tween(160), label = "icon") { filled ->
+                            Icon(if (filled) t.selectedIcon else t.icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
                         }
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(2.dp))
                         Text(
                             t.label,
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = if (on) androidx.compose.ui.text.font.FontWeight.SemiBold else androidx.compose.ui.text.font.FontWeight.Medium),
-                            color = text,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = if (on) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Medium
+                            ),
+                            color = tint,
                             maxLines = 1
                         )
                     }
@@ -399,39 +404,84 @@ fun SunpodsApp(
     val message by vm.message.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     var page by rememberSaveable { mutableStateOf<Page?>(null) }
-    var backProgress by remember { mutableFloatStateOf(0f) }
-    var backFromLeft by remember { mutableStateOf(true) }
-    var backCommitted by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
-    val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    // Each tab keeps its place, title bar included, so coming back from a page or another tab
-    // lands exactly where you left. A page opens at its top, every time.
+    // Navigation is one seekable transition, so a back swipe can drag it. It follows One UI's
+    // Settings: a page slides in from the right edge over the one before, which drifts left and
+    // dims; a back swipe drags the page off under your finger, title and all, and lets it go on
+    // release. Every page carries its own title bar so the title moves with it.
     val navScope = rememberCoroutineScope()
+    val nav = remember { androidx.compose.animation.core.SeekableTransitionState(tab to page) }
+    val navTransition = androidx.compose.animation.core.rememberTransition(nav, label = "nav")
+    var gestureBack by remember { mutableStateOf(false) }
+    // Each tab keeps its scroll position and title bar while you're elsewhere; pages start fresh.
     val tabScroll = remember { mutableMapOf<Tab, androidx.compose.foundation.ScrollState>() }
-    val tabBar = remember { mutableMapOf<Tab, Float>() }
-    val pageScroll = remember(page) { androidx.compose.foundation.ScrollState(0) }
-    val listScroll = if (page == null) tabScroll.getOrPut(tab) { androidx.compose.foundation.ScrollState(0) } else pageScroll
-    fun go(toTab: Tab, toPage: Page?) {
-        if (page == null) tabBar[tab] = scroll.state.heightOffset
-        scroll.state.heightOffset = if (toPage == null) tabBar[toTab] ?: 0f else 0f
-        tab = toTab
-        page = toPage
-    }
-    androidx.activity.compose.PredictiveBackHandler(enabled = page != null) { events ->
-        try {
-            events.collect { e ->
-                backFromLeft = e.swipeEdge == androidx.activity.BackEventCompat.EDGE_LEFT
-                backProgress = e.progress
+    val tabBars = remember { mutableMapOf<Tab, androidx.compose.material3.TopAppBarState>() }
+    fun scrollOf(t: Tab) = tabScroll.getOrPut(t) { androidx.compose.foundation.ScrollState(0) }
+    fun barOf(t: Tab) = tabBars.getOrPut(t) { androidx.compose.material3.TopAppBarState(-Float.MAX_VALUE, 0f, 0f) }
+    // Like Samsung Members, the tab bar slips away while you scroll down and returns when you scroll up.
+    var barHidden by remember { mutableStateOf(false) }
+    val barScroll = remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: androidx.compose.ui.geometry.Offset,
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
+            ): androidx.compose.ui.geometry.Offset {
+                if (consumed.y < -4f) barHidden = true
+                else if (consumed.y > 4f || available.y > 4f) barHidden = false
+                return androidx.compose.ui.geometry.Offset.Zero
             }
-            backCommitted = true
-            go(tab, null)
-        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
-            // Gesture let go: spring back into place.
-            androidx.compose.animation.core.animate(backProgress, 0f, animationSpec = spring(stiffness = 500f)) { v, _ -> backProgress = v }
-        } finally {
-            if (page == null) backProgress = 0f
         }
     }
+    fun go(toTab: Tab, toPage: Page?) {
+        barHidden = false
+        tab = toTab
+        page = toPage
+        gestureBack = false
+        navScope.launch { nav.animateTo(toTab to toPage) }
+    }
+    val screenWidth = with(androidx.compose.ui.platform.LocalDensity.current) {
+        androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp.toPx()
+    }
+    androidx.activity.compose.PredictiveBackHandler(enabled = page != null) { events ->
+        val from = tab to page
+        val to = tab to null
+        gestureBack = true
+        var committed = false
+        try {
+            nav.seekTo(0f, targetState = to)
+            events.collect { e ->
+                // The page's left edge stays under your finger.
+                val x = if (e.swipeEdge == androidx.activity.BackEventCompat.EDGE_LEFT) e.touchX else screenWidth - e.touchX
+                nav.seekTo((x / screenWidth).coerceIn(0f, 1f), targetState = to)
+            }
+            committed = true
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            committed = false
+        }
+        // Finish outside the handler: clearing the page disables the handler and cancels its coroutine.
+        navScope.launch {
+            if (committed) {
+                page = null
+                nav.animateTo(to, tween(280, easing = Motion.Arrive))
+            } else {
+                // Let go early: the page slides back into place.
+                val start = nav.fraction
+                val t0 = androidx.compose.runtime.withFrameNanos { it }
+                while (true) {
+                    val t = androidx.compose.runtime.withFrameNanos { it }
+                    val p = ((t - t0) / 240_000_000f).coerceAtMost(1f)
+                    nav.seekTo(start * (1f - Motion.Arrive.transform(p)), targetState = to)
+                    if (p >= 1f) break
+                }
+                nav.snapTo(from)
+            }
+            gestureBack = false
+        }
+    }
+    // Back from another tab's top goes to Home first, like other Android apps with a tab bar.
+    androidx.activity.compose.BackHandler(enabled = page == null && tab != Tab.HOME) { go(Tab.HOME, null) }
+
     val buzz = rememberBuzz()
     val refresh = { if (hasPermission) vm.refreshAll() else onRequestPermission() }
     // The refresh arrow turns while SunPods talks to the earbuds, then eases into place.
@@ -444,7 +494,7 @@ fun SunpodsApp(
             spin.snapTo(0f)
         }
     }
-    // A thin bar under the title while a change is on its way, only if it takes long enough to notice.
+    // A thin bar while a change is on its way, only if it takes long enough to notice.
     val applying by vm.applying.collectAsState()
     var showApplying by remember { mutableStateOf(false) }
     LaunchedEffect(applying > 0) {
@@ -461,96 +511,119 @@ fun SunpodsApp(
     }
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         containerColor = pageColor,
-        topBar = {
-            LargeTopAppBar(
-                title = { Text(page?.title ?: if (tab == Tab.HOME) "SunPods" else tab.label) },
-                navigationIcon = {
-                    if (page != null) IconButton(onClick = { go(tab, null) }) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back to ${tab.label}")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { if (!busy) { buzz(Buzz.TICK); refresh() } }) {
-                        Icon(
-                            Icons.Rounded.Refresh,
-                            contentDescription = if (busy) "Refreshing" else "Refresh battery and settings",
-                            modifier = Modifier.graphicsLayer { rotationZ = spin.value }
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = pageColor,
-                    scrolledContainerColor = pageColor
-                ),
-                scrollBehavior = scroll
-            )
-        },
-        bottomBar = {
-            SunTabBar(tab) { t ->
-                if (t == tab && page == null) navScope.launch {
-                    listScroll.animateScrollTo(0, tween(420, easing = Motion.Arrive))
-                    scroll.state.heightOffset = 0f
-                } else go(t, null)
-            }
-        },
-        snackbarHost = { SnackbarHost(snackbar) }
+        // Messages sit just above the floating tab bar.
+        snackbarHost = { SnackbarHost(snackbar, Modifier.padding(bottom = TabBarHeight + TabBarGap)) },
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets.statusBars
     ) { padding ->
+      val barHide by animateFloatAsState(
+          if (barHidden) 1f else 0f,
+          tween(if (barHidden) 220 else 300, easing = if (barHidden) Motion.Leave else Motion.Arrive),
+          label = "barHide"
+      )
+      Box(Modifier.fillMaxSize().nestedScroll(barScroll)) {
         PullToRefreshBox(
             isRefreshing = busy,
             onRefresh = refresh,
             modifier = Modifier.fillMaxSize().padding(padding)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(listScroll)
-                    .padding(horizontal = Gutter)
-                    .padding(top = 8.dp, bottom = 48.dp),
-                verticalArrangement = Arrangement.spacedBy(GroupGap)
-            ) {
-                if (!hasPermission) PermissionBanner(onRequestPermission)
-                // Pages fade and rise slightly into place, so a tab change feels like one motion.
-                // A tab change fades and rises; a page slides in from the side, like a push.
-                androidx.compose.runtime.CompositionLocalProvider(LocalOpenPage provides { go(tab, it) }) {
-                    androidx.compose.animation.AnimatedContent(
-                        targetState = tab to page,
-                        transitionSpec = {
-                            val pushing = initialState.first == targetState.first && targetState.second != null && initialState.second == null
-                            val popping = initialState.first == targetState.first && targetState.second == null && initialState.second != null
-                            // Material motion: shared axis X for pages, fade through for tabs.
-                            val emphasized = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
-                            val shift = 40
-                            when {
-                                // The back gesture already showed the way out; land without a second animation.
-                                popping && backCommitted -> fadeIn(tween(120)).togetherWith(fadeOut(tween(80)))
-                                pushing -> (androidx.compose.animation.slideInHorizontally(tween(320, easing = emphasized)) { shift * 3 } + fadeIn(tween(200, delayMillis = 60)))
-                                    .togetherWith(androidx.compose.animation.slideOutHorizontally(tween(320, easing = emphasized)) { -shift * 3 } + fadeOut(tween(90)))
-                                popping -> (androidx.compose.animation.slideInHorizontally(tween(320, easing = emphasized)) { -shift * 3 } + fadeIn(tween(200, delayMillis = 60)))
-                                    .togetherWith(androidx.compose.animation.slideOutHorizontally(tween(320, easing = emphasized)) { shift * 3 } + fadeOut(tween(90)))
-                                else -> (fadeIn(tween(210, delayMillis = 90)) + androidx.compose.animation.scaleIn(tween(210, delayMillis = 90, easing = emphasized), initialScale = 0.94f))
-                                    .togetherWith(fadeOut(tween(90)))
+            androidx.compose.runtime.CompositionLocalProvider(LocalOpenPage provides { go(tab, it) }) {
+                navTransition.AnimatedContent(
+                    modifier = Modifier.fillMaxSize(),
+                    transitionSpec = {
+                        val pushing = initialState.first == targetState.first && targetState.second != null && initialState.second == null
+                        val popping = initialState.first == targetState.first && targetState.second == null && initialState.second != null
+                        val behind = { w: Int -> -(w * 0.28f).toInt() }
+                        when {
+                            // In: from the right edge, slowing hard at the end; the page behind drifts left.
+                            pushing -> androidx.compose.animation.slideInHorizontally(tween(420, easing = Motion.Arrive)) { it }
+                                .togetherWith(androidx.compose.animation.slideOutHorizontally(tween(420, easing = Motion.Arrive), behind))
+                                .apply { targetContentZIndex = 1f }
+                            // Back swipe: the page tracks the finger exactly; the one behind holds
+                            // back until late, then settles as the page leaves.
+                            popping && gestureBack -> androidx.compose.animation.slideInHorizontally(tween(400, easing = Motion.Leave), behind)
+                                .togetherWith(androidx.compose.animation.slideOutHorizontally(tween(400, easing = androidx.compose.animation.core.LinearEasing)) { it })
+                                .apply { targetContentZIndex = -1f }
+                            // Back button or arrow: the push in reverse.
+                            popping -> androidx.compose.animation.slideInHorizontally(tween(380, easing = Motion.Arrive), behind)
+                                .togetherWith(androidx.compose.animation.slideOutHorizontally(tween(380, easing = Motion.Arrive)) { it })
+                                .apply { targetContentZIndex = -1f }
+                            // Between tabs: Material fade through.
+                            else -> (fadeIn(tween(210, delayMillis = 90)) + androidx.compose.animation.scaleIn(tween(210, delayMillis = 90, easing = Motion.Arrive), initialScale = 0.94f))
+                                .togetherWith(fadeOut(tween(90)))
+                        }
+                    }
+                ) { (shownTab, shownPage) ->
+                    val listState = if (shownPage == null) scrollOf(shownTab) else androidx.compose.foundation.rememberScrollState()
+                    val barState = if (shownPage == null) barOf(shownTab) else remember { androidx.compose.material3.TopAppBarState(-Float.MAX_VALUE, 0f, 0f) }
+                    val bar = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(barState)
+                    // Moving between a tab and one of its pages (not between tabs): the tab dims
+                    // as the page covers it, and the page casts a soft shadow on its left edge.
+                    val inPageMove = navTransition.currentState.first == navTransition.targetState.first &&
+                        (navTransition.currentState.second == null) != (navTransition.targetState.second == null)
+                    val scrim by transition.animateFloat(
+                        transitionSpec = { tween(400, easing = if (gestureBack) Motion.Leave else Motion.Arrive) },
+                        label = "scrim"
+                    ) { if (it == androidx.compose.animation.EnterExitState.Visible) 0f else 1f }
+                    val dimHere = inPageMove && shownPage == null
+                    val shadeHere = inPageMove && shownPage != null
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .drawBehind {
+                                if (shadeHere) {
+                                    val w = 24.dp.toPx()
+                                    drawRect(
+                                        androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.28f)), startX = -w, endX = 0f
+                                        ),
+                                        topLeft = androidx.compose.ui.geometry.Offset(-w, 0f),
+                                        size = androidx.compose.ui.geometry.Size(w, size.height)
+                                    )
+                                }
                             }
-                        },
-                        label = "tab"
-                    ) { (shownTab, shownPage) ->
-                        androidx.compose.runtime.LaunchedEffect(shownPage) { if (shownPage == null) backCommitted = false }
+                            .background(pageColor)
+                            .drawWithContent {
+                                drawContent()
+                                if (dimHere && scrim > 0f) drawRect(Color.Black.copy(alpha = 0.32f * scrim))
+                            }
+                            .nestedScroll(bar.nestedScrollConnection)
+                    ) {
+                        LargeTopAppBar(
+                            title = {
+                                Text(
+                                    shownPage?.title ?: if (shownTab == Tab.HOME) "SunPods" else shownTab.label,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                                )
+                            },
+                            navigationIcon = {
+                                if (shownPage != null) IconButton(onClick = { go(shownTab, null) }) {
+                                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back to ${shownTab.label}")
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { if (!busy) { buzz(Buzz.TICK); refresh() } }) {
+                                    Icon(
+                                        Icons.Rounded.Refresh,
+                                        contentDescription = if (busy) "Refreshing" else "Refresh battery and settings",
+                                        modifier = Modifier.graphicsLayer { rotationZ = spin.value }
+                                    )
+                                }
+                            },
+                            windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+                            colors = TopAppBarDefaults.largeTopAppBarColors(containerColor = pageColor, scrolledContainerColor = pageColor),
+                            scrollBehavior = bar
+                        )
                         Column(
-                            verticalArrangement = Arrangement.spacedBy(GroupGap),
-                            modifier = if (shownPage != null) Modifier.graphicsLayer {
-                                // Material predictive back: the page scales toward 90% and slides
-                                // a little toward the edge it's being swiped from.
-                                val p = backProgress
-                                val scale = 1f - 0.1f * p
-                                scaleX = scale; scaleY = scale
-                                translationX = (if (backFromLeft) 1f else -1f) * p * 24.dp.toPx()
-                                alpha = 1f - 0.25f * p
-                                shape = RoundedCornerShape((28 * p).dp)
-                                clip = p > 0f
-                                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(if (backFromLeft) 1f else 0f, 0.5f)
-                            } else Modifier
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(listState)
+                                .padding(horizontal = Gutter)
+                                .padding(top = 8.dp, bottom = TabBarHeight + TabBarGap + 32.dp)
+                                .navigationBarsPadding(),
+                            verticalArrangement = Arrangement.spacedBy(GroupGap)
                         ) {
+                            if (!hasPermission) PermissionBanner(onRequestPermission)
                             if (shownPage != null) {
                                 PageContent(shownPage, settings, vm, onShareDiagnostics, onOpenBluetoothSettings, dynamicColor, onDynamicColorChange)
                             } else when (shownTab) {
@@ -576,6 +649,24 @@ fun SunpodsApp(
                 )
             }
         }
+        SunTabBar(
+            tab,
+            Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = TabBarGap)
+                .graphicsLayer {
+                    translationY = barHide * (size.height + 56.dp.toPx())
+                    alpha = 1f - 0.4f * barHide
+                }
+        ) { t ->
+            barHidden = false
+            if (t == tab && page == null) navScope.launch {
+                scrollOf(tab).animateScrollTo(0, tween(420, easing = Motion.Arrive))
+                barOf(tab).heightOffset = 0f
+            } else go(t, null)
+        }
+      }
     }
 }
 
@@ -1416,7 +1507,7 @@ private fun SafeListeningGroup(vm: SunpodsViewModel) {
                         label = { if (it) "Sensitive" else "Standard" },
                         detail = { if (it) "A lower limit, for children and sensitive ears" else "The guideline for adults" },
                         onDismiss = { choosing = false },
-                        onPick = { choosing = false; vm.setVolumeProtection(it) }
+                        onPick = { vm.setVolumeProtection(it) }
                     )
                 }
             }
@@ -1910,7 +2001,7 @@ private fun EarbudsGroup(settings: DeviceSettings) {
         if (choosing) {
             ChoiceSheet("Voice Assistant", a.second, a.first,
                 label = VoiceAssistantSetting::label, detail = { VoiceAssistantSetting.detail(it) },
-                onDismiss = { choosing = false }, onPick = { choosing = false; vm.setAssistant(it) })
+                onDismiss = { choosing = false }, onPick = { vm.setAssistant(it) })
         }
     }
     rows += { NavRow(Icons.Rounded.Hearing, "Ear Tip Fit Test", null) { fitting = true } }
@@ -2294,7 +2385,7 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
         label = { if (it) "LE Audio" else "Classic" },
         detail = { if (it) "Clearer calls on phones that support it. Turns off Connect to Two Devices." else "Works with every phone and device. Connect to Two Devices is available." },
         onDismiss = { choosing = false }
-    ) { pick -> choosing = false; if (pick != le) confirm = pick }
+    ) { pick -> if (pick != le) confirm = pick }
     confirm?.let { on ->
         AlertDialog(
             onDismissRequest = { confirm = null },

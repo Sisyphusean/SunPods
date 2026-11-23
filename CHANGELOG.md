@@ -2,7 +2,7 @@
 
 ## 2.29.0
 
-A new look, and nearly everything Sony's app can do for the WF-1000XM5 (not yet: Quick Access, voice guidance language and firmware updates).
+A new look, and nearly everything Sony's app can do for the WF-1000XM5 (not yet: voice guidance language and firmware updates).
 
 **Redesign**
 - Shorter tabs: each setting is one row with its value, and the details live one tap deeper on their own page

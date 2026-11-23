@@ -99,7 +99,6 @@ object TouchCapability {
         0x23 -> "volume up"; 0x24 -> "volume down"
         in 0x30..0x3b -> "voice assistant"
         0x70 -> "mute your mic"
-        0x43, 0x44 -> "Quick Access (set up in Spotify or Endel)"
         else -> null
     }
 
@@ -115,7 +114,6 @@ object TouchCapability {
         0x20 -> "Play/Pause"; 0x21 -> "Next"; 0x22 -> "Previous"
         0x23 -> "Volume up"; 0x24 -> "Volume down"
         in 0x30..0x3b -> "Assistant"
-        0x43, 0x44 -> "Quick Access"
         0x70 -> "Mute"
         else -> null
     }
