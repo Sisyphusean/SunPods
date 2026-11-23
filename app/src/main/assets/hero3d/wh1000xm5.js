@@ -19,25 +19,25 @@
 const FINISHES = {
   black: {
     body: [0.026, 0.026, 0.028], face: [0.046, 0.046, 0.048], pad: [0.026, 0.026, 0.028], slider: [0.030, 0.030, 0.032], hinge: [0.016, 0.016, 0.017],
-    baffle: [0.016, 0.016, 0.017], print: [0.42, 0.42, 0.42], mic: [0.22, 0.15, 0.07], seam: [0.010, 0.010, 0.010],
+    baffle: [0.016, 0.016, 0.017], icon: [0.20, 0.20, 0.21], print: [0.62, 0.46, 0.26], mic: [0.50, 0.29, 0.12], seam: [0.010, 0.010, 0.010],
     caseShell: [0.030, 0.030, 0.032], caseLining: [0.026, 0.026, 0.028], zip: [0.010, 0.010, 0.011], pull: [0.62, 0.46, 0.22],
     lift: [0, 0, 0],
   },
   silver: {   // Platinum Silver
     body: [0.640, 0.615, 0.540], face: [0.700, 0.675, 0.600], pad: [0.600, 0.575, 0.505], slider: [0.600, 0.580, 0.510], hinge: [0.30, 0.29, 0.26],
-    baffle: [0.25, 0.24, 0.22], print: [0.52, 0.38, 0.18], mic: [0.40, 0.32, 0.20], seam: [0.20, 0.19, 0.17],
+    baffle: [0.25, 0.24, 0.22], icon: [0.26, 0.24, 0.20], print: [0.52, 0.38, 0.18], mic: [0.55, 0.36, 0.18], seam: [0.20, 0.19, 0.17],
     caseShell: [0.520, 0.500, 0.440], caseLining: [0.420, 0.405, 0.360], zip: [0.30, 0.29, 0.26], pull: [0.62, 0.48, 0.25],
     lift: [0.03, 0.03, 0.03],
   },
   blue: {     // Midnight Blue
     body: [0.026, 0.034, 0.060], face: [0.042, 0.052, 0.086], pad: [0.024, 0.031, 0.055], slider: [0.022, 0.029, 0.052], hinge: [0.012, 0.014, 0.022],
-    baffle: [0.014, 0.017, 0.026], print: [0.50, 0.40, 0.30], mic: [0.20, 0.17, 0.14], seam: [0.008, 0.009, 0.014],
+    baffle: [0.014, 0.017, 0.026], icon: [0.18, 0.20, 0.26], print: [0.50, 0.40, 0.30], mic: [0.50, 0.29, 0.13], seam: [0.008, 0.009, 0.014],
     caseShell: [0.024, 0.030, 0.050], caseLining: [0.020, 0.025, 0.040], zip: [0.008, 0.009, 0.014], pull: [0.55, 0.45, 0.32],
     lift: [0, 0, 0],
   },
   pink: {     // Smoky Pink
     body: [0.530, 0.440, 0.435], face: [0.585, 0.490, 0.484], pad: [0.495, 0.410, 0.405], slider: [0.500, 0.415, 0.410], hinge: [0.25, 0.20, 0.20],
-    baffle: [0.20, 0.16, 0.16], print: [0.62, 0.40, 0.30], mic: [0.36, 0.26, 0.22], seam: [0.16, 0.13, 0.13],
+    baffle: [0.20, 0.16, 0.16], icon: [0.30, 0.22, 0.21], print: [0.62, 0.40, 0.30], mic: [0.52, 0.30, 0.20], seam: [0.16, 0.13, 0.13],
     caseShell: [0.430, 0.360, 0.355], caseLining: [0.350, 0.290, 0.285], zip: [0.25, 0.20, 0.20], pull: [0.66, 0.46, 0.34],
     lift: [0.02, 0.02, 0.02],
   },
@@ -53,31 +53,33 @@ const HP0 = {
   // Sony's side view: an oval 8.5 x 10 whose long axis leans back at the top)
   cup: {
     r: [4.20, 4.10, 4.13, 4.23, 4.47, 4.69, 4.88, 5.00, 5.02, 5.05, 5.12, 5.09, 4.95, 4.81, 4.61, 4.37,
-      4.18, 4.07, 4.10, 4.23, 4.42, 4.66, 4.81, 4.98, 5.07, 5.12, 5.11, 5.05, 4.90, 4.76, 4.59, 4.38],
-    scale: 1.0,
-    H: 2.55,            // housing depth, seam to the flat face
-    wall: 0.30,         // straight wall above the seam before the round-over
-    n: 2.3,             // round-over superellipse exponent (2 = elliptical, larger = squarer)
-    faceK: 0.70,        // flat face size, as a fraction of the outline
+      4.18, 4.07, 4.10, 4.23, 4.42, 4.66, 4.95, 5.13, 5.22, 5.25, 5.20, 5.08, 4.90, 4.76, 4.59, 4.38],
+    scale: 0.87,
+    H: 2.40,            // housing depth, seam to the flat face
+    wall: 0.95,         // straight wall above the seam before the round-over
+    n: 3.2,             // round-over superellipse exponent (2 = elliptical, larger = squarer)
+    faceK: 0.73,        // flat face size, as a fraction of the outline
     faceC: [0.05, -0.28], // flat face centre (x front, y up)
-    dome: 0.06,
+    dome: 0.04,
   },
-  pad: { inset: 0.10, W: 1.95, T: 2.30, rc: 0.85, ri: 0.55, bulge: 0.06 },
+  pad: { inset: 0.10, W: 1.58, T: 2.05, rc: 0.85, ri: 0.55, bulge: 0.06 },
   // headband: outer outline an ellipse (half-width a, height b above its equator), section t x w
-  band: { a: 7.80, b: 6.80, t: 1.40, w: 1.75, ext0: 0.45, es: 3.2, cushion: 62 },
-  slider: { w: 0.62, t: 0.42, len: 2.6, ext: 1.10 },
-  hanger: { w: 1.00, t: 0.62, len: 2.70, rr: 0.28 },
-  knuckle: { r: 0.36, len: 0.95 },
-  pivot: [0.0, 4.30, 1.85],    // where the hanger's knuckle sits, in the cup frame
-  roll: 20,                    // cup bottoms swing in (deg) at rest
+  band: { a: 7.80, b: 6.95, t: 1.50, w: 1.80, ext0: 0.95, es: 3.2, cushion: 62, cap: 0.62 },
+  slider: { r: 0.42, len: 2.6, ext: 0.55 },
+  hanger: { r: 0.46, len: 2.90, collar: 0.51, collarLen: 0.34 },   // a round tube dropping into a round sleeve on the cup
+  flare: -14,                   // the hangers lean outwards at the bottom (deg)
+  pivot: [0.0, 3.10, null],    // where the hanger's lower end sits, in the cup frame (z found from the shell)
+  roll: 25,                    // cup bottoms swing in (deg) at rest
   yaw: 36,                     // cups turned about the hanger, outer faces towards the front (deg) at rest
-  logo: { y: 1.50, len: 1.10, h: 0.30, flip: false },   // SONY on the hanger: centre above the pivot, length, letter height
+  logo: { y: 1.30, len: 2.5, h: 0.30, span: 0.55 },   // SONY on the hanger: centre above the pivot, length, letter height, half-angle it spans round the tube (rad)
   // parts on the cup, as (angle around the outline in deg, position up the wall t 0..1 / face 1..2, w, h, kind)
-  micL: [[330, 0.42, 0.42, 0.13], [57, 0.55, 0.34, 0.11], [160, 0.38, 0.34, 0.11], [245, 0.30, 0.34, 0.11]],
-  micR: [[330, 0.42, 0.42, 0.13], [57, 0.55, 0.34, 0.11], [160, 0.38, 0.34, 0.11], [205, 0.32, 0.34, 0.11]],
-  buttons: { led: [193, 0.36, 0.13], power: [205, 0.36, 0.72, 0.30], nc: [222, 0.36, 0.72, 0.30], jack: [252, 0.30, 0.42] },
-  usb: [278, 0.30, 0.86, 0.30],
-  notch: [90, 0.50, 1.30, 1.70],
+  // mics: (angle, up the wall, length along the rim, width, kind): 'a' a bronze slit at the ends of the lower band, 'd' a dark slit
+  micL: [[312, 0.30, 1.05, 0.20, 'a'], [228, 0.30, 1.05, 0.20, 'a'], [18, 0.52, 1.20, 0.17, 'd'], [160, 0.40, 0.95, 0.15, 'd'], [64, 0.60, 0.34, 0.12, 'd']],
+  micR: [[312, 0.30, 1.05, 0.20, 'a'], [228, 0.30, 1.05, 0.20, 'a'], [18, 0.52, 1.20, 0.17, 'd'], [160, 0.40, 0.95, 0.15, 'd'], [64, 0.60, 0.34, 0.12, 'd']],
+  // the lower band, front to back: jack, power, indicator, NC/AMB (the left cup); USB-C in the middle of the right cup's
+  buttons: { led: [261, 0.34, 0.13], power: [273, 0.34, 0.74, 0.28], nc: [245, 0.34, 1.12, 0.28], jack: [292, 0.32, 0.50] },
+  icons: { pwr: [273, 0.19, 1.2, 0.30], nc: [245, 0.19, 1.5, 0.375] },
+  usb: [270, 0.32, 0.86, 0.30],
 };
 
 // Carrying case, in cm. Frame (lying on its back): +y up (the lid on top), +z towards the narrow end
@@ -91,12 +93,12 @@ const CASE0 = {
   baseH: 4.0, lidH: 2.3, wall: 0.28,
   n: 2.2, faceK: 0.70, dome: 0.10,
   lidOpenDeg: 112,
-  loop: { len: 4.6, w: 1.7, slotL: 2.4, slotW: 0.40, t: 0.22 },
-  phones: { pos: [0, 0.04, -0.4], scale: 1.0, ext: 0.35, squeeze: 14 },   // folded headphones on the base's floor: offset of their middle
+  loop: { len: 7.2, w: 2.7, slotL: 4.2, slotW: 0.85, t: 0.26 },   // a tall fabric strap, tapering to a rounded point, with a long slot
+  phones: { pos: [0, 0.04, -0.4], scale: 1.12, ext: 0.35, squeeze: 20 },   // folded headphones on the base's floor: offset of their middle
 };
 
 // The hero: the headphones upright like Sony's product shots (band on top, cups hanging), turned three-quarter and a little above eye level
-const HERO0 = { rot: [10, -30, 0], scale: 0.222, pos: [0.08, -0.03, 0], ext: 1.10 };
+const HERO0 = { rot: [10, -30, 0], scale: 0.222, pos: [0.08, -0.03, 0], ext: 0.60 };
 const CASEREST0 = { yaw: -22, tilt: 46, scale: 0.168, pos: [0.0, -0.02, 0] };
 
 function merge(a, b) {
@@ -130,10 +132,45 @@ export function createWH1000XM5(ctx) {
   // Print atlas (the WF-C710N's: SONY wordmark traced from the approved XM5 case logo)
   let atlasReady;
   const ready = new Promise((r) => { atlasReady = r; });
-  const atlas = new THREE.TextureLoader().load('./c710n_marks.png', () => atlasReady(), undefined, () => atlasReady());
-  atlas.colorSpace = THREE.NoColorSpace;
-  atlas.anisotropy = 4;
-  const ATL_SONY = [0.04, 0.03, 0.96, 0.47];
+  atlasReady();
+  // the print atlas, drawn here: a small sans SONY wordmark, the power and Bluetooth symbols, NC/AMB, and the R / L markers.
+  // Rects are [u0, v0, u1, v1] from the top-left of the canvas.
+  const ATL = { sony: [0, 0, 1, 0.25], pwr: [0, 0.25, 0.5, 0.5], nc: [0.5, 0.25, 1, 0.5], R: [0, 0.5, 0.25, 1], L: [0.25, 0.5, 0.5, 1] };
+  const atlas = (() => {
+    const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 512;
+    const c = cv.getContext('2d');
+    c.fillStyle = '#000'; c.fillRect(0, 0, 1024, 512);
+    c.fillStyle = '#fff'; c.strokeStyle = '#fff'; c.textBaseline = 'middle'; c.textAlign = 'center';
+    c.font = '700 96px "Helvetica Neue", Helvetica, Arial, sans-serif';
+    if ('letterSpacing' in c) c.letterSpacing = '14px';
+    c.fillText('SONY', 512 + 7, 64);
+    if ('letterSpacing' in c) c.letterSpacing = '0px';
+    // power symbol (left quarter of row 2) and Bluetooth rune (next)
+    c.lineWidth = 11; c.lineCap = 'round'; c.lineJoin = 'round';
+    c.beginPath(); c.arc(128, 192 + 4, 38, -Math.PI / 2 + 0.62, -Math.PI / 2 - 0.62 + Math.PI * 2); c.stroke();
+    c.beginPath(); c.moveTo(128, 192 - 46); c.lineTo(128, 192 + 2); c.stroke();
+    c.lineWidth = 9;
+    c.beginPath(); c.moveTo(340, 214); c.lineTo(384, 170); c.lineTo(362, 150); c.lineTo(362, 234); c.lineTo(384, 214); c.lineTo(340, 170); c.stroke();
+    // NC/AMB
+    c.font = '600 64px "Helvetica Neue", Helvetica, Arial, sans-serif'; c.lineWidth = 1;
+    c.fillText('NC/AMB', 768, 192 + 2);
+    // R marker: a ring and an R; L marker: an L
+    c.lineWidth = 14; c.beginPath(); c.arc(128, 384, 84, 0, Math.PI * 2); c.stroke();
+    c.font = '700 120px Helvetica, Arial, sans-serif'; c.fillText('R', 128, 388);
+    c.font = '700 150px Helvetica, Arial, sans-serif'; c.fillText('L', 384, 388);
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.NoColorSpace; t.anisotropy = 4; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter;
+    return t;
+  })();
+  function atlasUV(geo, rect, flipU = false) {   // re-map a 0..1 patch's uv into an atlas rect
+    const uv = geo.getAttribute('uv');
+    for (let i = 0; i < uv.count; i++) {
+      let u = uv.getX(i), v = uv.getY(i);
+      if (flipU) u = 1 - u;
+      uv.setXY(i, rect[0] + (rect[2] - rect[0]) * u, 1 - (rect[1] + (rect[3] - rect[1]) * (1 - v)));
+    }
+    return geo;
+  }
 
   // ---------------------------------------------------------------------------------------------
   // Materials. Few programs: every opaque surface shares one (the plain patched program), the small
@@ -155,6 +192,10 @@ export function createWH1000XM5(ctx) {
   M.baffle = matte(0.90, 0.05);       // the fabric inside the pad
   M.seam = matte(0.70, 0.0);          // the dark joint between housing and pad
   M.red = matte(0.40, 0.0); M.red.color.copy(lin([0.55, 0.035, 0.03]));
+  M.icon = P({ roughness: 0.5, metalness: 0.2, transparent: true, depthWrite: false, alphaMap: atlas,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  M.mark = P({ roughness: 0.4, metalness: 0, transparent: true, depthWrite: false, alphaMap: atlas, color: lin([0.60, 0.04, 0.035]),
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   M.print = P({ roughness: 0.35, metalness: 0.6, transparent: true, depthWrite: false, alphaMap: atlas,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
 
@@ -333,6 +374,17 @@ export function createWH1000XM5(ctx) {
   const cupR = (phi) => cupR0(phi) * HP.cup.scale;
   const housing = pillow({ outline: cupR, faceC: HP.cup.faceC, faceK: HP.cup.faceK, H: HP.cup.H, wall: HP.cup.wall, n: HP.cup.n, dome: HP.cup.dome, NU: 144 });
 
+  // the outline with only its first few harmonics: the pad's opening follows this, a clean tall oval, not the housing's lumps
+  const cupSmooth = (() => {
+    const N = HP.cup.r.length, H = 3, a = [], b = [];
+    for (let k = 0; k <= H; k++) {
+      let ca = 0, sa = 0;
+      for (let i = 0; i < N; i++) { ca += HP.cup.r[i] * Math.cos(2 * Math.PI * k * i / N); sa += HP.cup.r[i] * Math.sin(2 * Math.PI * k * i / N); }
+      a.push(ca * (k ? 2 : 1) / N); b.push(sa * 2 / N);
+    }
+    return (phi) => { const t = rad(phi) * 1; let v = a[0]; for (let k = 1; k <= H; k++) v += a[k] * Math.cos(k * t) + b[k] * Math.sin(k * t); return v * HP.cup.scale; };
+  })();
+  const padR = (phi, d, W) => { const w = Math.min(1, Math.max(0, d / W)); return cupR(phi) * (1 - w) + cupSmooth(phi) * w; };
   function padGeometry() {
     const pd = HP.pad, W = pd.W, T = pd.T, rc = pd.rc, ri = pd.ri;
     const prof = [[0.30, 0.0], [0.08, -0.05], [0.0, -0.16]];
@@ -344,14 +396,14 @@ export function createWH1000XM5(ctx) {
     prof.push([W + 0.10, -0.30]);
     const NU = 144;
     return gridGeometry(prof.length, NU, (j, i) => {
-      const phi = 360 * i / NU, a = rad(phi), r = cupR(phi) - pd.inset - prof[j][0];
+      const phi = 360 * i / NU, a = rad(phi), r = padR(phi, prof[j][0], W + 0.1) - pd.inset - prof[j][0];
       return [r * Math.cos(a), r * Math.sin(a), prof[j][1]];
     }, { wind: 'acb' });
   }
   function baffleGeometry() {
     const NU = 96, pos = [0, 0, -0.30], idx = [];
     for (let i = 0; i < NU; i++) {
-      const phi = 360 * i / NU, a = rad(phi), r = cupR(phi) - HP.pad.inset - HP.pad.W - 0.06;
+      const phi = 360 * i / NU, a = rad(phi), r = padR(phi, HP.pad.W, HP.pad.W + 0.1) - HP.pad.inset - HP.pad.W - 0.06;
       pos.push(r * Math.cos(a), r * Math.sin(a), -0.30);
     }
     for (let i = 0; i < NU; i++) idx.push(0, 1 + (i + 1) % NU, 1 + i);
@@ -384,14 +436,14 @@ export function createWH1000XM5(ctx) {
     const n = pts.length;
     const len = [0];
     for (let k = 1; k < n; k++) len.push(len[k - 1] + pts[k].distanceTo(pts[k - 1]));
-    const L = len[n - 1], CAP = 0.30;
+    const L = len[n - 1], CAP = BAND.cap;
     const tan = pts.map((p, k) => pts[Math.min(n - 1, k + 1)].clone().sub(pts[Math.max(0, k - 1)]).normalize());
     const Z = V3(0, 0, 1);
     const nor = tan.map((t) => new THREE.Vector3().crossVectors(Z, t).normalize());
     const sp = (v, p) => Math.sign(v) * Math.pow(Math.abs(v), p);
     const ep = 2 / BAND.es;
     // section scale at the rounded ends
-    const capS = (s) => { const d = Math.min(s, L - s); return d >= CAP ? 1 : Math.max(0.02, Math.sqrt(1 - Math.pow(1 - d / CAP, 2))); };
+    const capS = (s) => { const d = Math.min(s, L - s); return d >= CAP ? 1 : Math.max(0.03, Math.pow(1 - Math.pow(1 - d / CAP, 3), 1 / 3)); };   // a soft block with a fuller, rounded-square cap
     // the ends: pull the last rows in along the tangent so the cap rounds over
     function sweep(a0, a1, NS) {
       return gridGeometry(n, NS + 1, (j, i) => {
@@ -399,14 +451,15 @@ export function createWH1000XM5(ctx) {
         const k = capS(len[j]);
         const nn = (BAND.t / 2) * sp(Math.cos(al), ep) * k, zz = (BAND.w / 2) * sp(Math.sin(al), ep) * k;
         const p = pts[j];
-        return [p.x + nor[j].x * nn, p.y + nor[j].y * nn, zz];
+        const hh = Math.max(0, (p.y - bandYc) / bandB);
+        return [p.x + nor[j].x * nn, p.y + nor[j].y * nn, zz + (BAND.bow || 0) * hh * hh];
       }, { wrap: false });
     }
     const b = rad(BAND.cushion);
     return { shell: sweep(-(Math.PI - b), Math.PI - b, 56), cushion: sweep(Math.PI - b, Math.PI + b, 20) };
   }
 
-  const HG = HP.hanger, SL = HP.slider, KN = HP.knuckle;
+  const HG = HP.hanger, SL = HP.slider;
   const G = {
     housing: housing.geometry(false, 'wall'),
     face: housing.geometry(false, 'face'),
@@ -414,29 +467,44 @@ export function createWH1000XM5(ctx) {
     baffle: baffleGeometry(),
     seam: seamGeometry(),
     ...(() => { const b = bandGeometries(); return { bandShell: b.shell, bandCushion: b.cushion }; })(),
-    slider: bar(SL.w, SL.t, SL.len, 0.2, SL.len),           // from y = +len (inside the band end) down to 0
-    hanger: bar(HG.w, HG.t, HG.len + 0.15, HG.rr, 0.15),
-    knuckle: (() => { const g = new THREE.CylinderGeometry(HG.w / 2, HG.w / 2, HG.t, 32); g.rotateZ(Math.PI / 2); return g; })(),
+    slider: (() => { const g = new THREE.CylinderGeometry(SL.r, SL.r, SL.len, 28); g.translate(0, SL.len / 2, 0); return g; })(),   // y = +len (inside the band end) down to 0
+    // the hanger: a smooth round tube, its lower end rounded over
+    hanger: (() => {
+      const pr = [], top = 0.15, bot = -HG.len, rr = 0.26;
+      pr.push(new THREE.Vector2(SL.r * 0.9, top + 0.02)); pr.push(new THREE.Vector2(SL.r * 1.0, top));
+      pr.push(new THREE.Vector2(HG.r * 0.93, top - 0.05)); pr.push(new THREE.Vector2(HG.r, top - 0.14)); pr.push(new THREE.Vector2(HG.r, bot + rr));
+      for (let k = 1; k <= 8; k++) { const a = (k / 8) * Math.PI / 2; pr.push(new THREE.Vector2(HG.r - rr + rr * Math.cos(a) - (k === 8 ? 0 : 0), bot + rr - rr * Math.sin(a))); }
+      pr.push(new THREE.Vector2(0.001, bot));
+      return new THREE.LatheGeometry(pr.reverse(), 40);
+    })(),
+    // the round sleeve the hanger drops into, on the top of the cup (a little wider than the tube, rounded lip)
+    knuckle: (() => {
+      const pr = [], r = HG.collar, L = HG.collarLen, rr = 0.14;
+      pr.push(new THREE.Vector2(HG.r * 0.9, L)); pr.push(new THREE.Vector2(r - rr, L)); 
+      for (let k = 1; k <= 5; k++) { const a = (k / 5) * Math.PI / 2; pr.push(new THREE.Vector2(r - rr + rr * Math.sin(a), L - rr + rr * Math.cos(a))); }
+      pr.push(new THREE.Vector2(r, -L * 0.2)); pr.push(new THREE.Vector2(r - 0.1, -L * 0.45)); pr.push(new THREE.Vector2(HG.r * 0.9, -L * 0.45));
+      return new THREE.LatheGeometry(pr.reverse(), 40);
+    })(),
   };
-  // SONY on the hanger's outer face (x = -t/2), reading up, letter tops towards the front on the left
-  // unit and towards the back on the right one (as Sony prints it; the left unit is the right one
-  // mirrored, so its uv flips)
-  function logoGeometry(side) {
-    const lg = HP.logo, g = new THREE.PlaneGeometry(lg.h, lg.len, 1, 1);
-    g.rotateY(-Math.PI / 2);                                  // faces -x; its width along z, length along y
-    g.translate(-HG.t / 2 - 0.004, -HG.len + lg.y, 0);
-    const p = g.getAttribute('position'), uv = g.getAttribute('uv');
-    const R = ATL_SONY;
-    for (let i = 0; i < p.count; i++) {
-      const along = (p.getY(i) - (-HG.len + lg.y - lg.len / 2)) / lg.len;      // 0 at the bottom
-      let down = (p.getZ(i) + lg.h / 2) / lg.h;                                 // 0 at the back (-z)
-      if ((side === 'L') !== !!lg.flip) down = 1 - down;
-      uv.setXY(i, R[0] + (R[2] - R[0]) * along, 1 - (R[1] + (R[3] - R[1]) * down));
+  // SONY on the tube's outer side, reading up, letter tops towards the back on the right unit and towards the
+  // front on the left one (as Sony prints it; the left unit is the right one mirrored, so its uv flips)
+  function wrapPatch(rect, y0, len, h, rr, N = 14, flipV = false) {   // a print wrapped round the tube, centred on the outward side
+    const pos = [], uv = [], idx = [], span = h / rr;
+    for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+      const y = y0 + (i / N - 0.5) * len, a = (j / N - 0.5) * span * (flipV ? -1 : 1);
+      pos.push(-Math.cos(a) * rr, y, Math.sin(a) * rr); uv.push(i / N, j / N);
     }
-    return g;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const a = j * (N + 1) + i, b = a + 1, c = a + N + 1, d = c + 1; idx.push(a, c, b, b, c, d); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    return atlasUV(g, rect);
   }
+  const logoGeometry = (side) => wrapPatch(ATL.sony, -HG.len + HP.logo.y, HP.logo.len, HP.logo.h, HG.r + 0.004, 14, side === 'R');
   G.logoL = logoGeometry('L'); G.logoR = logoGeometry('R');
-  G.redDot = (() => { const g = new THREE.CircleGeometry(0.11, 24); g.rotateY(Math.PI / 2); g.translate(HG.t / 2 + 0.004, -HG.len + 1.25, 0.0); return g; })();
+  // the R / L markers on the inner face of the band's end block (R: a red ring and R, L: a plain L), as on Sony's right and left
+  const markGeo = (rect, w, flipU) => { const g = new THREE.PlaneGeometry(w, w); g.rotateY(Math.PI / 2); g.translate(BAND.t / 2 + 0.02, 0.50, 0.0); return atlasUV(g, rect, flipU); };
+  G.markR = markGeo(ATL.R, 0.72, false); G.markL = markGeo(ATL.L, 0.60, true);
 
   // small parts on the cups: (phi, t, w, h) on the housing surface
   const SH = {};
@@ -444,9 +512,7 @@ export function createWH1000XM5(ctx) {
   function cupParts(side) {
     const out = [];
     const add = (geo, mat, name) => { const m = new THREE.Mesh(geo, mat); m.name = name; out.push(m); return m; };
-    // the notch in the top of the housing that the hanger's foot sits in
-    add(housing.patch(HP.notch[0], HP.notch[1], HP.notch[2], HP.notch[3], 0.008, 10), shapeOf('notch', 0, HP.notch[2], HP.notch[3]), 'XM5H_Notch');
-    for (const [phi, t, w, h] of side === 'L' ? HP.micL : HP.micR) add(housing.patch(phi, t, w, h, 0.010, 6), shapeOf('mic' + w + h, 0, w, h), 'XM5H_Mic');
+    for (const [phi, t, w, h, kind] of side === 'L' ? HP.micL : HP.micR) add(housing.patch(phi, t, w, h, 0.010, 8), shapeOf('mic' + kind.toUpperCase() + w + h, 0, w, h), 'XM5H_Mic');
     if (side === 'L') {
       const B = HP.buttons;
       const led = add(housing.patch(B.led[0], B.led[1], B.led[2], B.led[2], 0.012, 6), shapeOf('led', 3, B.led[2], B.led[2], { roughness: 0.1, emissive: new THREE.Color(0, 0, 0) }), 'XM5H_LED');
@@ -455,6 +521,10 @@ export function createWH1000XM5(ctx) {
       add(housing.patch(B.nc[0], B.nc[1], B.nc[2], B.nc[3], 0.014, 8), shapeOf('nc', 2, B.nc[2], B.nc[3]), 'XM5H_NC');
       add(housing.patch(B.jack[0], B.jack[1], B.jack[2], B.jack[2], 0.010, 8), shapeOf('jack', 1, B.jack[2], B.jack[2]), 'XM5H_Jack');
       void led;
+      // the printed power / Bluetooth symbols and NC/AMB under the buttons (the left unit is mirrored, so the print flips)
+      const I = HP.icons;
+      add(atlasUV(housing.patch(I.pwr[0], I.pwr[1], I.pwr[2], I.pwr[3], 0.016, 8), ATL.pwr, true), M.icon, 'XM5H_IconPwr');
+      add(atlasUV(housing.patch(I.nc[0], I.nc[1], I.nc[2], I.nc[3], 0.016, 8), ATL.nc, true), M.icon, 'XM5H_IconNC');
     } else {
       const U = HP.usb;
       add(housing.patch(U[0], U[1], U[2], U[3], 0.010, 8), shapeOf('usb', 0, U[2], U[3]), 'XM5H_USB');
@@ -468,7 +538,20 @@ export function createWH1000XM5(ctx) {
   // together about the slider to fold flat), the pivot at the hanger's foot (the cup swings in).
   const cupBasis = new THREE.Matrix4().makeBasis(V3(0, 0, 1), V3(0, 1, 0), V3(-1, 0, 0));   // cup frame -> right unit
   const cupQ = new THREE.Quaternion().setFromRotationMatrix(cupBasis);
-  const pivotInUnit = V3(...HP.pivot).applyMatrix4(cupBasis);
+  const pivotCup = (() => {   // the hanger's lower end rests on the shell: find the shell's height there
+    const [px, py] = HP.pivot; let z = HP.pivot[2];
+    if (z == null) {
+      z = 0;
+      for (let phi = 0; phi < 360; phi += 0.5) for (let t = 0; t <= 1; t += 0.005) {
+        const q = housing.point(phi, t);
+        if (Math.abs(q[0] - px) < 0.12 && Math.abs(q[1] - py) < 0.12) z = Math.max(z, q[2]);
+      }
+      z += 0.15;
+    }
+    return V3(px, py, z);
+  })();
+  const pivotInUnit = pivotCup.clone().applyMatrix4(cupBasis);
+  const LIFT = 1.5;   // the arms flex about a point inside the band end, so the block stays in line with the band
   function buildPhones(tag) {
     const root = new THREE.Group(); root.name = 'XM5H_Phones' + tag;
     const mesh = (geo, mat, name) => Object.assign(new THREE.Mesh(geo, mat), { name });
@@ -478,14 +561,14 @@ export function createWH1000XM5(ctx) {
       const holder = new THREE.Group(); holder.name = 'XM5H_Side' + side;
       if (side === 'L') holder.scale.x = -1;
       root.add(holder);
-      const unit = new THREE.Group(); unit.position.copy(bandEnd); holder.add(unit);
+      const unit = new THREE.Group(); unit.position.copy(bandEnd).y += LIFT; holder.add(unit);
       const ext = new THREE.Group(); unit.add(ext);                  // moves down as the slider extends
       ext.add(mesh(G.slider, M.slider, 'XM5H_Slider'));
       const swivel = new THREE.Group(); ext.add(swivel);
       swivel.add(mesh(G.hanger, M.hanger, 'XM5H_Hanger'), mesh(side === 'L' ? G.logoL : G.logoR, M.print, 'XM5H_Logo'));
-      if (side === 'R') swivel.add(mesh(G.redDot, M.red, 'XM5H_RedDot'));
+      const markM = side === 'R' ? mesh(G.markR, M.mark, 'XM5H_MarkR') : mesh(G.markL, M.print, 'XM5H_MarkL'); markM.position.y = -LIFT; unit.add(markM);
       const pivot = new THREE.Group(); pivot.position.y = -HG.len; swivel.add(pivot);
-      pivot.add(mesh(G.knuckle, M.hanger, 'XM5H_Knuckle'));
+      pivot.add(mesh(G.knuckle, M.hinge, 'XM5H_Knuckle'));
       const cup = new THREE.Group(); cup.name = 'XM5H_Cup' + side;
       cup.quaternion.copy(cupQ); cup.position.copy(pivotInUnit).negate();
       pivot.add(cup);
@@ -495,11 +578,12 @@ export function createWH1000XM5(ctx) {
     }
     // pose: fold 0 (worn) .. 1 (flat, outer faces to the front), slider extension, cup swing and turn
     // (squeeze: the band's arms flexed in, as when stored in the case)
-    function pose({ fold = 0, ext = HERO.ext, roll = HP.roll, yaw = HP.yaw, squeeze = 0 } = {}) {
+    function pose({ fold = 0, ext = HERO.ext, roll = HP.roll, yaw = HP.yaw, squeeze = 0, flare = HP.flare } = {}) {
       for (const s of ['L', 'R']) {
         const u = units[s];
         u.unit.rotation.z = rad(squeeze);
-        u.ext.position.y = -ext;
+        u.ext.rotation.z = rad(flare * (1 - fold));
+        u.ext.position.y = -ext - LIFT;
         u.swivel.rotation.y = rad(yaw * (1 - fold) + 90 * fold);
         u.pivot.rotation.z = rad(roll * (1 - fold));
       }
@@ -561,11 +645,13 @@ export function createWH1000XM5(ctx) {
     // the loop at the narrow end: a flat ribbon tab with a slot
     {
       const lp = CASE.loop, s = new THREE.Shape(), zN = caseR(90) - 0.3;
-      s.moveTo(-lp.w / 2, 0); s.lineTo(-lp.w / 2 * 0.8, lp.len * 0.55);
-      s.quadraticCurveTo(0, lp.len * 1.12, lp.w / 2 * 0.8, lp.len * 0.55); s.lineTo(lp.w / 2, 0); s.lineTo(-lp.w / 2, 0);
-      const h = new THREE.Path(); const sy = lp.len * 0.5, sl = lp.slotL, sw = lp.slotW;
-      h.moveTo(0, sy - sl / 2); h.absarc(0, sy - sl / 2 + sw / 2, sw / 2, -Math.PI / 2, Math.PI / 2, true);
-      h.absarc(0, sy + sl / 2 - sw / 2, sw / 2, -Math.PI / 2, Math.PI / 2, false); s.holes.push(h);
+      s.moveTo(-lp.w / 2, 0); s.lineTo(-lp.w * 0.24, lp.len * 0.84);
+      s.quadraticCurveTo(-lp.w * 0.22, lp.len * 0.98, 0, lp.len); s.quadraticCurveTo(lp.w * 0.22, lp.len * 0.98, lp.w * 0.24, lp.len * 0.84);
+      s.lineTo(lp.w / 2, 0); s.lineTo(-lp.w / 2, 0);
+      // the slot: a long teardrop, wide near the top (as in Sony's photo)
+      const h = new THREE.Path(), sy = lp.len * 0.52, sl = lp.slotL, sw = lp.slotW;
+      h.moveTo(0, sy - sl / 2); h.lineTo(sw * 0.5, sy + sl * 0.18); h.quadraticCurveTo(sw * 0.55, sy + sl / 2, 0, sy + sl / 2);
+      h.quadraticCurveTo(-sw * 0.55, sy + sl / 2, -sw * 0.5, sy + sl * 0.18); h.lineTo(0, sy - sl / 2); s.holes.push(h);
       const g = new THREE.ExtrudeGeometry(s, { depth: lp.t, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2, curveSegments: 10 });
       g.rotateX(Math.PI / 2); g.translate(0, -0.15 + lp.t / 2, zN);
       base.add(Object.assign(new THREE.Mesh(g, M.loop), { name: 'XM5H_CaseLoop' }));
@@ -651,11 +737,11 @@ export function createWH1000XM5(ctx) {
     set(M.slider.color, f.slider); set(M.hinge.color, f.hinge);
     set(M.pad.color, f.pad); set(M.cushion.color, f.pad);
     set(M.baffle.color, f.baffle); set(M.seam.color, f.seam);
-    set(M.print.color, f.print); set(M.print.emissive, f.print, 0.25);
+    set(M.print.color, f.print); set(M.icon.color, f.icon); set(M.print.emissive, f.print, 0.25);
     for (const [k, m] of Object.entries(SH)) {
       if (k === 'led') continue;
       set(m.color, f.body);
-      set(m.userData.uniforms.uInk.value, k.startsWith('mic') ? f.mic : f.seam, k.startsWith('mic') ? 0.35 : k === 'notch' ? 0.25 : 0.6);
+      set(m.userData.uniforms.uInk.value, k.startsWith('micA') ? f.mic : f.seam, k.startsWith('micA') ? 1.0 : 0.6);
     }
     set(SH.led.userData.uniforms.uInk.value, f.hinge, 0.6);
     set(M.caseShell.color, f.caseShell); set(M.caseLining.color, f.caseLining); set(M.loop.color, f.caseShell);

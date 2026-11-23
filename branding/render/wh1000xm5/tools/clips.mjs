@@ -71,15 +71,16 @@ for (const clip of which === 'both' ? ['open', 'pair'] : [which]) {
           const [x, y] = await page.evaluate(`window.XMCLIP.project(${JSON.stringify(p)}, '${part}', ${SIZE})`);
           p[3] -= (x - SIZE / 2) / SIZE; p[4] += (y - SIZE / 2) / SIZE;
         }
+        p[3] -= 0.04; p[4] -= 0.0;   // keep the whole cup (and its hanger) inside the frame: the button sits a little below and right of centre
         return p;
       };
       const [yb, pb] = await page.evaluate(`window.XMCLIP.facing('XM5H_Power')`);
       const hero = await page.evaluate(`(async () => { const d = await window.sunpods.debugMod('wh1000xm5', false); return d.M.HERO.rot; })()`);
       aim = {
         hero: [hero[0], hero[1], hero[2], 0, 0, 0.27],
-        button: await centre([yb + 22, pb - 12, 0, 0, 0, 0.62], 'XM5H_Power'),
+        button: await centre([yb + 22, pb - 12, 0, 0, 0, 0.58], 'XM5H_Power'),
         led: await centre([yb + 18, pb - 10, 0, 0, 0, 0.52], 'XM5H_LED'),
-        ledClose: await centre([yb + 14, pb - 8, 0, 0, 0, 0.56], 'XM5H_LED'),
+        ledClose: await centre([yb + 14, pb - 8, 0, 0, 0, 0.55], 'XM5H_LED'),
       };
     }
     const n = clip === 'open' ? 120 : 210;
