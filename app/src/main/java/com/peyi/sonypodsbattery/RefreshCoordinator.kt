@@ -573,7 +573,7 @@ private object SonyCommandCoordinator {
         val target = client.findEarbuds()
             ?: return Result.failure(EarbudsUnavailableException("Pair your ${EarbudModel.active.noun} in Bluetooth settings, then try again."))
         if (A2dpConnectionHelper.isConnected(app, target) == false) {
-            return Result.failure(EarbudsUnavailableException("Your earbuds aren't connected. Open the case near your phone and try again."))
+            return Result.failure(EarbudsUnavailableException("Your ${EarbudModel.active.noun} aren't connected. ${EarbudModel.active.wakeHint} and try again."))
         }
         val wasConnected = SonyControlSessionManager.currentState() == SonySessionState.CONNECTED
         return try {

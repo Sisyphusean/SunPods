@@ -21,9 +21,7 @@ object BatteryNotifier {
             description = "Live battery levels while your earbuds or headphones are connected."
         })
         val model = EarbudModel.current(context)
-        val content = if (model.headphones) state.left?.let { "Battery $it%" }.orEmpty() else listOfNotNull(
-            state.left?.let { "L $it%" }, state.right?.let { "R $it%" }, state.case?.let { "Case $it%" }
-        ).joinToString("   ")
+        val content = model.batteries.mapNotNull { part -> part.level(state)?.let { "${part.short} $it%" } }.joinToString("   ")
         val open = PendingIntent.getActivity(context, 20, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = android.app.Notification.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_sunpods_mark)

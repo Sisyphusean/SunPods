@@ -1121,26 +1121,19 @@ private fun BatteryCard(battery: BatteryState, busy: Boolean, liveAt: Long = 0L)
         SunCard {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 24.dp)) {
                 val art = LocalBudArt.current
-                if (EarbudModel.fromId(art.device)?.headphones == true) {
-                    // Headphones: one battery, no case.
-                    Spacer(Modifier.weight(1f))
-                    BatteryRing("Battery", battery.left?.takeIf { it in 1..100 }, battery.leftCharging, art.left, Modifier.weight(1f))
-                    Spacer(Modifier.weight(1f))
-                } else {
-                    BatteryRing("Left", battery.left?.takeIf { it in 1..100 }, battery.leftCharging, art.left, Modifier.weight(1f))
-                    BatteryRing("Right", battery.right?.takeIf { it in 1..100 }, battery.rightCharging, art.right, Modifier.weight(1f))
-                    // The case reports its level only when the earbuds come out of it. An old reading
-                    // greys out and the status line says how old, like Sony's app explains it.
+                // The case reports its level only when the earbuds come out of it. An old reading
+                // greys out and the status line says how old, like Sony's app explains it.
+                art.model.batteries.forEach { part ->
                     BatteryRing(
-                        "Case", battery.case?.takeIf { it in 1..100 }, battery.caseCharging, art.case, Modifier.weight(1f),
-                        muted = caseStale
+                        part, part.level(battery)?.takeIf { it in 1..100 }, part.charging(battery), art.image(part), Modifier.weight(1f),
+                        muted = part == BatteryPart.CASE && caseStale
                     )
                 }
             }
         }
         RollingFooter(
             when {
-                busy -> "Checking your ${EarbudModel.fromId(LocalBudArt.current.device)?.noun ?: "earbuds"}…"
+                busy -> "Checking your ${LocalBudArt.current.model.noun}…"
                 battery.updatedAt == 0L -> "Pull down to refresh."
                 outlook.caseNeedsCharge -> "Case battery is low. Charge it tonight."
                 caseStale -> "Updated ${relative(heard)}. Case level from ${relative(caseAt)}."
@@ -1151,7 +1144,8 @@ private fun BatteryCard(battery: BatteryState, busy: Boolean, liveAt: Long = 0L)
 }
 
 @Composable
-private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int, modifier: Modifier = Modifier, muted: Boolean = false) {
+private fun BatteryRing(part: BatteryPart, level: Int?, charging: Boolean, art: Int, modifier: Modifier = Modifier, muted: Boolean = false) {
+    val label = part.label
     val colors = MaterialTheme.colorScheme
     val low = level != null && level <= 20 && !charging
     // The reading is there the moment the screen is: no fill-up to wait through. A new reading
@@ -1199,13 +1193,13 @@ private fun BatteryRing(label: String, level: Int?, charging: Boolean, art: Int,
                 painter = painterResource(art),
                 contentDescription = null,
                 alpha = if (level == null) 0.4f else 1f,
-                modifier = Modifier.size(if (label == "Case") 40.dp else 52.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value }
+                modifier = Modifier.size(if (part == BatteryPart.CASE) 40.dp else 52.dp).graphicsLayer { scaleX = pop.value; scaleY = pop.value }
             )
         }
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value }) {
             if (level == null) {
-                Text(if (label == "Case") "Unknown" else "In Case", style = MaterialTheme.typography.titleSmall, color = colors.onSurfaceVariant)
+                Text(part.missing, style = MaterialTheme.typography.titleSmall, color = colors.onSurfaceVariant)
             } else {
                 Text(
                     (sweep * 100).roundToInt().toString(),
@@ -1241,13 +1235,7 @@ private fun LastReading(battery: BatteryState) {
         SectionHeader("Last Reading")
         SunCard {
             Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                if (EarbudModel.fromId(LocalBudArt.current.device)?.headphones == true) {
-                    LevelBar("Battery", last.left, Modifier.weight(1f))
-                } else {
-                    LevelBar("Left", last.left, Modifier.weight(1f))
-                    LevelBar("Right", last.right, Modifier.weight(1f))
-                    LevelBar("Case", last.case, Modifier.weight(1f))
-                }
+                LocalBudArt.current.model.batteries.forEach { LevelBar(it.label, it.level(last), Modifier.weight(1f)) }
             }
         }
         Footer("Updated ${relative(last.time)}.")
@@ -1531,7 +1519,7 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
         }
         val context = LocalContext.current
         val automation = remember(battery.listeningMode, battery.updatedAt) { AutomationStore.active(context) }
-        Footer(automation?.let { "Set automatically: $it. Choose a mode to take over." } ?: if (EarbudModel.active.headphones) "You can also press the NC/AMB button to switch modes." else "You can also tap the earbuds to switch modes.")
+        Footer(automation?.let { "Set automatically: $it. Choose a mode to take over." } ?: if (vm.settings.collectAsState().value.has(Feature.NC_AMB_BUTTON)) "You can also press the NC/AMB button to switch modes." else "You can also tap the earbuds to switch modes.")
     }
 }
 
@@ -1855,6 +1843,17 @@ private fun EqCurve(values: List<Int>, modifier: Modifier) {
 // Controls
 // ======================================================================
 
+/** Which noise modes a tap or the NC/AMB button steps through. */
+@Composable
+private fun NoiseCycleRow(title: String, sheetTitle: String, settings: DeviceSettings, vm: SunpodsViewModel) {
+    var open by remember { mutableStateOf(false) }
+    NavRow(Icons.Rounded.NoiseAware, title, settings.noiseCycle?.short ?: "—") { open = true }
+    if (open) {
+        ChoiceSheet(sheetTitle, NoiseCycle.entries.toList(), settings.noiseCycle,
+            label = { it.label }, onDismiss = { open = false }, onPick = vm::setNoiseCycle)
+    }
+}
+
 @Composable
 private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
     val context = LocalContext.current
@@ -1862,14 +1861,7 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
     val right = settings.touchRight
 
     if (!settings.has(Feature.TOUCH) && settings.has(Feature.NC_AMB_BUTTON)) Column {
-        SunCard {
-            var open by remember { mutableStateOf(false) }
-            NavRow(Icons.Rounded.NoiseAware, "NC/AMB Button", settings.noiseCycle?.short ?: "—") { open = true }
-            if (open) {
-                ChoiceSheet("NC/AMB Button Cycles Through", NoiseCycle.entries.toList(), settings.noiseCycle,
-                    label = { it.label }, onDismiss = { open = false }, onPick = vm::setNoiseCycle)
-            }
-        }
+        SunCard { NoiseCycleRow("NC/AMB Button", "NC/AMB Button Cycles Through", settings, vm) }
         Footer("Press the NC/AMB button on the left ear cup to switch. Tap and swipe controls are on the right ear cup.")
     } else Column {
         SunCard {
@@ -1880,12 +1872,7 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
             }
             if (left == TouchFunction.AMBIENT_SOUND_CONTROL || right == TouchFunction.AMBIENT_SOUND_CONTROL) {
                 RowDivider(inset = 16.dp)
-                var open by remember { mutableStateOf(false) }
-                NavRow(Icons.Rounded.NoiseAware, "Tap Cycles Through", settings.noiseCycle?.short ?: "—") { open = true }
-                if (open) {
-                    ChoiceSheet("Tap Cycles Through", NoiseCycle.entries.toList(), settings.noiseCycle,
-                        label = { it.label }, onDismiss = { open = false }, onPick = vm::setNoiseCycle)
-                }
+                NoiseCycleRow("Tap Cycles Through", "Tap Cycles Through", settings, vm)
             }
         }
         Footer("Tap an earbud to change what it does.")
@@ -2250,7 +2237,7 @@ private fun EarbudsGroup(settings: DeviceSettings) {
             onDismissRequest = { confirmReset = false },
             title = { Text("Reset your ${EarbudModel.active.noun}' settings?") },
             text = { Text("Equaliser, noise control, touch controls and other settings go back to their defaults. Your paired devices stay.") },
-            confirmButton = { TextButton(onClick = { confirmReset = false; vm.resetSettings { ok -> note = if (ok) "Your earbuds are back to their original settings." else "Couldn't reset your ${EarbudModel.active.noun}. Make sure both are connected and try again." } }) { Text("Reset") } },
+            confirmButton = { TextButton(onClick = { confirmReset = false; vm.resetSettings { ok -> note = if (ok) "Your ${EarbudModel.active.noun} are back to their original settings." else "Couldn't reset your ${EarbudModel.active.noun}. Make sure they're connected and try again." } }) { Text("Reset") } },
             dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } }
         )
     }

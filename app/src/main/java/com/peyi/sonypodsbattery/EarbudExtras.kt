@@ -148,7 +148,9 @@ object EarbudReset {
  */
 object SafeListening {
     /** Sony's Safe Listening type: 02 for headphones (one headband), 03 for earbuds (TWS). */
-    private fun slType(): Byte = if (EarbudModel.active.headphones) 0x02 else 0x03
+    /** Sony's Safe Listening type from what the earbuds list; headband (02) or TWS (03) by model if they didn't say. */
+    private fun SonyBatteryClient.SonySession.slType(): Byte =
+        (functions()?.safeListeningType ?: if (EarbudModel.active.headphones) 0x02 else 0x03).toByte()
     private const val PREFS = "safe_listening"
     private const val T2 = SonyProtocol.DATA_MDR_NO2
 
@@ -157,7 +159,7 @@ object SafeListening {
 
     internal fun setOn(context: android.content.Context, s: SonyBatteryClient.SonySession, on: Boolean): Boolean {
         // Logging on or off; the live meter stays off (Sony's app never runs both).
-        val ok = s.command(byteArrayOf(0x58, slType(), if (on) 0x00 else 0x01, 0x01), type = T2)
+        val ok = s.command(byteArrayOf(0x58, s.slType(), if (on) 0x00 else 0x01, 0x01), type = T2)
         if (ok) context.getSharedPreferences(PREFS, 0).edit().putBoolean("on", on).apply()
         return ok
     }
@@ -172,17 +174,14 @@ object SafeListening {
 
     /** Starts the earbuds' live measurement; logging pauses while it runs. */
     internal fun startMeter(s: SonyBatteryClient.SonySession): Boolean =
-        s.command(byteArrayOf(0x58, slType(), 0x01, 0x00), type = T2)
+        s.command(byteArrayOf(0x58, s.slType(), 0x01, 0x00), type = T2)
 
     /** Puts the earbuds back to Safe Listening logging on or off. */
     internal fun stopMeter(s: SonyBatteryClient.SonySession, loggingOn: Boolean): Boolean =
-        s.command(byteArrayOf(0x58, slType(), if (loggingOn) 0x00 else 0x01, 0x01), type = T2)
+        s.command(byteArrayOf(0x58, s.slType(), if (loggingOn) 0x00 else 0x01, 0x01), type = T2)
 
     internal fun readLevel(s: SonyBatteryClient.SonySession): Level? {
-        s.send(byteArrayOf(0x5a, slType()), T2)
-        val p = s.waitFor(1_500) { f ->
-            f.type == T2 && f.payload.size >= 4 && (f.payload[0].toInt() and 0xff) == 0x5b && f.payload[1] == slType()
-        }?.payload ?: return null
+        val p = s.request(byteArrayOf(0x5a, s.slType()), 1_500, T2)?.takeIf { it.size >= 4 } ?: return null
         val db = p[2].toInt() and 0xff
         return when {
             db == 0xff -> when (p[3].toInt()) { 1 -> Level.OnCall; 2 -> Level.NotWorn; else -> Level.NotPlaying }

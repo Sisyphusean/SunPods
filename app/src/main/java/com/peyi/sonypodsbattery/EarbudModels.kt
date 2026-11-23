@@ -28,7 +28,14 @@ enum class EarbudModel(
     /** What to call them in copy: "earbuds" or "headphones". */
     val noun: String get() = if (headphones) "headphones" else "earbuds"
     /** "Earbuds" or "Headphones", for titles. */
-    val titleNoun: String get() = noun.replaceFirstChar { it.uppercase() }
+    val titleNoun: String get() = if (headphones) "Headphones" else "Earbuds"
+    /** How to get them to connect: "Open the case near your phone" or "Turn them on near your phone". */
+    val wakeHint: String get() = if (headphones) "Turn them on near your phone" else "Open the case near your phone"
+
+    /** The batteries these report, in the order they're shown: left, right and case, or one for headphones. */
+    val batteries: List<BatteryPart> get() = if (headphones) HEADPHONE_BATTERIES else EARBUD_BATTERIES
+    /** The batteries you listen on (no case). */
+    val buds: List<BatteryPart> get() = if (headphones) HEADPHONE_BATTERIES else EARBUD_BUDS
 
     fun matches(name: String?): Boolean = name != null && pattern.containsMatchIn(name)
 
@@ -56,7 +63,7 @@ enum class EarbudModel(
         }
 
         fun current(context: Context): EarbudModel {
-            fromName(SettingsStore.load(context).modelName)?.let { active = it }
+            fromName(SettingsStore.modelName(context))?.let { active = it }
             return active
         }
 
@@ -64,7 +71,21 @@ enum class EarbudModel(
         val scanPattern: java.util.regex.Pattern = java.util.regex.Pattern.compile(
             ".*(" + entries.joinToString("|") { it.pattern.pattern } + ").*", java.util.regex.Pattern.CASE_INSENSITIVE)
 
-        /** "WF-1000XM5 or WF-C710N", for copy written before a pair is known. */
-        val anyName: String get() = entries.joinToString(" or ") { it.displayName }
     }
 }
+
+/**
+ * One battery a model reports. Headphones have one, MAIN, which travels in the left slot of
+ * BatteryState and BatterySample (the Sony reply has one level where earbuds have two).
+ */
+enum class BatteryPart(val label: String, val short: String, val missing: String) {
+    LEFT("Left", "L", "In Case"), RIGHT("Right", "R", "In Case"), CASE("Case", "Case", "Unknown"), MAIN("Battery", "Battery", "Unknown");
+
+    fun level(s: BatteryState): Int? = when (this) { LEFT, MAIN -> s.left; RIGHT -> s.right; CASE -> s.case }
+    fun charging(s: BatteryState): Boolean = when (this) { LEFT, MAIN -> s.leftCharging; RIGHT -> s.rightCharging; CASE -> s.caseCharging }
+    fun level(s: BatterySample): Int? = when (this) { LEFT, MAIN -> s.left; RIGHT -> s.right; CASE -> s.case }
+}
+
+private val EARBUD_BATTERIES = listOf(BatteryPart.LEFT, BatteryPart.RIGHT, BatteryPart.CASE)
+private val EARBUD_BUDS = listOf(BatteryPart.LEFT, BatteryPart.RIGHT)
+private val HEADPHONE_BATTERIES = listOf(BatteryPart.MAIN)

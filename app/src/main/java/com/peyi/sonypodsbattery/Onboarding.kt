@@ -528,7 +528,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
                             // Same press, both sides: the LE Audio side too, if Shizuku is set up.
                             leScope.launch { LePairing.alsoPairLe(context.applicationContext) { DiagnosticsStore.add(context, "Setup: $it") } }
                         }
-                        BluetoothDevice.BOND_NONE -> state = Buds.Failed("Pairing didn't finish. Put the earbuds back in pairing mode and try again.")
+                        BluetoothDevice.BOND_NONE -> state = Buds.Failed("Pairing didn't finish. Put them back in pairing mode and try again.")
                     }
                 }
             }
@@ -540,8 +540,8 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
     // Some phones never answer a search or a pairing request; don't leave a spinner forever.
     LaunchedEffect(state) {
         when (state) {
-            Buds.Searching -> { delay(60_000); if (state is Buds.Searching) state = Buds.Failed("Nothing found. Make sure the light is flashing blue and your ${EarbudModel.active.noun} or headphones are next to your phone.") }
-            Buds.Pairing -> { delay(45_000); if (state is Buds.Pairing) state = Buds.Failed("Pairing took too long. Put the earbuds back in pairing mode and try again.") }
+            Buds.Searching -> { delay(60_000); if (state is Buds.Searching) state = Buds.Failed("Nothing found. Make sure the light is flashing blue and your earbuds or headphones are next to your phone.") }
+            Buds.Pairing -> { delay(45_000); if (state is Buds.Pairing) state = Buds.Failed("Pairing took too long. Put them back in pairing mode and try again.") }
             else -> Unit
         }
     }
@@ -561,7 +561,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
                 chooser.launch(IntentSenderRequest.Builder(chooserLauncher).build())
             }
             override fun onFailure(error: CharSequence?) {
-                state = Buds.Failed("Nothing found. Make sure the light is flashing blue and your ${EarbudModel.active.noun} or headphones are next to your phone.")
+                state = Buds.Failed("Nothing found. Make sure the light is flashing blue and your earbuds or headphones are next to your phone.")
             }
         }
         runCatching {
@@ -572,7 +572,8 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
 
     val progress = progressOf(Step.EARBUDS)
     val battery by vm.battery.collectAsState()
-    val model = remember(state, battery.updatedAt) { EarbudModel.current(context) }
+    val saved by vm.settings.collectAsState()
+    val model = remember(saved.modelName) { EarbudModel.fromName(saved.modelName) ?: EarbudModel.active }
     androidx.compose.animation.AnimatedContent(
         targetState = state,
         contentKey = { it::class },
@@ -667,7 +668,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
                 body = if (read) "Here's your battery, straight from your ${model.noun}." else "Checking battery levels.",
                 primary = "Continue", onPrimary = onNext
             ) {
-                if (read) Levels(battery, model.headphones) else CircularProgressIndicator()
+                if (read) Levels(battery, model) else CircularProgressIndicator()
             }
         }
         is Buds.Failed -> Page(
@@ -699,12 +700,14 @@ private fun pickedDevice(context: Context, data: Intent?): BluetoothDevice? {
 
 /** Live levels as proof it works. */
 @Composable
-private fun Levels(battery: BatteryState, headphones: Boolean = false) {
+private fun Levels(battery: BatteryState, model: EarbudModel) {
     SunCard {
     Row(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-        (if (headphones) listOf("Battery" to battery.left) else listOf("Left" to battery.left, "Right" to battery.right, "Case" to battery.case)).forEach { (label, level) ->
+        model.batteries.forEach { part ->
+            val label = part.label
+            val level = part.level(battery)
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(level?.takeIf { it in 1..100 }?.let { "$it%" } ?: (if (label == "Case") "Unknown" else "In Case"), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(level?.takeIf { it in 1..100 }?.let { "$it%" } ?: part.missing, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -924,11 +927,11 @@ private fun DoneStep(vm: SunpodsViewModel, onDone: () -> Unit) {
     Page(
         progress = 1f, icon = Icons.Rounded.CheckCircle,
         title = "You're All Set",
-        body = if (connected) "Your earbuds are ready." else "SunPods connects as soon as your ${EarbudModel.active.noun} do.",
+        body = if (connected) "Your ${EarbudModel.active.noun} are ready." else "SunPods connects as soon as your ${EarbudModel.active.noun} do.",
         primary = "Start Using SunPods",
         onPrimary = { OnboardingStore.setDone(context, true); onDone() }
     ) {
-        if (connected) { Levels(battery); Spacer(Modifier.height(24.dp)) }
+        if (connected) { Levels(battery, EarbudModel.active); Spacer(Modifier.height(24.dp)) }
         SunCard {
             SetupRow(
                 Icons.Rounded.Widgets, "Add a Widget",

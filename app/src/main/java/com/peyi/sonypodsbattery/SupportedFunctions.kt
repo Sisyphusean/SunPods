@@ -12,6 +12,8 @@ internal data class SupportedFunctions(val table1: Set<Int>, val table2: Set<Int
     /** Table 2 features count as there when the earbuds didn't answer for table 2 (an older pair). */
     fun has2(vararg codes: Int) = table2 == null || codes.any { it in table2 }
     fun has2Any(codes: IntRange) = table2 == null || codes.any { it in table2 }
+    /** Safe Listening's inquired type: the listed T2 function minus 0x50 (0x52 headband = 02, 0x53 TWS = 03). */
+    val safeListeningType: Int? get() = table2?.firstOrNull { it in 0x51..0x53 }?.minus(0x50)
     /** The NC/ASM inquired type the listed noise control function is driven on. */
     val ncAsmType: Int? get() = table1.firstNotNullOfOrNull(Fn::ncAsmType)
 

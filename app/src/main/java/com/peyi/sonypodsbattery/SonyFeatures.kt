@@ -181,12 +181,12 @@ enum class NoiseCycle(val code: Int, val label: String, val short: String) {
  */
 data class GeneralSetting(val slot: Int, val key: String, val on: Boolean?) {
     val title: String get() = GS_TITLES[key]?.first ?: pretty(key)
-    val subtitle: String get() = GS_TITLES[key]?.second ?: ""
+    val subtitle: String get() = GS_TITLES[key]?.second?.replace("{noun}", EarbudModel.active.noun) ?: ""
 
     companion object {
         private val GS_TITLES = mapOf(
             "MULTIPOINT_SETTING" to ("Connect to Two Devices" to "Stay connected to your phone and another device at the same time"),
-            "SIDETONE_SETTING" to ("Hear Your Voice on Calls" to "Hear yourself in your ${EarbudModel.active.noun} while you talk"),
+            "SIDETONE_SETTING" to ("Hear Your Voice on Calls" to "Hear yourself in your {noun} while you talk"),
             "TOUCH_PANEL_SETTING" to ("Touch Controls" to "Tap and swipe on the right ear cup to control playback and volume"),
             "TWS_ONE_SIDE_USE_NCASM_SETTING" to ("Noise Control with One Earbud" to "Keeps noise control on when you wear one earbud"),
             "FACETAP_SETTING" to ("Face Tap" to "Tap near your ear instead of on the earbud")
@@ -681,14 +681,12 @@ internal object SonyFeatures {
     }
 
     fun setNoiseCycle(s: SonyBatteryClient.SonySession, r: DeviceSettings, cycle: NoiseCycle): DeviceSettings {
-        if (r.has(Feature.NC_AMB_BUTTON)) {
-            val ok = s.command(bytes(NCASM_GET_PARAM + 2, NCASM_BUTTON, cycle.code))
-            return readNoiseCycle(s, if (ok) r.copy(noiseCycle = cycle) else r)
+        val ok = if (r.has(Feature.NC_AMB_BUTTON)) s.command(bytes(NCASM_GET_PARAM + 2, NCASM_BUTTON, cycle.code)) else {
+            // Send back the preset byte the earbuds report here (the WF-1000XM5 reports 00), as Sound Connect does.
+            val preset = s.request(bytes(SYSTEM_GET_EXT_PARAM, SYSTEM_ASSIGNABLE))?.takeIf { it.size == 7 }?.let { u(it[3]) }
+                ?: TouchFunction.AMBIENT_SOUND_CONTROL.code
+            s.command(bytes(SYSTEM_GET_EXT_PARAM + 2, SYSTEM_ASSIGNABLE, 0x01, preset, 0x01, 0x00, cycle.code))
         }
-        // Send back the preset byte the earbuds report here (the WF-1000XM5 reports 00), as Sound Connect does.
-        val preset = s.request(bytes(SYSTEM_GET_EXT_PARAM, SYSTEM_ASSIGNABLE))?.takeIf { it.size == 7 }?.let { u(it[3]) }
-            ?: TouchFunction.AMBIENT_SOUND_CONTROL.code
-        val ok = s.command(bytes(SYSTEM_GET_EXT_PARAM + 2, SYSTEM_ASSIGNABLE, 0x01, preset, 0x01, 0x00, cycle.code))
         return readNoiseCycle(s, if (ok) r.copy(noiseCycle = cycle) else r)
     }
 
@@ -795,6 +793,10 @@ internal object SonyFeatures {
 object SettingsStore {
     private const val PREFS = "device_settings"
     private const val KEY = "json"
+
+    /** Just the saved model name, without building the whole settings. */
+    fun modelName(context: Context): String? = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)
+        ?.let { runCatching { org.json.JSONObject(it).optString("model").ifEmpty { null } }.getOrNull() }
 
     fun load(context: Context): DeviceSettings {
         val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)
