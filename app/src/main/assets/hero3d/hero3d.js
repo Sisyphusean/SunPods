@@ -795,8 +795,6 @@ const modPoseState = {
 
 function applyPose() {
   const a = rad(state.angle);
-  let effModel = state.model;
-  let effLid = state.lid;
 
   if (canvas.style.opacity !== '1' && !deviceFading && !modelFading) {
     canvas.style.transitionDuration = '';
@@ -812,19 +810,19 @@ function applyPose() {
       }
       kase.spin.rotation.y = a;
       if (kase.lid) {
-        kase.lid.rotation.x = LID_OPEN * effLid;
+        kase.lid.rotation.x = LID_OPEN * state.lid;
         for (const an of kase.anchors) {
-          an.node.position.y = an.y + BUD_SEAT * (1 - effLid);
-          an.node.visible = effLid > 0.01;
+          an.node.position.y = an.y + BUD_SEAT * (1 - state.lid);
+          an.node.visible = state.lid > 0.01;
         }
       }
-      buds.root.visible = effModel === 'buds';
-      kase.root.visible = effModel === 'case';
+      buds.root.visible = state.model === 'buds';
+      kase.root.visible = state.model === 'case';
     } else {
       const p = clamp01(state.caseProgress);
       if (p <= 0.0005) {
-        state.model = effModel = 'buds';
-        state.lid = effLid = 0;
+        state.model = 'buds';
+        state.lid = 0;
         kase.root.visible = false;
         kase.root.matrix.copy(CASE_REST_MAT);
         if (buds.pivotL && buds.restL) {
@@ -834,8 +832,8 @@ function applyPose() {
         buds.root.visible = true;
       } else if (p >= 0.72 || !kase.loaded || !buds.loaded) {
         const lidT = smooth(clamp01((1 - p) / 0.28));
-        state.model = effModel = 'case';
-        state.lid = effLid = lidT;
+        state.model = 'case';
+        state.lid = lidT;
         kase.root.matrix.copy(CASE_REST_MAT);
         kase.spin.rotation.y = a;
         if (kase.lid) {
@@ -851,8 +849,8 @@ function applyPose() {
         // Continuous 3D unpack: open case -> earbuds lift on an arc to hero pose -> case glides below viewport.
         const liftT = smooth(clamp01((0.72 - p) / 0.58));
         const dropT = smooth(clamp01((0.58 - p) / 0.44));
-        state.model = effModel = 'case';
-        state.lid = effLid = 1;
+        state.model = 'case';
+        state.lid = 1;
 
         // First compute exact seated world poses at the resting (pre-drop) case so unpack starts flush from the wells.
         kase.root.matrix.copy(CASE_REST_MAT);
@@ -899,8 +897,8 @@ function applyPose() {
     kase.root.visible = false;
     if (!legacyLidMode) {
       const p = clamp01(state.caseProgress);
-      state.model = effModel = p > 0.0005 ? 'case' : 'buds';
-      state.lid = effLid = 0;
+      state.model = p > 0.0005 ? 'case' : 'buds';
+      state.lid = 0;
     }
   }
 
@@ -913,8 +911,8 @@ function applyPose() {
     modPoseState.angle = state.angle;
     modPoseState.ready = state.ready;
     modPoseState.device = state.device;
-    modPoseState.model = useNativeCase ? state.model : effModel;
-    modPoseState.lid = useNativeCase ? state.lid : effLid;
+    modPoseState.model = state.model;
+    modPoseState.lid = state.lid;
     modPoseState.caseProgress = useNativeCase ? state.caseProgress : undefined;
     m.applyPose(modPoseState, state.device === id);
   }
@@ -1088,14 +1086,17 @@ function setModel(m) {
     canvas.style.transitionDuration = '';
     canvas.style.opacity = '0';
     setTimeout(() => {
-      modelFading = false;
       if (token !== modelToken) return;
       state.model = want; state.angle = 0; stopMotion();
       if (want === 'buds') { legacyLidMode = false; state.caseProgress = 0; state.lid = 0; }
       else if (state.lid > 0) { legacyLidMode = true; }
       else { legacyLidMode = false; state.caseProgress = 1; }
       requestRender();
-      requestAnimationFrame(() => { canvas.style.opacity = '1'; });
+      requestAnimationFrame(() => {
+        if (token !== modelToken) return;
+        modelFading = false;
+        canvas.style.opacity = '1';
+      });
     }, 170);
   });
 }
@@ -1273,13 +1274,15 @@ function setDevice(d, fadeMs) {
     canvas.style.transitionDuration = fade ? fade + 'ms' : '';
     canvas.style.opacity = '0';
     setTimeout(() => {
-      deviceFading = false;
       if (token !== deviceToken) return;
       state.device = want; state.angle = 0; stopMotion();
       syncDeviceLighting(want);
-      if (centered) { applyPose(); recenter(); } else { applyPose(); }
+      applyPose();
+      if (centered) recenter();
       requestRender();
       requestAnimationFrame(() => {
+        if (token !== deviceToken) return;
+        deviceFading = false;
         canvas.style.opacity = '1';
         flushPendingCaseAction(want);
       });
@@ -1411,7 +1414,6 @@ const api = {
   setDevice: (d, fadeMs) => setDevice(String(d), Number(fadeMs) || 0),
   preload: (d) => preload(String(d)),
   setSize: (w, h) => { w = Number(w); h = Number(h); if (w >= 1 && h >= 1 && (!forcedSize || forcedSize.w !== w || forcedSize.h !== h)) { forcedSize = { w, h }; resize(); } },
-  setCentered: (on) => { on = !!on; if (on !== centered) { centered = on; applyPose(); recenter(); } },
   wiggle, spin,
   get state() { return { ...state }; },
 };

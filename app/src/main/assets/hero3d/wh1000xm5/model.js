@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { clampUnitRange } from "./dimensions.js";
 import { disposeObjectGeometries } from "./geometryUtils.js";
-import { COLORWAY_PRESETS, createHeadphoneMaterials } from "./materials.js";
+import { createHeadphoneMaterials } from "./materials.js";
 import { createHeadbandAssembly } from "./headband.js";
 import { createSideAssembly } from "./hingeAssembly.js";
 

@@ -48,7 +48,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -501,8 +500,8 @@ private fun Feature(icon: ImageVector, title: String, body: String) {
 
 /**
  * Everyone picks their own device; nothing is guessed or suggested here. An Earbuds | Headphones switch
- * chooses the family, then one device at a time in the live 3D hero: swipe to change it, and the hero
- * fades across to the one you land on. "See All" lists every model by series, with search.
+ * chooses the family, then one device at a time in the pager: swipe to change it.
+ * "See All" lists every model by series, with search.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -519,7 +518,6 @@ private fun DeviceStep(
     val models = remember(headphones) { EarbudModel.entries.filter { it.headphones == headphones } }
     LaunchedEffect(selectedModel) { onModelChange(selectedModel) }
     var showAll by rememberSaveable { mutableStateOf(false) }
-    var jumpTo by remember { mutableStateOf<EarbudModel?>(null) }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
         Spacer(Modifier.height(32.dp))
@@ -552,16 +550,6 @@ private fun DeviceStep(
                 fun goTo(i: Int) {
                     val clamped = i.coerceIn(0, models.lastIndex)
                     scope.launch { if (reduceMotion) pager.scrollToPage(clamped) else pager.animateScrollToPage(clamped) }
-                }
-                // A pick from the full list: switch family if needed, then land on that model.
-                LaunchedEffect(jumpTo, models) {
-                    val target = jumpTo ?: return@LaunchedEffect
-                    val idx = models.indexOf(target)
-                    if (idx >= 0) {
-                        pager.scrollToPage(idx)
-                        selectedModel = target
-                        jumpTo = null
-                    }
                 }
                 androidx.compose.foundation.pager.HorizontalPager(
                     state = pager, modifier = Modifier.fillMaxSize(), key = { models.getOrNull(it)?.id ?: it }
@@ -818,7 +806,6 @@ private fun EarbudsStep(
                 delay(1_500)
                 continue
             }
-            val s = state
             val (btOn, bonded, live) = withContext(Dispatchers.IO) {
                 val bt = bluetoothOn(context)
                 val b = bondedForModel(context, model)
@@ -826,6 +813,7 @@ private fun EarbudsStep(
                 Triple(bt, b, l)
             }
             if (EarbudModel.active != model) EarbudModel.choose(context, model)
+            val s = state
             // Paired some other way while searching, such as through Google's Fast Pair popup.
             if ((s is Buds.Searching || s is Buds.Pairing) && live) {
                 pairNew = false
@@ -910,7 +898,10 @@ private fun EarbudsStep(
         if (demo || forceDemo) {
             note = null
             state = Buds.Pairing
-            leScope.launch { delay(1_500); state = Buds.Connected }
+            leScope.launch {
+                delay(1_500)
+                if (BuildConfig.TOOLS && SimMode.active(context) && state is Buds.Pairing) state = Buds.Connected
+            }
             return
         }
         note = null
@@ -1259,7 +1250,7 @@ private fun DoneStep(vm: SunpodsViewModel, model: EarbudModel, onDone: () -> Uni
     val battery by vm.battery.collectAsState()
     val settings by vm.settings.collectAsState()
     val matchesModel = settings.modelName == null || model.matches(settings.modelName)
-    val connected = matchesModel && (battery.left != null || battery.right != null)
+    val connected = matchesModel && (battery.left != null || battery.right != null) && audioLinkUp(context)
     var pinned by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf(false) }
     Page(
@@ -1268,7 +1259,7 @@ private fun DoneStep(vm: SunpodsViewModel, model: EarbudModel, onDone: () -> Uni
         body = if (connected) "Your ${model.noun} are ready." else "SunPods connects as soon as your ${model.noun} do.",
         primary = "Start Using SunPods",
         onPrimary = {
-            OnboardingStore.setHeroIntroPending(context, true)
+            OnboardingStore.setHeroIntroPending(context, connected)
             OnboardingStore.setDone(context, true)
             onDone()
         }

@@ -94,6 +94,7 @@ class MainActivity : ComponentActivity() {
                         OnboardingStore.setHeroIntroPending(this@MainActivity, false)
                     },
                     onRunSetupAgain = {
+                        OnboardingStore.setHeroIntroPending(this@MainActivity, false)
                         OnboardingStore.setDone(this@MainActivity, false)
                         if (BuildConfig.TOOLS) SimMode.stopDemo(this@MainActivity)
                         vm.setLive(false)

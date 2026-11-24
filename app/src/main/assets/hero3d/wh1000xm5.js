@@ -1,7 +1,6 @@
 import { clampUnitRange } from './wh1000xm5/dimensions.js';
-import { CASE_COLORWAY_PRESETS } from './wh1000xm5/carryCase.js';
+import { CASE_COLORWAY_PRESETS, createCarryCaseModel } from './wh1000xm5/carryCase.js';
 import { COLORWAY_PRESETS, resolveColorwayKey } from './wh1000xm5/materials.js';
-import { createCarryCaseModel } from './wh1000xm5/carryCase.js';
 import { createWh1000Xm5Model } from './wh1000xm5/model.js';
 
 function buildFinishes(THREE) {
