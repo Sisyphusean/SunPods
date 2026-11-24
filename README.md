@@ -20,8 +20,8 @@ Not made by or affiliated with Sony.
 Get the APK from the [latest release](https://github.com/Sisyphusean/SunPods/releases/latest).
 Android 10 or later.
 
-Pair the earbuds in Android's Bluetooth settings first, then open SunPods and follow the setup.
-Close Sony Sound Connect while you use SunPods: the earbuds only talk to one control app at a time.
+Open SunPods, pick your device and follow the guided setup (it walks you through pairing or picks up an existing Bluetooth pairing). SunPods connects to one device at a time; to switch later, use **Device > Help and About > Run Setup Again**.
+Close Sony Sound Connect while you use SunPods: Sony earbuds and headphones only talk to one control app at a time.
 
 SunPods tells you when a new version is out. To have updates installed for you, use
 [Obtainium](https://obtainium.imranr.dev/): in Obtainium tap **Add App**, paste
@@ -32,18 +32,20 @@ button does the same:
 
 ## What it does
 
-- **Battery** for each earbud and the case, in the app, a notification, home screen widgets and a
-  Quick Settings tile, with an estimate of the listening time left
+- **Live 3D view**: your earbuds or headphones and carry case in their real colour, drag to spin
+- **Battery** for each earbud and the case, or for headphones, in the app, a notification, home
+  screen widgets and a Quick Settings tile, with an estimate of the listening time left
 - **Noise control**: noise cancelling, ambient sound with level and focus on voice, or off
 - **Equaliser**: Sony's presets, your own five-band curve and Clear Bass
-- **LE Audio**: switch between Classic and LE Audio from the app, for clearer calls
-- **Touch controls**: pick what each earbud does from the options your earbuds offer, with the
-  gestures spelled out
-- **The earbuds' own settings**: Speak-to-Chat, pause when you take one out, DSEE Extreme,
-  connection quality, voice guidance, automatic power off
-- **Devices**: see, connect and switch between the devices your earbuds remember
-- **Call mic test**, so you can hear what people on calls hear
-- **Automations** for calls and walks, **battery health** over time, and where your earbuds were
+- **LE Audio**: switch between Classic and LE Audio from the app on supported earbuds, for clearer calls
+- **Touch controls and buttons**: pick what each earbud or headphone button does from the options your
+  device offers, with the gestures spelled out
+- **Your device's own settings**: Speak-to-Chat, pause when you take them off, DSEE Extreme,
+  connection quality, voice guidance, automatic power off, plus **Now Playing** controls
+- **Devices**: see, connect and switch between the devices yours remember
+- **Safe Listening and Call mic test**: live listening level in dB with volume protection, plus a
+  mic check to hear how calls sound
+- **Automations** for calls and walks, **battery health** over time, and where your device was
   **last seen**
 
 Everything stays on your phone. The only thing SunPods does online is check GitHub once a day for a
@@ -61,12 +63,12 @@ new version, and you can turn that off.
 | LinkBuds, LinkBuds S, Fit, Open | ⏳ Not yet | |
 | Earbuds from other brands | ❌ Not supported | Sony only |
 
-SunPods grows one model at a time. Sony's earbuds share most of their commands, but each model has
-its own quirks, so a model is only marked as working once someone has tested it. SunPods asks the
-earbuds what they support, the way Sony's app does, and shows only that. Send Diagnostics (Device >
-Help and About) includes the earbuds' replies, with nothing personal in them, so a tester's report
-is enough to fix a model. Own one of the models
-above and want to help? [Tell us](https://github.com/Sisyphusean/SunPods/issues/new?template=earbuds_request.yml).
+SunPods grows one model at a time. Sony's earbuds and headphones share most of their commands, but
+each model has its own quirks, so a model is only marked as working once someone has tested it.
+SunPods asks your device what it supports, the way Sony's app does, and shows only that. Send
+Diagnostics (Device > Help and About) includes the device's replies, with nothing personal in them,
+so a tester's report is enough to fix a model. Own one of the models above and want to help?
+[Tell us](https://github.com/Sisyphusean/SunPods/issues/new?template=earbuds_request.yml).
 
 ## Switching between Classic and LE Audio
 
@@ -90,8 +92,7 @@ Shizuku, SunPods doesn't switch and tells you why.
 
 The protocol work behind SunPods was checked against [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge)
 (AGPL-3.0-or-later) and SonyBridge (MIT); no code from either is included. LE Audio switching relies
-on [Shizuku](https://github.com/RikkaApps/Shizuku). The earbud and case renders were modelled for this
-project.
+on [Shizuku](https://github.com/RikkaApps/Shizuku). The earbud, headphone and case 3D models were built for this project.
 
 GPL-3.0 licensed; see [LICENSE](LICENSE). Sony, WF-1000XM5 and Sony's other product names are
 trademarks of Sony Group Corporation, used here only to say what this software works with.
