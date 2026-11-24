@@ -220,6 +220,8 @@ object SonyControlSessionManager {
         close(context, "A2DP disconnect")
     }
 
+    fun closeForReset(context: Context, reason: String) = close(context, reason)
+
     fun closeForCommandRetry(context: Context) {
         close(context, "stale session command retry")
     }
@@ -427,6 +429,12 @@ class SonyBatteryClient(private val context: Context) {
         @Volatile private var lastPick: String? = null
         @Volatile private var lastPickAt = 0L
 
+        fun clearPickCache() {
+            notedAddress = null
+            lastPick = null
+            lastPickAt = 0L
+        }
+
         fun isTargetModel(name: String): Boolean = EarbudModel.isSupported(name)
 
         /** A paired entry of supported earbuds; false when Android won't give its name. */
@@ -469,34 +477,66 @@ class SonyBatteryClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun findEarbuds(): BluetoothDevice? {
         SimMode.device(context)?.let { device -> SimMode.model(context)?.let { EarbudModel.noteModelName(it.displayName) }; return device }
-        return pickEarbuds()?.also { device ->
-            if (device.address != notedAddress) { notedAddress = device.address; runCatching { EarbudModel.noteModelName(device.name) } }
+        val pick = pickEarbudsWithLive() ?: return null
+        val chosen = EarbudModel.chosen(context)
+        if (pick.device.address != notedAddress && (pick.isLive || chosen == null || pick.model == chosen)) {
+            notedAddress = pick.device.address
+            EarbudModel.noteModelName(pick.name)
         }
+        return pick.device
     }
 
+    private data class PickedEarbuds(
+        val device: BluetoothDevice,
+        val name: String,
+        val model: EarbudModel,
+        val isLive: Boolean,
+    )
+
     @SuppressLint("MissingPermission")
-    private fun pickEarbuds(): BluetoothDevice? {
+    private fun pickEarbudsWithLive(): PickedEarbuds? {
         val adapter = BluetoothAdapter.getDefaultAdapter() ?: return null
-        val bonded = adapter.bondedDevices.filter { device -> EarbudModel.isSupported(device.name) }
+        val bonded = adapter.bondedDevices.mapNotNull { device ->
+            val name = runCatching { device.name }.getOrNull() ?: return@mapNotNull null
+            val model = EarbudModel.fromName(name) ?: return@mapNotNull null
+            Triple(device, name, model)
+        }
         if (bonded.isEmpty()) return null
-        // The entry on A2DP right now is the one Android is using, so it wins over anything
-        // remembered: Classic and LE Audio bond separately, and a remembered entry can go stale
-        // (a WF-1000XM5 on Classic was skipped as disconnected on every refresh because of that).
-        val live = A2dpConnectionHelper.connectedNow().map { it.address }.toSet()
-        val pick = bonded.firstOrNull { it.address in live }
-            ?: lastPick?.takeIf { System.currentTimeMillis() - lastPickAt < 30_000 }?.let { addr -> bonded.firstOrNull { it.address == addr } }
-            ?: EarbudAddresses.classic(context)?.let { saved -> bonded.firstOrNull { it.address.equals(saved, true) } }
-            // Not playing and nothing remembered: the Classic entry (public address), since an
-            // LE-only entry never shows on A2DP and has no Classic control channel.
-            ?: bonded.firstOrNull { it.type != BluetoothDevice.DEVICE_TYPE_LE && !EarbudAddresses.isRandom(it.address) }
-            ?: bonded.first()
+        // The entry actively connected on A2DP or LE Audio wins over anything remembered, then
+        // the model picked during setup wins over unrelated bonded models.
+        val a2dpLive = A2dpConnectionHelper.connectedNow().mapNotNull { runCatching { it.address }.getOrNull() }.toSet()
+        val leDevices = if (LeAudio.anyConnected(context) &&
+            android.os.Looper.myLooper() != android.os.Looper.getMainLooper()
+        ) {
+            LeAudio.connectedEarbuds(context)
+        } else {
+            emptyList()
+        }
+        val leLiveAddrs = leDevices.mapNotNull { runCatching { it.address }.getOrNull() }.toSet()
+        val leLiveModels = leDevices.mapNotNull { EarbudModel.fromName(runCatching { it.name }.getOrNull()) }.toSet()
+        val liveAddrs = a2dpLive + leLiveAddrs
+        val anyAddrLive = bonded.any { (device, _, _) -> device.address in liveAddrs }
+        val candidates = bonded.map { (device, _, model) ->
+            val isLive = device.address in liveAddrs || (!anyAddrLive && model in leLiveModels)
+            val isClassic = device.type != BluetoothDevice.DEVICE_TYPE_LE && !EarbudAddresses.isRandom(device.address)
+            BondedDeviceInfo(device.address, model, isLive, isClassic)
+        }
+        val freshLastPick = lastPick?.takeIf { System.currentTimeMillis() - lastPickAt < 30_000 }
+        val idx = selectBondedDeviceIndex(
+            candidates = candidates,
+            chosen = EarbudModel.chosen(context),
+            lastPickAddress = freshLastPick,
+            savedClassicAddress = EarbudAddresses.classic(context),
+        )
+        val (pick, pickName, pickModel) = bonded[idx]
+        val pickInfo = candidates[idx]
         if (bonded.size > 1 && lastPick != pick.address) DiagnosticsStore.add(
             context,
-            "Earbuds: ${bonded.size} paired entries, using ${if (pick.address in live) "the one playing" else if (EarbudAddresses.isRandom(pick.address)) "an LE entry" else "the Classic entry"} (…${pick.address.takeLast(5)})"
+            "Earbuds: ${bonded.size} paired entries, using ${if (pickInfo.isLive) "the one playing" else if (EarbudAddresses.isRandom(pick.address)) "an LE entry" else "the Classic entry"} (…${pick.address.takeLast(5)})"
         )
         lastPick = pick.address
         lastPickAt = System.currentTimeMillis()
-        return pick
+        return PickedEarbuds(pick, pickName, pickModel, pickInfo.isLive)
     }
 
     @SuppressLint("MissingPermission")
@@ -742,4 +782,51 @@ class SonyBatteryClient(private val context: Context) {
             return waitFor(timeoutMs) { it.type == SonyProtocol.ACK } != null
         }
     }
+}
+
+internal fun resetDeviceState(context: Context, reason: String, closeSession: Boolean = true) {
+    SettingsStore.clear(context)
+    BatteryStore.clearAll(context)
+    SonyBatteryClient.clearPickCache()
+    if (closeSession) SonyControlSessionManager.closeForReset(context, reason)
+}
+
+internal data class BondedDeviceInfo(
+    val address: String,
+    val model: EarbudModel?,
+    val isLive: Boolean,
+    val isClassic: Boolean,
+)
+
+/**
+ * Picks among paired Sony entries: any entry actively connected on A2DP/LE wins (preferring
+ * [chosen] when multiple models are live); when none are connected, [chosen] is preferred over
+ * other models before falling back to [lastPickAddress], [savedClassicAddress], or Classic entries.
+ */
+internal fun selectBondedDeviceIndex(
+    candidates: List<BondedDeviceInfo>,
+    chosen: EarbudModel?,
+    lastPickAddress: String?,
+    savedClassicAddress: String?,
+): Int {
+    if (candidates.isEmpty()) return -1
+    val indexed = candidates.withIndex().toList()
+    val live = indexed.filter { it.value.isLive }
+    val pool = when {
+        live.isNotEmpty() -> {
+            val liveChosen = chosen?.let { c -> live.filter { it.value.model == c } }.orEmpty()
+            liveChosen.ifEmpty { live }
+        }
+        chosen != null -> {
+            val chosenBonded = indexed.filter { it.value.model == chosen }
+            chosenBonded.ifEmpty { indexed }
+        }
+        else -> indexed
+    }
+    val chosenMatch =
+        lastPickAddress?.let { addr -> pool.firstOrNull { it.value.address == addr } }
+            ?: savedClassicAddress?.let { addr -> pool.firstOrNull { it.value.address.equals(addr, true) } }
+            ?: pool.firstOrNull { it.value.isClassic }
+            ?: pool.first()
+    return chosenMatch.index
 }

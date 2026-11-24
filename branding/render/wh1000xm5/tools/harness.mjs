@@ -73,3 +73,10 @@ export function savePng(file, dataUrl) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, Buffer.from(dataUrl.split(',')[1], 'base64'));
 }
+
+// the review angles' metadata (_fit/refs/meta.json); XM_HP='{"tq_L":{"flare":5}}' merges trial cup poses (hp) per angle
+export function loadMeta() {
+  const meta = JSON.parse(fs.readFileSync(path.join(XMDIR, '_fit', 'refs', 'meta.json'), 'utf8'));
+  if (process.env.XM_HP) for (const [k, v] of Object.entries(JSON.parse(process.env.XM_HP))) meta[k].hp = { ...(meta[k].hp || {}), ...v };
+  return meta;
+}

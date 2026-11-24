@@ -55,7 +55,10 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         if (key != "a2dp_state" && key != "state") return@OnSharedPreferenceChangeListener
         _link.value++
         _battery.value = BatteryStore.load(app)
-        if (key == "a2dp_state" && EarbudConnectionStateStore.a2dpState(app) == A2dpConnectionState.CONNECTED) {
+        if (key == "a2dp_state" &&
+            OnboardingStore.done(app) &&
+            EarbudConnectionStateStore.a2dpState(app) == A2dpConnectionState.CONNECTED
+        ) {
             viewModelScope.launch {
                 delay(1_500)
                 refreshAll()
@@ -104,6 +107,7 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
      * old, or their settings were never read (then the app doesn't know which model it has yet).
      */
     fun refreshIfStale() {
+        if (!OnboardingStore.done(app)) return
         val b = _battery.value
         val age = System.currentTimeMillis() - maxOf(b.updatedAt, b.lastCheckedAt)
         if ((age > 60_000 || _settings.value.modelName == null) && audioLinkUp(app)) refreshAll()

@@ -373,11 +373,15 @@ fun SunpodsApp(
     onShareDiagnostics: () -> Unit,
     onOpenBluetoothSettings: () -> Unit,
     dynamicColor: Boolean = false,
-    onDynamicColorChange: (Boolean) -> Unit = {}
+    onDynamicColorChange: (Boolean) -> Unit = {},
+    animateEntrance: Boolean = false,
+    onEntrancePlayed: () -> Unit = {},
+    onRunSetupAgain: () -> Unit = {},
 ) {
     val liveBattery by vm.battery.collectAsState()
     val liveSettings by vm.settings.collectAsState()
     val demoContext = LocalContext.current
+    remember { EarbudModel.current(demoContext) }
     val demo = remember { DemoMode.on(demoContext) }
     val battery = if (demo) DemoMode.battery else liveBattery
     // Demo screenshots in any colour: the "demo_color" flag (Sony's code, e.g. 6 for pink).
@@ -577,7 +581,7 @@ fun SunpodsApp(
                         LargeTopAppBar(
                             title = {
                                 Text(
-                                    shownPage?.title ?: if (shownTab == Tab.HOME) "SunPods" else shownTab.label,
+                                    shownPage?.displayTitle() ?: if (shownTab == Tab.HOME) "SunPods" else shownTab.label,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis
                                 )
                             },
@@ -610,9 +614,9 @@ fun SunpodsApp(
                         ) {
                             if (!hasPermission) PermissionBanner(onRequestPermission)
                             if (shownPage != null) {
-                                PageContent(shownPage, settings, vm, onShareDiagnostics, onOpenBluetoothSettings, dynamicColor, onDynamicColorChange)
+                                PageContent(shownPage, settings, vm, onShareDiagnostics, onOpenBluetoothSettings, dynamicColor, onDynamicColorChange, onRunSetupAgain)
                             } else when (shownTab) {
-                                Tab.HOME -> HomeScreen(battery, settings, vm, busy)
+                                Tab.HOME -> HomeScreen(battery, settings, vm, busy, animateEntrance, onEntrancePlayed)
                                 Tab.SOUND -> SoundScreen(settings, vm)
                                 Tab.CONTROLS -> ControlsScreen(settings, vm)
                                 Tab.BATTERY -> BatteryInsightsScreen(battery)
@@ -771,11 +775,13 @@ private fun NavRow(icon: ImageVector?, title: String, value: String?, note: Stri
     }
 }
 
+private fun Page.displayTitle(): String = if (this == Page.FIND && EarbudModel.active.headphones) "Find My Headphones" else title
+
 /** A row that opens one of the app's own pages. */
 @Composable
 private fun PageRow(icon: ImageVector, page: Page, value: String? = null) {
     val open = LocalOpenPage.current
-    NavRow(icon, page.title, value) { open(page) }
+    NavRow(icon, page.displayTitle(), value) { open(page) }
 }
 
 @Composable
@@ -872,7 +878,14 @@ private fun signed(v: Int) = if (v > 0) "+$v" else "$v"
  * reading and where the earbuds were last seen.
  */
 @Composable
-private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: SunpodsViewModel, busy: Boolean) {
+private fun HomeScreen(
+    battery: BatteryState,
+    settings: DeviceSettings,
+    vm: SunpodsViewModel,
+    busy: Boolean,
+    animateEntrance: Boolean = false,
+    onEntrancePlayed: () -> Unit = {},
+) {
     val update by vm.update.collectAsState()
     androidx.compose.animation.AnimatedVisibility(update != null, enter = revealIn(), exit = revealOut()) {
         update?.let { UpdateCard(it, vm) }
@@ -909,7 +922,9 @@ private fun HomeScreen(battery: BatteryState, settings: DeviceSettings, vm: Sunp
                 connected = connected,
                 model = settings.modelName ?: EarbudModel.active.displayName,
                 color = LocalBudArt.current.hero3d,
-                device = LocalBudArt.current.device
+                device = LocalBudArt.current.device,
+                animateEntrance = animateEntrance,
+                onEntrancePlayed = onEntrancePlayed,
             ) {
                 val next = when (battery.listeningMode) {
                     ListeningMode.NOISE_CANCELLING -> ListeningMode.AMBIENT
@@ -1605,7 +1620,7 @@ private fun SafeListeningGroup(vm: SunpodsViewModel) {
     // The switch leads; everything else on the page belongs to it. Off stops the live meter.
     Group(
         null,
-        footer = "Your earbuds keep track of how loud and how long you listen, following the World Health Organization's guidelines.",
+        footer = "Your ${EarbudModel.active.noun} keep track of how loud and how long you listen, following the World Health Organization's guidelines.",
         rows = listOf({ ToggleRow(Icons.Rounded.HealthAndSafety, "Safe Listening", "", safe.first, vm::setSafeListening) })
     )
     androidx.compose.animation.AnimatedVisibility(safe.first, enter = revealIn(), exit = revealOut()) {
@@ -1937,9 +1952,10 @@ private fun SpeakToChatPage(settings: DeviceSettings, vm: SunpodsViewModel) {
 
 @Composable
 private fun WearingPage(settings: DeviceSettings, vm: SunpodsViewModel) {
+    val model = EarbudModel.active
     Group(
         null,
-        footer = "Your earbuds sense when you take them out.",
+        footer = "Your ${model.noun} sense when you take them ${if (model.headphones) "off" else "out"}.",
         rows = buildList {
             if (settings.has(Feature.PAUSE_WHEN_REMOVED)) add { ToggleRow(Icons.Rounded.Sensors, "Pause When Removed", "", settings.pauseWhenRemoved, vm::setPauseWhenRemoved) }
             if (settings.has(Feature.AUTO_OFF_WHEN_REMOVED)) {
@@ -1989,7 +2005,8 @@ private fun PageContent(
     onShareDiagnostics: () -> Unit,
     onOpenBluetoothSettings: () -> Unit,
     dynamicColor: Boolean,
-    onDynamicColorChange: (Boolean) -> Unit
+    onDynamicColorChange: (Boolean) -> Unit,
+    onRunSetupAgain: () -> Unit,
 ) {
     when (page) {
         Page.AUTOMATIONS -> AutomationsCard()
@@ -2003,7 +2020,7 @@ private fun PageContent(
         Page.APPEARANCE -> AppearancePage(dynamicColor, onDynamicColorChange)
         Page.DATA -> YourDataGroup()
         Page.UPDATES -> UpdatesGroup(vm)
-        Page.HELP -> HelpPage(onShareDiagnostics, onOpenBluetoothSettings)
+        Page.HELP -> HelpPage(onShareDiagnostics, onOpenBluetoothSettings, onRunSetupAgain)
         Page.BATTERY_HEALTH -> BatteryHealthCard(vm.battery.collectAsState().value.updatedAt)
         Page.BATTERY_WEEK -> BatteryWeekPage(vm.battery.collectAsState().value)
         Page.BATTERY_ALERTS -> BatteryAlertsPage()
@@ -2123,7 +2140,7 @@ private fun DeviceScreen(settings: DeviceSettings) {
         Text(settings.modelName ?: EarbudModel.active.displayName, style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(2.dp))
         Text(
-            listOfNotNull(settings.firmware?.let { "Firmware $it" }, settings.codec).joinToString("  ·  ").ifEmpty { "Sony wireless earbuds" },
+            listOfNotNull(settings.firmware?.let { "Firmware $it" }, settings.codec).joinToString("  ·  ").ifEmpty { "Sony wireless ${EarbudModel.active.noun}" },
             style = MaterialTheme.typography.bodyMedium,
             color = colors.onSurfaceVariant
         )
@@ -2161,21 +2178,17 @@ private fun AppearancePage(dynamicColor: Boolean, onDynamicColorChange: (Boolean
 }
 
 @Composable
-private fun HelpPage(onShareDiagnostics: () -> Unit, onOpenBluetoothSettings: () -> Unit) {
+private fun HelpPage(onShareDiagnostics: () -> Unit, onOpenBluetoothSettings: () -> Unit, onRunSetupAgain: () -> Unit) {
     val context = LocalContext.current
+    val model = EarbudModel.active
     Group(
         null,
         rows = listOf(
             { NavRow(Icons.Rounded.Bluetooth, "Bluetooth Settings", null, onClick = onOpenBluetoothSettings) },
             { NavRow(Icons.Rounded.BugReport, "Send Diagnostics", null, onClick = onShareDiagnostics) },
-            {
-                NavRow(Icons.Rounded.RestartAlt, "Run Setup Again", null) {
-                    OnboardingStore.setDone(context, false)
-                    Backup.restart(context)
-                }
-            }
+            { NavRow(Icons.Rounded.RestartAlt, "Run Setup Again", null, onClick = onRunSetupAgain) }
         ),
-        footer = "Your earbuds talk to one app at a time, so close Sony Sound Connect while you use SunPods."
+        footer = "Your ${model.noun} talk to one app at a time, so close Sony Sound Connect while you use SunPods."
     )
     Group(
         null,
@@ -2217,18 +2230,19 @@ private fun EarbudsGroup(settings: DeviceSettings) {
                 onDismiss = { choosing = false }, onPick = { vm.setAssistant(it) })
         }
     }
+    val model = EarbudModel.active
     if (settings.has(Feature.FIT_TEST)) rows += { NavRow(Icons.Rounded.Hearing, "Ear Tip Fit Test", null) { fitting = true } }
-    if (settings.has(Feature.POWER_OFF)) rows += { NavRow(Icons.Rounded.PowerSettingsNew, "Turn Off Earbuds", null) { confirmOff = true } }
-    if (settings.has(Feature.RESET)) rows += { NavRow(Icons.Rounded.RestartAlt, "Reset Earbud Settings", null) { confirmReset = true } }
-    Group("Your Earbuds", rows = rows, footer = note)
+    if (settings.has(Feature.POWER_OFF)) rows += { NavRow(Icons.Rounded.PowerSettingsNew, "Turn Off ${model.titleNoun}", null) { confirmOff = true } }
+    if (settings.has(Feature.RESET)) rows += { NavRow(Icons.Rounded.RestartAlt, "Reset ${if (model.headphones) "Headphone" else "Earbud"} Settings", null) { confirmReset = true } }
+    Group("Your ${model.titleNoun}", rows = rows, footer = note)
 
     if (fitting) FitTestSheet(vm) { fitting = false }
     if (confirmOff) {
         AlertDialog(
             onDismissRequest = { confirmOff = false },
-            title = { Text("Turn off your ${EarbudModel.active.noun}?") },
-            text = { Text("They stay off until you put them in the case and take them out again.") },
-            confirmButton = { TextButton(onClick = { confirmOff = false; vm.powerOff { ok -> note = if (ok) null else "Couldn't turn off your ${EarbudModel.active.noun}. Make sure they're connected." } }) { Text("Turn Off") } },
+            title = { Text("Turn off your ${model.noun}?") },
+            text = { Text(if (model.headphones) "They stay off until you press the power button again." else "They stay off until you put them in the case and take them out again.") },
+            confirmButton = { TextButton(onClick = { confirmOff = false; vm.powerOff { ok -> note = if (ok) null else "Couldn't turn off your ${model.noun}. Make sure they're connected." } }) { Text("Turn Off") } },
             dismissButton = { TextButton(onClick = { confirmOff = false }) { Text("Cancel") } }
         )
     }

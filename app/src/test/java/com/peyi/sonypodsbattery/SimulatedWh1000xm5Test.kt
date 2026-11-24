@@ -28,7 +28,7 @@ class SimulatedWh1000xm5Test {
         assertEquals(EarbudModel.WF_1000XM5, EarbudModel.fromName("WF-1000XM5"))
         assertTrue(EarbudModel.WH_1000XM5.headphones)
         assertEquals("headphones", EarbudModel.WH_1000XM5.noun)
-        assertTrue(EarbudModel.scanPattern.matcher("WH-1000XM5").matches())
+        assertTrue(EarbudModel.WH_1000XM5.namePattern.matcher("WH-1000XM5").matches())
     }
 
     @Test fun `one battery, no case`() {

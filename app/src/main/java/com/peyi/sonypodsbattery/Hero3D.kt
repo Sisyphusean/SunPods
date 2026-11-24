@@ -35,12 +35,20 @@ import kotlin.math.abs
  * The Home hero as live 3D: the approved Blender earbuds and case, rendered by three.js from
  * app/src/main/assets/hero3d (offline, served through [WebViewAssetLoader], no network).
  *
- * @param color the earbuds' finish: "black", "silver" (Platinum Silver) or "pink" (Smoky Pink).
+ * @param color the earbuds' finish: "black", "silver", "blue", "white", or "pink".
  *   [hero3dColorFor] maps the colour code the earbuds report. Changes crossfade.
- * @param model "buds" (the hero pose) or "case" (the charging case, earbuds inside).
- * @param lid case lid, 0 closed to 1 open; animates when it changes.
  * @param onTap a tap on the hero (the page tells taps from spins).
- * @param device which earbuds: "xm5" (WF-1000XM5) or "c710n" (WF-C710N); each has its own finishes.
+ * @param device which earbuds/headphones: "xm5" (WF-1000XM5), "c710n" (WF-C710N), or "wh1000xm5" (WH-1000XM5); each has its own finishes.
+ * @param cycleDevices when given (at least two device ids), the hero steps through them in the one
+ *   WebView, every [CYCLE_MS] with a soft fade, each in [color]; the next is preloaded. The timer starts
+ *   once the first has drawn. Not with reduced motion (animator duration scale 0): the first one stays.
+ *
+ * @param centered shift the picture so the shown model sits in the middle of the view (Welcome); Home keeps the hero framing.
+ * @param caseProgress continuous pack/unpack state (0 = hero pose, 1 = closed carry case).
+ * @param animateEntrance when true with [caseProgress] == 0 and motion enabled, starts closed at caseProgress=1 and calls playUnpack().
+ * @param onEntrancePlayed invoked once the entrance unpack is triggered (or skipped due to reduced motion).
+ * @param onUnpacked invoked when playUnpack() settles at caseProgress == 0.
+ * @param onPacked invoked when playPack() settles at caseProgress == 1.
  *
  * Horizontal drags spin the earbuds (fling, then they ease home 2.5 s after the finger lifts,
  * with a haptic tick); vertical drags are left to the scrolling parent.
@@ -49,49 +57,118 @@ import kotlin.math.abs
 internal fun Hero3D(
     color: String,
     modifier: Modifier = Modifier,
-    model: String = "buds",
-    lid: Float = 0f,
     onTap: (() -> Unit)? = null,
     device: String = "xm5",
+    cycleDevices: List<String>? = null,
+    centered: Boolean = false,
+    caseProgress: Float = 0f,
+    animateEntrance: Boolean = false,
+    onEntrancePlayed: (() -> Unit)? = null,
+    onUnpacked: (() -> Unit)? = null,
+    onPacked: (() -> Unit)? = null,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val cycle = cycleDevices?.takeIf { it.size > 1 }
+    val reduceMotion = rememberReduceMotion()
+    val cycling = cycle != null && !reduceMotion
+    var step by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val shownDevice = if (cycle != null) cycle[step % cycle.size] else device
+    val nextDevice = if (cycling) listOf(cycle!![(step + 1) % cycle.size]) else emptyList()
+    val targetProgress = caseProgress.coerceIn(0f, 1f)
+    val wantEntrance = animateEntrance && targetProgress == 0f && !reduceMotion
+    LaunchedEffect(animateEntrance, reduceMotion) {
+        if (animateEntrance && reduceMotion) onEntrancePlayed?.invoke()
+    }
     // One hero view for the whole screen, kept alive while you move between tabs and pages, so
     // coming back to Home doesn't reload the 3D scene (which showed as the earbuds vanishing).
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     val state = remember(lifecycle) { HeroCache.stateFor(lifecycle) }
-    SideEffect { HeroCache.onTap = onTap }
-    state.device = device
-    state.color = color
-    state.model = model
-    state.lid = lid.coerceIn(0f, 1f)
+    // While one page slides out and the next slides in, both hold a Hero3D. Only the newest owns the one
+    // view: the other leaves it alone, so the two never fight over its size, device or position.
+    val token = remember { Any().also { HeroCache.driver = it } }
+    val isOwner = HeroCache.driver === token
+    androidx.compose.runtime.DisposableEffect(token) { onDispose { if (HeroCache.driver === token) HeroCache.driver = null } }
+    var prevWantEntrance by remember { mutableStateOf(false) }
 
-    // push changes after every recomposition (each is a no-op unless a value changed)
-    SideEffect { state.sync() }
+    // Push state mutations and bridge updates strictly in SideEffect (never during composition).
+    SideEffect {
+        if (isOwner) {
+            HeroCache.onTap = onTap
+            HeroCache.onEntrancePlayed = onEntrancePlayed
+            HeroCache.onUnpacked = onUnpacked
+            HeroCache.onPacked = onPacked
+            val hostChanged = state.onHost(token)
+            if (hostChanged && state.ready && !reduceMotion && state.view != null) {
+                state.snapped = false
+            }
+            if (wantEntrance && !prevWantEntrance) {
+                state.armEntrance()
+            } else if (!wantEntrance && state.pendingUnpack) {
+                state.cancelEntrance()
+            }
+            prevWantEntrance = wantEntrance
+            state.device = shownDevice
+            state.soft = cycling
+            state.centered = centered
+            state.preload = nextDevice
+            state.color = color
+            state.caseProgress = targetProgress
+            state.reduceMotion = reduceMotion
+            state.sync(forceSnap = hostChanged)
+        }
+    }
 
     // Until the 3D page has drawn, show the picture it left last time (same size, same pose), then
     // fade across. Opening the app shows the earbuds at once instead of them popping in.
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val placeholder = if (state.drawn) null else remember(device, color, model) { HeroSnapshots.load(context, device, color, model) }
-    val cover by androidx.compose.animation.core.animateFloatAsState(
+    // Suppress the standalone-buds placeholder while starting closed for the unpack entrance.
+    val suppressPlaceholder = wantEntrance || state.pendingUnpack || targetProgress > 0.5f
+    val snapKey = if (centered) "centered" else "buds"
+    val placeholder = if (state.drawn || suppressPlaceholder) null else remember(shownDevice, color, snapKey) { HeroSnapshots.load(context, shownDevice, color, snapKey) }
+    if (cycling && isOwner) LaunchedEffect(state.drawn, state.snapped) {
+        if (!state.drawn || !state.snapped) return@LaunchedEffect
+        while (true) { kotlinx.coroutines.delay(CYCLE_MS); step++ }
+    }
+    val cover = androidx.compose.animation.core.animateFloatAsState(
         if (state.drawn) 0f else 1f, androidx.compose.animation.core.tween(240), label = "heroCover"
+    )
+    var revealed by remember { mutableStateOf(reduceMotion || (placeholder != null && state.snapped)) }
+    LaunchedEffect(state.drawn, state.snapped, isOwner, placeholder, reduceMotion) {
+        if (reduceMotion) {
+            revealed = true
+        } else if (placeholder != null && state.drawn) {
+            revealed = true
+        } else if (state.drawn && state.snapped && isOwner) {
+            withFrameNanos { }
+            revealed = true
+        } else {
+            revealed = false
+        }
+    }
+    val webAlpha by androidx.compose.animation.core.animateFloatAsState(
+        if (revealed) 1f else 0f,
+        if (reduceMotion) androidx.compose.animation.core.snap() else androidx.compose.animation.core.tween(260),
+        label = "heroWebAlpha"
     )
     // Creating the WebView takes a few hundred ms on the main thread, so a cold start puts the
     // first frame (with the picture above) on screen first and creates the 3D view right after.
     var mountWeb by remember { mutableStateOf(state.view != null) }
     if (!mountWeb) LaunchedEffect(Unit) { withFrameNanos { }; mountWeb = true }
     androidx.compose.foundation.layout.Box(modifier) {
-        if (mountWeb) AndroidView(
-            modifier = Modifier.matchParentSize(),
+        if (mountWeb && isOwner) AndroidView(
+            modifier = Modifier.matchParentSize().graphicsLayer { alpha = webAlpha },
             factory = { ctx ->
+                state.hosts++
                 state.view?.also { (it.parent as? android.view.ViewGroup)?.removeView(it) }
                     ?: createHeroWebView(ctx, state) { HeroCache.onTap?.invoke() }
             },
             // Not destroyed here: the next Home screen picks the same view up again.
-            onRelease = { view -> (view.parent as? android.view.ViewGroup)?.removeView(view) },
+            // A page change can build the next screen's hero before this one is released; only the last host lets go.
+            onRelease = { view -> if (--state.hosts <= 0) (view.parent as? android.view.ViewGroup)?.removeView(view) },
         )
-        if (placeholder != null && cover > 0f) androidx.compose.foundation.Image(
+        if (placeholder != null) androidx.compose.foundation.Image(
             placeholder, contentDescription = null,
             contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-            modifier = Modifier.matchParentSize().graphicsLayer { alpha = cover }
+            modifier = Modifier.matchParentSize().graphicsLayer { alpha = cover.value }
         )
     }
 }
@@ -111,7 +188,7 @@ private object HeroSnapshots {
         val first = when {
             model != "buds" -> null
             device == "xm5" && color == "black" -> "turntable/f000.webp"
-            device == EarbudModel.WF_C710N.id -> "turntable/c710n_$color.webp"
+            device != "xm5" -> "turntable/${device}_$color.webp"   // every other model's first-launch picture
             else -> null
         } ?: return null
         return runCatching {
@@ -136,10 +213,16 @@ private object HeroCache {
     private var owner: Lifecycle? = null
     private var state: Hero3DState? = null
     var onTap: (() -> Unit)? = null
+    var onEntrancePlayed: (() -> Unit)? = null
+    var onUnpacked: (() -> Unit)? = null
+    var onPacked: (() -> Unit)? = null
+    /** The Hero3D that currently drives the view (the newest one composed). */
+    var driver by androidx.compose.runtime.mutableStateOf<Any?>(null)
 
     fun stateFor(lifecycle: Lifecycle): Hero3DState {
         if (owner !== lifecycle) {
-            state?.view?.destroy()
+            state?.cancelEntrance()
+            state?.view?.let { v -> (v.parent as? android.view.ViewGroup)?.removeView(v); v.stopLoading(); v.removeJavascriptInterface("SunPodsHost"); v.destroy() }
             owner = lifecycle
             state = Hero3DState()
             lifecycle.addObserver(LifecycleEventObserver { _, event ->
@@ -156,13 +239,21 @@ private object HeroCache {
 
     fun release(lifecycle: Lifecycle) {
         if (owner !== lifecycle) return
+        state?.cancelEntrance()
         state?.view?.let { v -> (v.parent as? android.view.ViewGroup)?.removeView(v); v.stopLoading(); v.removeJavascriptInterface("SunPodsHost"); v.destroy() }
         state = null
         owner = null
         onTap = null
+        onEntrancePlayed = null
+        onUnpacked = null
+        onPacked = null
     }
 }
 
+
+/** The Welcome page cycle: time on each model, and the fade out and in of a swap. */
+private const val CYCLE_MS = 4000L
+private const val SOFT_FADE_MS = 320
 
 private const val HERO3D_HOST = "appassets.androidplatform.net"
 private const val HERO3D_PAGE = "https://$HERO3D_HOST/assets/hero3d/index.html"
@@ -170,42 +261,140 @@ private const val HERO3D_PAGE = "https://$HERO3D_HOST/assets/hero3d/index.html"
 /** What the page should show, and what it was last told, so only changes cross the bridge. */
 private class Hero3DState {
     var view: WebView? = null
+    /** How many on-screen hosts currently hold the view. */
+    var hosts = 0
     var ready = false
     /** The live view has drawn its first frame; the placeholder can go. */
     var drawn by androidx.compose.runtime.mutableStateOf(false)
+    /** The live view is synced and painted for the current screen host (gates fade-in across screen changes). */
+    var snapped by androidx.compose.runtime.mutableStateOf(false)
+    var awaitingSnap = false
     var device = "xm5"
     var color = "black"
-    var model = "buds"
-    var lid = 0f
+    var caseProgress = 0f
+    var pendingUnpack = false
+    private var unpackScheduled = false
+    private var unpackRunnable: Runnable? = null
+    private var lastHost: Any? = null
+    var reduceMotion = false
+    /** Slow fade for device swaps (the Welcome cycle), and the device to warm up next. */
+    var soft = false
+    var centered = false
+    /** The WebView's own layout size in dp, pushed to the page so its canvas always matches it. */
+    var wDp = 0f
+    var hDp = 0f
+    private var sentW = 0f
+    private var sentH = 0f
+    private var sentCentered = false
+    var preload: List<String> = emptyList()
+    private val sentPreloads = mutableSetOf<String>()
     private var sentDevice: String? = null
     private var sentColor: String? = null
-    private var sentModel: String? = null
-    private var sentLid: Float? = null
+    private var sentCaseProgress: Float? = null
 
-    fun markLoaded(device: String, color: String, model: String, lid: Float) {
-        sentDevice = device; sentColor = color; sentModel = model; sentLid = lid
+    val poseReadyForSnapshot: Boolean
+        get() = centered || (!pendingUnpack && caseProgress == 0f)
+
+    private fun WebView.callSunpods(fn: String, args: String = "") =
+        evaluateJavascript("window.sunpods&&window.sunpods.$fn&&window.sunpods.$fn($args)", null)
+
+    fun onHost(hostToken: Any): Boolean {
+        if (lastHost === hostToken) return false
+        lastHost = hostToken
+        return true
     }
 
-    fun sync() {
+    fun onSnapped() {
+        awaitingSnap = false
+        snapped = true
+        scheduleEntranceIfReady()
+    }
+
+    fun armEntrance() {
+        unpackRunnable?.let { view?.removeCallbacks(it) }
+        unpackRunnable = null
+        pendingUnpack = true
+        unpackScheduled = false
+        sentCaseProgress = null
+    }
+
+    fun cancelEntrance() {
+        unpackRunnable?.let { view?.removeCallbacks(it) }
+        unpackRunnable = null
+        pendingUnpack = false
+        unpackScheduled = false
+    }
+
+    private fun scheduleEntranceIfReady() {
+        val v = view ?: return
+        if (!pendingUnpack || unpackScheduled || !ready || !drawn || !snapped) return
+        unpackScheduled = true
+        val r = Runnable {
+            unpackRunnable = null
+            unpackScheduled = false
+            if (hosts > 0 && pendingUnpack && ready && snapped && view === v && caseProgress == 0f) {
+                pendingUnpack = false
+                sentCaseProgress = 0f
+                v.callSunpods("playUnpack")
+                HeroCache.onEntrancePlayed?.invoke()
+            }
+        }
+        unpackRunnable = r
+        // Fade-in (~240ms) plus a brief visual settle before the case opens and unpacks.
+        v.postDelayed(r, 480L)
+    }
+
+    fun markLoaded(device: String, color: String, initialCaseProgress: Float) {
+        sentDevice = device; sentColor = color
+        sentCaseProgress = initialCaseProgress
+        sentCentered = centered; sentW = 0f; sentH = 0f
+    }
+
+    fun sync(forceSnap: Boolean = false) {
         val v = view ?: return
         if (!ready) return
-        // The device first: colours are named per device.
+        if (wDp > 0f && hDp > 0f && (wDp != sentW || hDp != sentH)) {
+            sentW = wDp; sentH = hDp
+            v.callSunpods("setSize", "$wDp, $hDp")
+        }
+        val screenSwap = forceSnap || centered != sentCentered
+        if (screenSwap) {
+            val targetSnap = if (pendingUnpack) 1f else caseProgress
+            sentCentered = centered
+            sentDevice = device
+            sentColor = color
+            sentCaseProgress = targetSnap
+            snapped = false
+            awaitingSnap = true
+            for (p in preload) if (sentPreloads.add(p)) v.callSunpods("preload", js(p))
+            v.callSunpods("snapTo", "${js(device)}, ${js(color)}, $targetSnap, $centered")
+            return
+        }
+        // Within the same screen: crossfade device swaps and animate pack/unpack transitions smoothly.
         if (device != sentDevice) {
             sentDevice = device
             sentColor = null
-            v.evaluateJavascript("window.sunpods&&window.sunpods.setDevice&&window.sunpods.setDevice(${js(device)})", null)
+            v.callSunpods("setDevice", "${js(device)}${if (soft) ", $SOFT_FADE_MS" else ""}")
         }
+        for (p in preload) if (sentPreloads.add(p)) v.callSunpods("preload", js(p))
         if (color != sentColor) {
             sentColor = color
-            v.evaluateJavascript("window.sunpods&&window.sunpods.setColor(${js(color)})", null)
+            v.callSunpods("setColor", js(color))
         }
-        if (model != sentModel) {
-            sentModel = model
-            v.evaluateJavascript("window.sunpods&&window.sunpods.setModel(${js(model)})", null)
-        }
-        if (lid != sentLid) {
-            sentLid = lid
-            v.evaluateJavascript("window.sunpods&&window.sunpods.setLid($lid)", null)
+        if (pendingUnpack) {
+            if (sentCaseProgress != 1f) {
+                sentCaseProgress = 1f
+                v.callSunpods("setCaseProgress", "1, true")
+            }
+            scheduleEntranceIfReady()
+        } else if (caseProgress != sentCaseProgress) {
+            val prev = sentCaseProgress
+            sentCaseProgress = caseProgress
+            when {
+                !reduceMotion && prev != null && prev > 0.5f && caseProgress == 0f -> v.callSunpods("playUnpack")
+                !reduceMotion && prev != null && prev < 0.5f && caseProgress == 1f -> v.callSunpods("playPack")
+                else -> v.callSunpods("setCaseProgress", "$caseProgress, true")
+            }
         }
     }
 
@@ -227,6 +416,11 @@ private fun createHeroWebView(context: Context, state: Hero3DState, onTap: () ->
     web.isVerticalScrollBarEnabled = false
     web.isHorizontalScrollBarEnabled = false
     web.isHapticFeedbackEnabled = true
+    web.addOnLayoutChangeListener { v, l, t, r, b, _, _, _, _ ->
+        val d = v.resources.displayMetrics.density
+        state.wDp = (r - l) / d; state.hDp = (b - t) / d
+        state.sync()
+    }
     // decorative: the Compose parent carries the hero's semantics
     web.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
     with(web.settings) {
@@ -247,29 +441,57 @@ private fun createHeroWebView(context: Context, state: Hero3DState, onTap: () ->
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
     }
+    fun scheduleSnapshot(key: String, delayMs: Long) {
+        val d = state.device; val c = state.color
+        if (!state.poseReadyForSnapshot || HeroSnapshots.has(context, d, c, key)) return
+        web.postDelayed({
+            if (state.view === web && state.poseReadyForSnapshot && state.centered == (key == "centered") && state.device == d && state.color == c) {
+                web.evaluateJavascript("window.sunpods&&window.sunpods.snapshot()") { r ->
+                    val url = r?.trim('"')?.takeIf { it.startsWith("data:image/png") } ?: return@evaluateJavascript
+                    Thread { HeroSnapshots.save(context.applicationContext, d, c, key, url) }.start()
+                }
+            }
+        }, delayMs)
+    }
     web.addJavascriptInterface(object {
         @JavascriptInterface
         fun ready() = web.post {
+            if (state.view !== web) return@post
             StartupLog.mark("hero 3d ready")
             state.ready = true
             state.sync()
-            // One frame for the GPU to put it on screen, then drop the placeholder.
-            web.postDelayed({ state.drawn = true }, 120)
-            // Keep this exact picture for next launch (once per colour, model and app version).
-            val d = state.device; val c = state.color; val m = state.model
-            if (!HeroSnapshots.has(context, d, c, m)) web.postDelayed({
-                if (state.device == d && state.color == c && state.model == m) web.evaluateJavascript("window.sunpods&&window.sunpods.snapshot()") { r ->
-                    val url = r?.trim('"')?.takeIf { it.startsWith("data:image/png") } ?: return@evaluateJavascript
-                    Thread { HeroSnapshots.save(context.applicationContext, d, c, m, url) }.start()
+            // One frame for the GPU to put it on screen, then drop the placeholder and start delayed entrance if pending.
+            web.postDelayed({
+                if (state.view === web) {
+                    state.drawn = true
+                    if (!state.awaitingSnap) state.onSnapped()
                 }
-            }, 900)
+            }, 120)
+            // Keep this exact picture for next launch (once per colour, pose and app version),
+            // only when settled in the hero pose (never mid-unpack or closed case).
+            scheduleSnapshot(if (state.centered) "centered" else "buds", 900)
         }
 
         @JavascriptInterface
-        fun settled() = web.post { web.performHapticFeedback(if (android.os.Build.VERSION.SDK_INT >= 34) HapticFeedbackConstants.SEGMENT_TICK else HapticFeedbackConstants.CLOCK_TICK) }
+        fun snapped() = web.post { if (state.view === web) state.onSnapped() }
 
         @JavascriptInterface
-        fun tap() = web.post { onTap() }
+        fun settled() = web.post {
+            if (state.view === web) web.performHapticFeedback(if (android.os.Build.VERSION.SDK_INT >= 34) HapticFeedbackConstants.SEGMENT_TICK else HapticFeedbackConstants.CLOCK_TICK)
+        }
+
+        @JavascriptInterface
+        fun tap() = web.post { if (state.view === web) onTap() }
+
+        @JavascriptInterface
+        fun unpacked() = web.post {
+            if (state.view !== web) return@post
+            HeroCache.onUnpacked?.invoke()
+            if (!state.centered) scheduleSnapshot("buds", 150)
+        }
+
+        @JavascriptInterface
+        fun packed() = web.post { if (state.view === web) HeroCache.onPacked?.invoke() }
     }, "SunPodsHost")
 
     // Once a drag is clearly sideways, keep the parents (page scroll, back swipe) out of it.
@@ -295,13 +517,14 @@ private fun createHeroWebView(context: Context, state: Hero3DState, onTap: () ->
 
     state.view = web
     state.ready = false
-    state.markLoaded(state.device, state.color, state.model, state.lid)
+    val initialCaseProgress = if (state.pendingUnpack) 1f else state.caseProgress
+    state.markLoaded(state.device, state.color, initialCaseProgress)
     web.loadUrl(
         Uri.parse(HERO3D_PAGE).buildUpon()
             .appendQueryParameter("device", state.device)
             .appendQueryParameter("color", state.color)
-            .appendQueryParameter("model", state.model)
-            .appendQueryParameter("lid", state.lid.toString())
+            .appendQueryParameter("centered", if (state.centered) "1" else "0")
+            .appendQueryParameter("caseProgress", initialCaseProgress.toString())
             .build().toString()
     )
     return web

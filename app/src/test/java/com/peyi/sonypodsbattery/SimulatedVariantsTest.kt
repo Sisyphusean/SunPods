@@ -83,7 +83,7 @@ class SimulatedVariantsTest {
         assertTrue(EarbudModel.WF_C710N.matchesLe("LE_WF-C710N"))
         assertEquals(EarbudModel.WF_1000XM5, EarbudModel.fromName("WF-1000XM5"))
         assertNull(EarbudModel.fromName("WH-CH720N"))   // not supported
-        assertTrue(EarbudModel.scanPattern.matcher("WF-C710N").matches())
-        assertTrue(EarbudModel.scanPattern.matcher("WF-1000XM5").matches())
+        assertTrue(EarbudModel.WF_C710N.namePattern.matcher("WF-C710N").matches())
+        assertTrue(EarbudModel.WF_1000XM5.namePattern.matcher("WF-1000XM5").matches())
     }
 }

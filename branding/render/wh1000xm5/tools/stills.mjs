@@ -9,12 +9,12 @@ import { openHero, savePng } from './harness.mjs';
 const [outDir, ...cols] = process.argv.slice(2);
 const colours = cols.length ? cols : ['black', 'silver', 'blue', 'pink'];
 fs.mkdirSync(outDir, { recursive: true });
-// Sony's own studio angles (the side and front views of y_WH-1000XM5_021), and a raised three-quarter
-// view of the closed case. [subject, lid, rig pose]; the scale is set from the subject's size.
+// Sony's own studio angles (upright 3/4 side view, straight front view, and raised three-quarter
+// view of the closed case). [subject, lid, rig pose]; the scale is set from the subject's size.
 const POSE = {
-  side: ['phones', 0, [-84, 6, 0, 0, 0, 1.0]],
-  front: ['phones', 0, [0, 8, 0, 0, 0, 1.0]],
-  case: ['case', 0, [-24, 38, 0, 0, 0, 1.0]],
+  side: ['phones', 0, [-42, 11, 0, 0, 0, 1.0]],   // upright three-quarter hero angle, band on top
+  front: ['phones', 0, [0, 6, 0, 0, 0, 1.0]],      // upright straight front view, band on top
+  case: ['case', 0, [-32, 38, 0, 0, 0, 1.0]],      // raised 3/4 view of closed carry case
 };
 const page = await openHero({ query: 'device=wh1000xm5', width: 1000, height: 712, log: false });
 if (process.env.XM_OVR) await page.evaluate(`window.sunpods.debugRebuildMod('wh1000xm5', ${process.env.XM_OVR})`);

@@ -2,13 +2,16 @@ package com.peyi.sonypodsbattery
 
 import android.graphics.ImageDecoder
 import android.graphics.drawable.AnimatedImageDrawable
-import android.provider.Settings
 import android.widget.ImageView
 import androidx.annotation.RawRes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -24,19 +27,24 @@ internal fun RenderClip(@RawRes clip: Int, description: String, modifier: Modifi
     val drawable = remember(clip) {
         runCatching { ImageDecoder.decodeDrawable(ImageDecoder.createSource(context.resources, clip)) }.getOrNull()
     }
-    val animate = remember {
-        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
-    }
+    val reduceMotion = rememberReduceMotion()
+    var visible by remember(clip) { mutableStateOf(reduceMotion || drawable == null) }
+    val alpha by androidx.compose.animation.core.animateFloatAsState(
+        if (visible) 1f else 0f,
+        if (reduceMotion) androidx.compose.animation.core.snap() else androidx.compose.animation.core.tween(220),
+        label = "clipFade"
+    )
     DisposableEffect(drawable) {
         val anim = drawable as? AnimatedImageDrawable
         anim?.repeatCount = AnimatedImageDrawable.REPEAT_INFINITE
-        if (animate) anim?.start()
+        if (!reduceMotion) anim?.start()
+        visible = true
         onDispose { anim?.stop() }
     }
     AndroidView(
         factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.FIT_CENTER; importantForAccessibility = ImageView.IMPORTANT_FOR_ACCESSIBILITY_NO } },
         update = { it.setImageDrawable(drawable) },
-        modifier = modifier.semantics { contentDescription = description }
+        modifier = modifier.graphicsLayer { this.alpha = alpha }.semantics { contentDescription = description }
     )
 }
 

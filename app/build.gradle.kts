@@ -40,6 +40,8 @@ android {
 
     buildTypes {
         debug {
+            // Installed beside the real app, so a phone keeps its own SunPods and data
+            applicationIdSuffix = ".debug"
             if (hasLocalSigning) {
                 signingConfig = signingConfigs.getByName("localStable")
             }

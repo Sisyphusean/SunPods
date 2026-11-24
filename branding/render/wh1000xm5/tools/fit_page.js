@@ -22,35 +22,70 @@ window.XMFIT = (() => {
   }
   function hideAll() {
     const C7 = d.M;
+    C7.setToolOverride(true);
     C7.buds.root.visible = false; C7.kase.root.visible = false;
     d.scene.traverse((o) => { if (o.name === 'buds' || o.name === 'case') o.visible = false; });
   }
-  // kind: 'phones' (the hero headphones; pose = { fold, ext, roll, yaw } for the cups) or 'case'
+  function applyHpPose(pose) {
+    const C7 = d.M, p = pose || {};
+    C7.headphoneModel.setSliderExtension(p.ext ?? C7.HERO.ext);
+    C7.headphoneModel.setEarcupSwivel(p.swivel ?? p.fold ?? 0);
+    C7.headphoneModel.setHeadbandFlex(p.flex ?? 0);
+  }
+  // kind: 'phones' (the hero headphones; pose = { swivel, ext, flex }) or 'case'
   function useSubject(kind, lid = 0, pose = null) {
     if (restore) restore();
     const C7 = d.M;
     hideAll();
-    let obj;
+    const subjectGroup = new T.Group();
+    subjectGroup.name = 'XMFIT_Subject';
+    const hpRoot = C7.headphoneModel.rootGroup;
+    const hpOrigParent = hpRoot.parent;
+    const caseRoot = C7.carryCaseModel.rootGroup;
+    const caseOrigParent = caseRoot.parent;
+    let inCaseAnchor = null;
+
     if (kind === 'case') {
-      obj = C7.kase.spin;
-      C7.kase.lid.rotation.x = -C7.LID_OPEN * lid;
-      C7.kase.spin.rotation.y = 0;
-    } else { obj = C7.buds.phones.root; C7.buds.phones.pose(pose || {}); }
-    const parent = obj.parent, pos = obj.position.clone(), quat = obj.quaternion.clone(), scl = obj.scale.clone();
+      C7.carryCaseModel.setOpenAmount(lid);
+      C7.carryCaseModel.setOpacity(1);
+      subjectGroup.add(caseRoot);
+      caseRoot.position.set(0, 0, 0); caseRoot.quaternion.identity(); caseRoot.scale.set(1, 1, 1);
+
+      inCaseAnchor = new T.Group();
+      inCaseAnchor.name = 'XMFIT_InCaseAnchor';
+      const seated = C7.carryCaseModel.getSeatedHeadphonePose();
+      inCaseAnchor.position.copy(seated.position);
+      inCaseAnchor.quaternion.setFromEuler(seated.rotation);
+      subjectGroup.add(inCaseAnchor);
+
+      inCaseAnchor.add(hpRoot);
+      hpRoot.position.set(0, 0, 0); hpRoot.quaternion.identity(); hpRoot.scale.set(1, 1, 1);
+      C7.headphoneModel.setSliderExtension(0);
+      C7.headphoneModel.setHeadbandFlex(0);
+      C7.headphoneModel.setEarcupSwivel(1);
+      hpRoot.visible = lid > 0.015;
+    } else {
+      applyHpPose(pose);
+      subjectGroup.add(hpRoot);
+      hpRoot.position.set(0, 0, 0); hpRoot.quaternion.identity(); hpRoot.scale.set(1, 1, 1);
+      hpRoot.visible = true;
+    }
+
     const holder = new T.Group();
-    rig.add(holder); holder.add(obj);
-    obj.position.set(0, 0, 0); obj.quaternion.identity();
-    obj.scale.set(Math.sign(scl.x), 1, 1);
-    // centre the subject's bounding box on the rig origin
+    rig.add(holder); holder.add(subjectGroup);
     rig.position.set(0, 0, 0); rig.quaternion.identity(); rig.scale.setScalar(1); rig.updateMatrixWorld(true);
-    // (earbuds centre on their shell only, so ear-tip changes don't move the body; C7FIT_CENTRE = 'full' for the old way)
-    const centreOn = obj;
-    const box = new T.Box3().setFromObject(centreOn, true);
+    const boxTarget = kind === 'case' ? caseRoot : subjectGroup;
+    const box = new T.Box3().setFromObject(boxTarget, true);
     const c = box.getCenter(new T.Vector3()), size = box.getSize(new T.Vector3());
     holder.position.copy(c).negate();
-    subject = { kind, obj, holder, diag: size.length(), size };
-    restore = () => { parent.add(obj); obj.position.copy(pos); obj.quaternion.copy(quat); obj.scale.copy(scl); rig.remove(holder); restore = null;
-      if (kind !== 'case') C7.buds.phones.pose({}); };
+    subject = { kind, obj: subjectGroup, holder, diag: size.length(), size, inCaseAnchor };
+    restore = () => {
+      hpOrigParent.add(hpRoot); hpRoot.position.set(0, 0, 0); hpRoot.quaternion.identity(); hpRoot.scale.set(1, 1, 1); hpRoot.visible = true;
+      caseOrigParent.add(caseRoot); caseRoot.position.set(0, 0, 0); caseRoot.quaternion.identity(); caseRoot.scale.set(1, 1, 1);
+      rig.remove(holder); restore = null;
+      applyHpPose({});
+      C7.setToolOverride(false);
+    };
     return { size: size.toArray() };
   }
   function setPose(p) {
@@ -70,14 +105,12 @@ window.XMFIT = (() => {
   }
   function renderTo(rt, mask) {
     const r = d.renderer;
-    const prevOverride = d.scene.overrideMaterial, prevEnv = null;
-    const prevClear = r.getClearAlpha();
+    const prevOverride = d.scene.overrideMaterial;
     d.scene.overrideMaterial = mask ? maskMat : null;
     r.setRenderTarget(rt); r.setClearColor(0x000000, 0); r.clear();
     r.render(d.scene, cam);
     r.setRenderTarget(null);
     d.scene.overrideMaterial = prevOverride;
-    void prevEnv; void prevClear;
     const px = new Uint8Array(rt.width * rt.height * 4);
     r.readRenderTargetPixels(rt, 0, 0, rt.width, rt.height, px);
     return px;
@@ -146,8 +179,7 @@ window.XMFIT = (() => {
   }
   async function fit(kind, lid, refB64, init, opts = {}) {
     useSubject(kind, lid, opts.pose);
-    const ref0 = await decodeMask(refB64, 192);
-    const ref = ref0;
+    const ref = await decodeMask(refB64, 192);
     // a locked pitch (degrees) is held fixed while the rest is fitted
     const lockP = opts.lockPitch;
     const score0 = score;
@@ -234,15 +266,16 @@ window.XMFIT = (() => {
     return { color: colorUrl, mask: cv.toDataURL('image/png') };
   }
   function done() { if (restore) restore(); rig.position.set(0, 0, 0); }
+  function projectWorld(worldVec, size = 512) {
+    cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+    const v = worldVec.clone().project(cam);
+    return [(v.x * 0.5 + 0.5) * size, (0.5 - v.y * 0.5) * size];
+  }
   // screen positions (pixels in a size x size shot) of points given in the subject's own frame
   function project(kind, lid, pose, pts, size = 512, hp = null) {
     useSubject(kind, lid, hp); setPose(pose);
-    cam.updateMatrixWorld(); cam.updateProjectionMatrix();
     subject.obj.updateWorldMatrix(true, false);
-    return pts.map((q) => {
-      const v = new T.Vector3(q[0], q[1], q[2]).applyMatrix4(subject.obj.matrixWorld).project(cam);
-      return [(v.x * 0.5 + 0.5) * size, (0.5 - v.y * 0.5) * size];
-    });
+    return pts.map((q) => projectWorld(new T.Vector3(q[0], q[1], q[2]).applyMatrix4(subject.obj.matrixWorld), size));
   }
   async function rebuild(overrides) {
     if (restore) restore();
@@ -250,5 +283,5 @@ window.XMFIT = (() => {
     d = await window.sunpods.debugMod('wh1000xm5');
     return true;
   }
-  return { init, rebuild, project, fit, fitGroup, shot, scoreAt, useSubject, setPose, done, decodeMask, get subject() { return subject; }, get camera() { return cam; } };
+  return { init, rebuild, project, projectWorld, fit, fitGroup, shot, scoreAt, useSubject, setPose, done, decodeMask, get subject() { return subject; }, get camera() { return cam; } };
 })();

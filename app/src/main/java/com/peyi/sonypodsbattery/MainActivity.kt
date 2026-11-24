@@ -23,12 +23,13 @@ class MainActivity : ComponentActivity() {
     private var hasPermission by mutableStateOf(false)
     private var dynamicColor by mutableStateOf(false)
     private var onboarding by mutableStateOf(false)
+    private var animateEntrance by mutableStateOf(false)
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
         hasPermission = hasBluetoothPermission()
-        if (hasPermission) vm.refreshAll()
+        if (!onboarding && hasPermission) vm.refreshAll()
         BackgroundAccess.askOnce(this)
     }
 
@@ -59,13 +60,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         hasPermission = hasBluetoothPermission()
         dynamicColor = getSharedPreferences("ui", MODE_PRIVATE).getBoolean("dynamic_color", false)
+        EarbudModel.current(this)
         onboarding = !OnboardingStore.done(this)
+        animateEntrance = OnboardingStore.heroIntroPending(this)
         setContent {
             SunpodsTheme(dynamicColor = dynamicColor) {
                 if (onboarding) {
                     Onboarding(vm) {
+                        animateEntrance = OnboardingStore.heroIntroPending(this@MainActivity)
                         onboarding = false
                         hasPermission = hasBluetoothPermission()
+                        vm.setLive(true)
                         if (hasPermission) vm.refreshAll()
                     }
                     return@SunpodsTheme
@@ -82,7 +87,20 @@ class MainActivity : ComponentActivity() {
                         getSharedPreferences("ui", MODE_PRIVATE).edit().putBoolean("dynamic_color", on).commit()
                         // Widgets follow the same colour choice as the app.
                         lifecycleScope.launch { SonyPodsBatteryWidgetUpdater.updateAll(applicationContext) }
-                    }
+                    },
+                    animateEntrance = animateEntrance,
+                    onEntrancePlayed = {
+                        animateEntrance = false
+                        OnboardingStore.setHeroIntroPending(this@MainActivity, false)
+                    },
+                    onRunSetupAgain = {
+                        OnboardingStore.setHeroIntroPending(this@MainActivity, false)
+                        OnboardingStore.setDone(this@MainActivity, false)
+                        if (BuildConfig.TOOLS) SimMode.stopDemo(this@MainActivity)
+                        vm.setLive(false)
+                        vm.reloadCached()
+                        onboarding = true
+                    },
                 )
             }
         }
@@ -94,7 +112,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        vm.setLive(true)
+        if (!onboarding) vm.setLive(true)
     }
 
     override fun onStop() {
@@ -107,7 +125,7 @@ class MainActivity : ComponentActivity() {
         StartupLog.mark("resume")
         hasPermission = hasBluetoothPermission()
         vm.reloadCached()
-        if (hasPermission) vm.refreshIfStale()
+        if (!onboarding && hasPermission) vm.refreshIfStale()
         StartupLog.mark("resume done")
     }
 

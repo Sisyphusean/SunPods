@@ -34,24 +34,33 @@ function openState(f) {
   return { pose, lid, lift };
 }
 // the indicator during pairing: two short blue flashes, a pause, repeat (on 5, off 5, on 5, off 16 frames)
-function blink(f, start) {
-  if (f < start) return 0;
+function blink(f, start, end) {
+  if (f < start || f > end) return 0;
   const k = (f - start) % 31;
   return (k < 5 || (k >= 10 && k < 15)) ? 1 : 0;
 }
 function pairState(f, aim) {
   const front = [-22, 18, 0, 0, -0.04, 0.66];
-  const back = [180 + 18, 12, 0, 0, 0, 0.66];
-  const pose = track([[0, front], [22, front], [52, back], [66, aim.button], [140, aim.button], [150, aim.button],
-    [178, aim.led], [209, aim.ledWide]], f);
-  // press: the ring fades in and pulses while the button is held (frames 70 to 146)
+  const back = [180 + 18, 12, 0, 0, -0.04, 0.68];
+  const pose = track([
+    [0, front],
+    [18, front],
+    [48, back],
+    [62, aim.button],
+    [132, aim.button],
+    [142, aim.button],
+    [168, aim.led],
+    [182, aim.ledWide],
+    [209, front],
+  ], f);
+  // press: the ring fades in and pulses while the button is held (frames 66 to 136)
   let glow = 0, grow = 0;
-  if (f >= 70 && f <= 146) {
-    const t = (f - 70) / 76;
-    glow = Math.min(1, (f - 70) / 8) * (0.65 + 0.35 * Math.sin(t * Math.PI * 6)) * (f > 140 ? (146 - f) / 6 : 1);
+  if (f >= 66 && f <= 136) {
+    const t = (f - 66) / 70;
+    glow = Math.min(1, (f - 66) / 8) * (0.65 + 0.35 * Math.sin(t * Math.PI * 6)) * (f > 130 ? (136 - f) / 6 : 1);
     grow = t;
   }
-  return { pose, lid: 1, lift: 0, glow, ringGrow: grow, led: blink(f, 176) };
+  return { pose, lid: 1, lift: 0, glow, ringGrow: grow, led: blink(f, 150, 183) };
 }
 
 const page = await openHero({ query: 'device=c710n', width: SIZE, height: SIZE, log: false });
@@ -67,20 +76,21 @@ for (const clip of which === 'both' ? ['open', 'pair'] : [which]) {
     await page.evaluate(`window.C7CLIP.init(${clip === 'open' ? 0 : 1})`);
     let aim = null;
     if (clip === 'pair') {
-      // zoom targets: the pairing button (back) and the indicator (front), centred
+      // zoom targets: the pairing button (back) and the indicator (front), kept unclipped inside the frame
       const C = await page.evaluate(`(async () => { const d = await window.sunpods.debugC7(false); return d.C7.CASE; })()`);
       const centre = async (pose, pt) => {
         let p = pose.slice();
         for (let i = 0; i < 3; i++) {
           const [x, y] = await page.evaluate(`window.C7CLIP.project(${JSON.stringify(p)}, ${JSON.stringify(pt)}, ${SIZE}, 1)`);
-          p[3] -= (x - SIZE / 2) / SIZE; p[4] += (y - SIZE / 2) / SIZE;
+          p[3] -= ((x - SIZE / 2) / SIZE) * 0.40; p[4] += ((y - SIZE / 2) / SIZE) * 0.35;
         }
+        p[4] = Math.max(-0.08, Math.min(0.02, p[4]));
         return p;
       };
       aim = {
-        button: await centre([180 + 10, 8, 0, 0, 0, 1.9], [C.button.x - 0.35, C.button.y, -C.B]),
-        led: await centre([-12, 14, 0, 0, 0, 0.95], [0, C.led.y + 0.75, C.B]),
-        ledWide: await centre([-16, 16, 0, 0, 0, 0.82], [0, C.led.y + 0.95, C.B]),
+        button: await centre([180 + 12, 10, 0, 0, -0.04, 0.84], [C.button.x * 0.5, C.yP, -C.B]),
+        led: await centre([-14, 16, 0, 0, -0.04, 0.80], [0, C.yP, C.B]),
+        ledWide: await centre([-16, 16, 0, 0, -0.04, 0.78], [0, C.yP, C.B]),
       };
     }
     const n = clip === 'open' ? 120 : 210;

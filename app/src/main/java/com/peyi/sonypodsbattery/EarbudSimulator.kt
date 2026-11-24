@@ -200,6 +200,8 @@ internal object SimMode {
     const val ADDRESS = "02:5E:00:00:71:0A"
     @Volatile private var state: Pair<EarbudModel, SimState>? = null
 
+    internal fun forgetState() { state = null }
+
     fun model(context: android.content.Context): EarbudModel? {
         if (!BuildConfig.TOOLS) return null
         return EarbudModel.fromId(context.getSharedPreferences("sunpods_ui", android.content.Context.MODE_PRIVATE).getString("sim_model", null))
@@ -222,4 +224,25 @@ internal object SimMode {
             ?: SimState(profile.initial).also { state = model to it }
         return SimulatedEarbuds(profile, kept)
     }
+}
+
+/** Debug demo (TOOLS builds): switch the simulated earbuds right now, no restart, setup stays open. */
+internal fun SimMode.startDemo(context: android.content.Context, model: EarbudModel) {
+    if (!BuildConfig.TOOLS) return
+    context.getSharedPreferences("sunpods_ui", android.content.Context.MODE_PRIVATE).edit()
+        .putString("sim_model", model.id).putInt("sim_color", 0x01).apply()
+    resetDemoDevice(context)
+}
+
+/** End the demo pair and forget the pick, for "Run Setup Again". */
+internal fun SimMode.stopDemo(context: android.content.Context) {
+    if (!BuildConfig.TOOLS) return
+    context.getSharedPreferences("sunpods_ui", android.content.Context.MODE_PRIVATE).edit()
+        .remove("sim_model").remove("chosen_model").apply()
+    resetDemoDevice(context)
+}
+
+private fun resetDemoDevice(context: android.content.Context) {
+    resetDeviceState(context, "demo: another simulated model")
+    SimMode.forgetState()
 }

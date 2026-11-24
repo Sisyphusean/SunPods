@@ -66,6 +66,11 @@ object BatteryStore {
 
     fun caseAt(context: Context): Long = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong("case_at", 0L)
 
+    fun clearAll(context: Context, commit: Boolean = false) {
+        val editor = prefs(context).edit().clear()
+        if (commit) editor.commit() else editor.apply()
+    }
+
     fun clearBatteryValues(context: Context, status: String = "Earbuds disconnected") {
         save(
             context,

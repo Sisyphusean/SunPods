@@ -32,6 +32,58 @@ internal fun audioLinkUp(context: Context): Boolean {
     }
 }
 
+@SuppressLint("MissingPermission")
+internal fun bondedForModel(context: Context, model: EarbudModel): List<android.bluetooth.BluetoothDevice> = runCatching {
+    val adapter = context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter ?: return emptyList()
+    adapter.bondedDevices.orEmpty().filter { device ->
+        runCatching { model.matches(device.name) }.getOrDefault(false)
+    }
+}.getOrDefault(emptyList())
+
+internal fun matchesModelAudioDevice(
+    model: EarbudModel,
+    deviceName: String?,
+    deviceAddress: String?,
+    bondedAddresses: Set<String>,
+): Boolean = model.matches(deviceName) || (deviceAddress != null && deviceAddress in bondedAddresses)
+
+/**
+ * True when [model] specifically has a live Bluetooth audio link (LE Audio, A2DP, or Headset),
+ * ignoring any other Sony model that may be paired or connected.
+ */
+@SuppressLint("MissingPermission")
+internal suspend fun modelAudioLinkUp(
+    context: Context,
+    model: EarbudModel,
+    bonded: List<android.bluetooth.BluetoothDevice>? = null,
+): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    if (SimMode.active(context)) return@withContext SimMode.model(context) == model
+    val adapter = context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter ?: return@withContext false
+    try {
+        if (!adapter.isEnabled) return@withContext false
+        val modelBonded = bonded ?: bondedForModel(context, model)
+        if (modelBonded.isEmpty()) return@withContext false
+        val bondedAddrs = modelBonded.mapNotNullTo(mutableSetOf()) { runCatching { it.address }.getOrNull() }
+        fun matchesThisModel(device: android.bluetooth.BluetoothDevice): Boolean = matchesModelAudioDevice(
+            model = model,
+            deviceName = runCatching { device.name }.getOrNull(),
+            deviceAddress = runCatching { device.address }.getOrNull(),
+            bondedAddresses = bondedAddrs,
+        )
+        if (LeAudio.anyConnected(context) && LeAudio.connectedEarbuds(context).any(::matchesThisModel)) return@withContext true
+        if (adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.A2DP) == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
+            A2dpConnectionHelper.ensureBound(context)
+            if (A2dpConnectionHelper.connectedNow().any(::matchesThisModel)) return@withContext true
+        }
+        if (adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.HEADSET) == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
+            if (A2dpConnectionHelper.headsetConnectedNow(context).any(::matchesThisModel)) return@withContext true
+        }
+        false
+    } catch (_: SecurityException) {
+        false
+    }
+}
+
 /** Where the phone was the last time the earbuds were connected. Kept only on this phone. */
 data class LastSeen(
     val lat: Double,

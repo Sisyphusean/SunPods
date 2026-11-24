@@ -1,0 +1,307 @@
+{
+ "side_L": {
+  "group": "phones",
+  "box": [
+   -51.900000000000006,
+   5.599999999999994,
+   384.9,
+   442.4
+  ],
+  "size": [
+   345,
+   450
+  ],
+  "id": "side_L",
+  "img": "ref_sony/y_WH-1000XM5_021.jpg",
+  "crop": [
+   0,
+   0,
+   345,
+   450
+  ],
+  "mask": "white",
+  "subject": "phones",
+  "color": "black",
+  "init": [
+   -88,
+   0,
+   0
+  ],
+  "hp": {
+   "roll": 0,
+   "yaw": 0,
+   "flare": 0,
+   "ext": 0.56
+  }
+ },
+ "tq_L": {
+  "group": "phones",
+  "box": [
+   -66.79999999999998,
+   8.700000000000017,
+   368.79999999999995,
+   444.29999999999995
+  ],
+  "size": [
+   330,
+   450
+  ],
+  "id": "tq_L",
+  "img": "ref_sony/y_WH-1000XM5_021.jpg",
+  "crop": [
+   370,
+   0,
+   700,
+   450
+  ],
+  "mask": "white",
+  "subject": "phones",
+  "color": "black",
+  "init": [
+   -55,
+   4,
+   0
+  ],
+  "hp": {
+   "roll": 32.64,
+   "yaw": 33.03,
+   "flare": -14.3,
+   "ext": 0.56
+  }
+ },
+ "front": {
+  "group": "phones",
+  "box": [
+   -3.9000000000000057,
+   6.599999999999994,
+   432.9,
+   443.4
+  ],
+  "size": [
+   460,
+   450
+  ],
+  "id": "front",
+  "img": "ref_sony/y_WH-1000XM5_021.jpg",
+  "crop": [
+   740,
+   0,
+   1200,
+   450
+  ],
+  "mask": "white",
+  "subject": "phones",
+  "color": "black",
+  "init": [
+   0,
+   3,
+   0
+  ],
+  "hp": {
+   "roll": 37.64,
+   "yaw": 23.43,
+   "flare": -14.3,
+   "ext": 0.56
+  }
+ },
+ "tq_black": {
+  "group": "phones",
+  "box": [
+   -47.599999999999994,
+   16.400000000000006,
+   271.6,
+   335.6
+  ],
+  "size": [
+   218,
+   360
+  ],
+  "id": "tq_black",
+  "img": "ref_sony/WH-1000XM5.jpg",
+  "crop": [
+   0,
+   60,
+   218,
+   420
+  ],
+  "mask": "white",
+  "subject": "phones",
+  "color": "black",
+  "init": [
+   -55,
+   4,
+   0
+  ],
+  "hp": {
+   "roll": 33.01,
+   "yaw": 31.56,
+   "flare": -14.3,
+   "ext": 0.56
+  }
+ },
+ "tq_silver": {
+  "group": "phones",
+  "box": [
+   -53.0,
+   16.5,
+   265.0,
+   334.5
+  ],
+  "size": [
+   210,
+   360
+  ],
+  "id": "tq_silver",
+  "img": "ref_sony/WH-1000XM5.jpg",
+  "crop": [
+   212,
+   60,
+   422,
+   420
+  ],
+  "mask": "white",
+  "subject": "phones",
+  "color": "silver",
+  "init": [
+   -55,
+   4,
+   0
+  ],
+  "hp": {
+   "roll": 33.01,
+   "yaw": 31.56,
+   "flare": -14.3,
+   "ext": 0.56
+  }
+ },
+ "tq_pink": {
+  "group": "phones",
+  "box": [
+   -61.0,
+   16.5,
+   257.0,
+   334.5
+  ],
+  "size": [
+   210,
+   360
+  ],
+  "id": "tq_pink",
+  "img": "ref_sony/WH-1000XM5.jpg",
+  "crop": [
+   416,
+   60,
+   626,
+   420
+  ],
+  "mask": "white",
+  "subject": "phones",
+  "color": "pink",
+  "init": [
+   -55,
+   4,
+   0
+  ],
+  "hp": {
+   "roll": 33.01,
+   "yaw": 31.56,
+   "flare": -14.3,
+   "ext": 0.56
+  }
+ },
+ "tq20": {
+  "group": "phones",
+  "box": [
+   -48.79999999999998,
+   -14.299999999999983,
+   386.79999999999995,
+   421.29999999999995
+  ],
+  "size": [
+   262,
+   430
+  ],
+  "id": "tq20",
+  "img": "ref_sony/y_WH-1000XM5_020.jpg",
+  "crop": [
+   0,
+   20,
+   262,
+   450
+  ],
+  "mask": "white",
+  "subject": "phones",
+  "color": "black",
+  "init": [
+   -55,
+   4,
+   0
+  ],
+  "hp": {
+   "roll": 31.45,
+   "yaw": 32.79,
+   "flare": -14.3,
+   "ext": 0.56
+  }
+ },
+ "case_black": {
+  "group": "case",
+  "box": [
+   -71.0,
+   -20.5,
+   319.0,
+   369.5
+  ],
+  "size": [
+   245,
+   350
+  ],
+  "id": "case_black",
+  "img": "ref_sony/original_WH-1000XM5_014.jpg",
+  "crop": [
+   60,
+   0,
+   305,
+   350
+  ],
+  "mask": "white",
+  "subject": "case",
+  "color": "black",
+  "lid": 1,
+  "init": [
+   180,
+   90,
+   0
+  ]
+ },
+ "case_silver": {
+  "group": "case",
+  "box": [
+   -79.0,
+   -20.5,
+   311.0,
+   369.5
+  ],
+  "size": [
+   260,
+   350
+  ],
+  "id": "case_silver",
+  "img": "ref_sony/original_WH-1000XM5_014.jpg",
+  "crop": [
+   300,
+   0,
+   560,
+   350
+  ],
+  "mask": "white",
+  "subject": "case",
+  "color": "silver",
+  "lid": 1,
+  "init": [
+   180,
+   90,
+   0
+  ]
+ }
+}
