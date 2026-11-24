@@ -5,12 +5,12 @@
 // start from the last fits (_fit/fits_latest.json) unless --refit. XM_OVR='{...}' tries shape values.
 import fs from 'node:fs';
 import path from 'node:path';
-import { openHero, savePng, XMDIR } from './harness.mjs';
+import { openHero, savePng, XMDIR, loadMeta } from './harness.mjs';
 
 const [iterDir, which = 'all', ...flags] = process.argv.slice(2);
 const refit = flags.includes('--refit');
 fs.mkdirSync(iterDir, { recursive: true });
-const meta = JSON.parse(fs.readFileSync(path.join(XMDIR, '_fit', 'refs', 'meta.json'), 'utf8'));
+const meta = loadMeta();
 const prevFile = path.join(XMDIR, '_fit', 'fits_latest.json');
 const prev = !refit && fs.existsSync(prevFile) ? JSON.parse(fs.readFileSync(prevFile, 'utf8')) : {};
 const page = await openHero({ query: 'device=wh1000xm5', width: 512, height: 512, log: false });
@@ -24,7 +24,9 @@ for (const [id, r] of Object.entries(meta)) {
   if (which !== 'all' && r.group !== which && !which.split(',').includes(id)) continue;
   const b64 = mask64(id), lid = r.lid || 0, hp = r.hp || null;
   const o = prev[id] ? `{ starts: [[0,0,0]], iters: 120, pose: ${JSON.stringify(hp)} }` : `{ pose: ${JSON.stringify(hp)} }`;
-  const res = await page.evaluate(`XMFIT.fit(${JSON.stringify(r.subject)}, ${lid}, ${JSON.stringify(b64)}, ${JSON.stringify(prev[id] ? prev[id].pose.slice(0, 3) : r.init)}, ${o})`);
+  const res = process.env.XM_LOCK && prev[id]
+    ? await page.evaluate(`(async () => { const ref = await XMFIT.decodeMask(${JSON.stringify(b64)}, 192); const pose = ${JSON.stringify(prev[id].pose)}; return { pose, iou: XMFIT.scoreAt(${JSON.stringify(r.subject)}, ${lid}, pose, ref, ${JSON.stringify(hp)}) }; })()`)   // XM_LOCK=1: keep the fitted cameras, only measure
+    : await page.evaluate(`XMFIT.fit(${JSON.stringify(r.subject)}, ${lid}, ${JSON.stringify(b64)}, ${JSON.stringify(prev[id] ? prev[id].pose.slice(0, 3) : r.init)}, ${o})`);
   const shot = await page.evaluate(`XMFIT.shot(${JSON.stringify(r.subject)}, ${lid}, ${JSON.stringify(res.pose)}, ${JSON.stringify(r.color)}, 512, ${JSON.stringify(hp)})`);
   savePng(path.join(iterDir, id + '_model.png'), shot.color);
   savePng(path.join(iterDir, id + '_mask.png'), shot.mask);

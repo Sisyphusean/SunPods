@@ -3,21 +3,32 @@
 //   node closeup.mjs <outDir> [ids...]      XM_OVR='{...}' tries shape values
 import fs from 'node:fs';
 import path from 'node:path';
-import { openHero, savePng, XMDIR } from './harness.mjs';
+import { openHero, savePng, XMDIR, loadMeta } from './harness.mjs';
 
 const [outDir, ...idsArg] = process.argv.slice(2);
 const ids = idsArg.length ? idsArg : ['side_L', 'tq_L', 'front', 'tq_silver', 'case_black'];
 fs.mkdirSync(outDir, { recursive: true });
-const meta = JSON.parse(fs.readFileSync(path.join(XMDIR, '_fit', 'refs', 'meta.json'), 'utf8'));
+const meta = loadMeta();
 const fits = JSON.parse(fs.readFileSync(path.join(XMDIR, '_fit', 'fits_latest.json'), 'utf8'));
 const page = await openHero({ query: 'device=wh1000xm5', width: 512, height: 512, log: false });
 await page.inject('fit_page.js');
 await page.evaluate('window.XMFIT.init()');
 if (process.env.XM_OVR) await page.evaluate(`XMFIT.rebuild(${process.env.XM_OVR})`);
-// parts, by mesh name and side: their bounding-box centres in the subject's frame
+// parts, by mesh/group name and sideKey: their bounding-box centres in the subject's frame
 const PARTS = {
-  phones: [['cup', 'L', 'XM5H_Face'], ['hanger', 'L', 'XM5H_Logo'], ['joint', 'L', 'XM5H_Knuckle'], ['band end', 'L', 'XM5H_Slider'], ['pad', 'R', 'XM5H_Pad'], ['buttons', 'L', 'XM5H_Power']],
-  case: [['case loop', null, 'XM5H_CaseLoop'], ['cups in case', null, 'XM5H_Face'], ['case rim', null, 'XM5H_CasePull']],
+  phones: [
+    ['cup', 'leftSide', 'earcupShell'],
+    ['hanger', 'leftSide', 'sonyWordmark'],
+    ['joint', 'leftSide', 'swivelKnuckle'],
+    ['band end', 'leftSide', 'sliderArm'],
+    ['pad', 'rightSide', 'earpadCushion'],
+    ['buttons', 'leftSide', 'powerButton'],
+  ],
+  case: [
+    ['case loop', null, 'carryCaseHangingLoop'],
+    ['cups in case', 'leftSide', 'earcupShell'],
+    ['case rim', null, 'carryCaseZipperPull'],
+  ],
 };
 const where = {};
 for (const id of ids) {
@@ -29,10 +40,10 @@ for (const id of ids) {
     XMFIT.useSubject(${JSON.stringify(m.subject)}, ${m.lid || 0}, ${JSON.stringify(hp)});
     const subj = XMFIT.subject.obj; subj.updateMatrixWorld(true);
     const inv = new T.Matrix4().copy(subj.matrixWorld).invert();
-    return ${JSON.stringify(parts)}.map(([label, side, name]) => {
-      const root = side ? d.M.buds.phones.units[side].cup.parent.parent.parent.parent.parent : subj;
+    return ${JSON.stringify(parts)}.map(([label, sideKey, name]) => {
+      const root = sideKey ? d.M.headphoneModel.parts[sideKey].sideAssembly : subj;
       let o = null; root.traverse((x) => { if (!o && x.name === name) o = x; });
-      const c = new T.Box3().setFromObject(o).getCenter(new T.Vector3()).applyMatrix4(inv);
+      const c = o ? new T.Box3().setFromObject(o).getCenter(new T.Vector3()).applyMatrix4(inv) : new T.Vector3();
       return c.toArray();
     }); })()`);
   const px = await page.evaluate(`XMFIT.project(${JSON.stringify(m.subject)}, ${m.lid || 0}, ${JSON.stringify(pose)}, ${JSON.stringify(pts)}, 512, ${JSON.stringify(hp)})`);

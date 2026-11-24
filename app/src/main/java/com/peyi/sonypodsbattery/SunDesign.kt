@@ -162,8 +162,8 @@ internal fun budArt(colorCode: Int?, model: EarbudModel = EarbudModel.active): B
         EarbudModel.WF_C710N -> c710nArt(c)
         EarbudModel.WH_1000XM5 -> wh1000xm5Art(c)
         EarbudModel.WF_1000XM5 -> when (c) {
-            0x03 -> BudArt(R.drawable.bud_left_silver, R.drawable.bud_right_silver, R.drawable.bud_case_silver, R.drawable.buds_pair_silver, "silver", R.raw.anim_pair_silver, R.raw.anim_open_silver)
-            0x06 -> BudArt(R.drawable.bud_left_pink, R.drawable.bud_right_pink, R.drawable.bud_case_pink, R.drawable.buds_pair_pink, "pink", R.raw.anim_pair_pink, R.raw.anim_open_pink)
+            0x03 -> BudArt(R.drawable.bud_left_silver, R.drawable.bud_right_silver, R.drawable.bud_case_silver, R.drawable.buds_pair_silver, "silver", R.raw.anim_pair_silver, R.raw.anim_open)
+            0x06 -> BudArt(R.drawable.bud_left_pink, R.drawable.bud_right_pink, R.drawable.bud_case_pink, R.drawable.buds_pair_pink, "pink", R.raw.anim_pair_pink, R.raw.anim_open)
             else -> BudArt(R.drawable.bud_left, R.drawable.bud_right, R.drawable.bud_case, R.drawable.buds_pair, "black", R.raw.anim_pair, R.raw.anim_open)
         }
     }
@@ -173,17 +173,17 @@ internal fun budArt(settings: DeviceSettings): BudArt = budArt(settings.colorCod
 
 /** WF-C710N finishes; the 3D hero names them black, white, blue and pink. */
 private fun c710nArt(c: Int?): BudArt = when (c) {
-    0x02 -> BudArt(R.drawable.c710n_bud_left_white, R.drawable.c710n_bud_right_white, R.drawable.c710n_bud_case_white, R.drawable.c710n_buds_pair_white, "white", R.raw.c710n_anim_pair_white, R.raw.c710n_anim_open_white, model = EarbudModel.WF_C710N)
-    0x05 -> BudArt(R.drawable.c710n_bud_left_blue, R.drawable.c710n_bud_right_blue, R.drawable.c710n_bud_case_blue, R.drawable.c710n_buds_pair_blue, "blue", R.raw.c710n_anim_pair_blue, R.raw.c710n_anim_open_blue, model = EarbudModel.WF_C710N)
-    0x06 -> BudArt(R.drawable.c710n_bud_left_pink, R.drawable.c710n_bud_right_pink, R.drawable.c710n_bud_case_pink, R.drawable.c710n_buds_pair_pink, "pink", R.raw.c710n_anim_pair_pink, R.raw.c710n_anim_open_pink, model = EarbudModel.WF_C710N)
+    0x02 -> BudArt(R.drawable.c710n_bud_left_white, R.drawable.c710n_bud_right_white, R.drawable.c710n_bud_case_white, R.drawable.c710n_buds_pair_white, "white", R.raw.c710n_anim_pair_black, R.raw.c710n_anim_open_black, model = EarbudModel.WF_C710N)
+    0x05 -> BudArt(R.drawable.c710n_bud_left_blue, R.drawable.c710n_bud_right_blue, R.drawable.c710n_bud_case_blue, R.drawable.c710n_buds_pair_blue, "blue", R.raw.c710n_anim_pair_black, R.raw.c710n_anim_open_black, model = EarbudModel.WF_C710N)
+    0x06 -> BudArt(R.drawable.c710n_bud_left_pink, R.drawable.c710n_bud_right_pink, R.drawable.c710n_bud_case_pink, R.drawable.c710n_buds_pair_pink, "pink", R.raw.c710n_anim_pair_black, R.raw.c710n_anim_open_black, model = EarbudModel.WF_C710N)
     else -> BudArt(R.drawable.c710n_bud_left_black, R.drawable.c710n_bud_right_black, R.drawable.c710n_bud_case_black, R.drawable.c710n_buds_pair_black, "black", R.raw.c710n_anim_pair_black, R.raw.c710n_anim_open_black, model = EarbudModel.WF_C710N)
 }
 
 /** WH-1000XM5 finishes; the 3D hero names them black, silver, blue and pink. Stills: side (the battery picture), front, case. */
 private fun wh1000xm5Art(c: Int?): BudArt = when (c) {
-    0x03 -> BudArt(R.drawable.wh1000xm5_side_silver, R.drawable.wh1000xm5_front_silver, R.drawable.wh1000xm5_case_silver, R.drawable.wh1000xm5_pair_silver, "silver", R.raw.wh1000xm5_anim_pair_silver, R.raw.wh1000xm5_anim_open_silver, model = EarbudModel.WH_1000XM5)
-    0x05 -> BudArt(R.drawable.wh1000xm5_side_blue, R.drawable.wh1000xm5_front_blue, R.drawable.wh1000xm5_case_blue, R.drawable.wh1000xm5_pair_blue, "blue", R.raw.wh1000xm5_anim_pair_blue, R.raw.wh1000xm5_anim_open_blue, model = EarbudModel.WH_1000XM5)
-    0x06 -> BudArt(R.drawable.wh1000xm5_side_pink, R.drawable.wh1000xm5_front_pink, R.drawable.wh1000xm5_case_pink, R.drawable.wh1000xm5_pair_pink, "pink", R.raw.wh1000xm5_anim_pair_pink, R.raw.wh1000xm5_anim_open_pink, model = EarbudModel.WH_1000XM5)
+    0x03 -> BudArt(R.drawable.wh1000xm5_side_silver, R.drawable.wh1000xm5_front_silver, R.drawable.wh1000xm5_case_silver, R.drawable.wh1000xm5_pair_silver, "silver", R.raw.wh1000xm5_anim_pair_black, R.raw.wh1000xm5_anim_open_black, model = EarbudModel.WH_1000XM5)
+    0x05 -> BudArt(R.drawable.wh1000xm5_side_blue, R.drawable.wh1000xm5_front_blue, R.drawable.wh1000xm5_case_blue, R.drawable.wh1000xm5_pair_blue, "blue", R.raw.wh1000xm5_anim_pair_black, R.raw.wh1000xm5_anim_open_black, model = EarbudModel.WH_1000XM5)
+    0x06 -> BudArt(R.drawable.wh1000xm5_side_pink, R.drawable.wh1000xm5_front_pink, R.drawable.wh1000xm5_case_pink, R.drawable.wh1000xm5_pair_pink, "pink", R.raw.wh1000xm5_anim_pair_black, R.raw.wh1000xm5_anim_open_black, model = EarbudModel.WH_1000XM5)
     else -> BudArt(R.drawable.wh1000xm5_side_black, R.drawable.wh1000xm5_front_black, R.drawable.wh1000xm5_case_black, R.drawable.wh1000xm5_pair_black, "black", R.raw.wh1000xm5_anim_pair_black, R.raw.wh1000xm5_anim_open_black, model = EarbudModel.WH_1000XM5)
 }
 
@@ -207,6 +207,17 @@ internal enum class Page(val title: String) {
     BATTERY_HEALTH("Battery Health"),
     BATTERY_WEEK("This Week"),
     BATTERY_ALERTS("Low Battery Alerts")
+}
+
+/** True when the system animator duration scale is 0 (reduced motion). */
+@Composable
+internal fun rememberReduceMotion(): Boolean {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return androidx.compose.runtime.remember {
+        android.provider.Settings.Global.getFloat(
+            context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f
+        ) <= 0f
+    }
 }
 
 /** Opens a [Page]; provided by the app shell. */

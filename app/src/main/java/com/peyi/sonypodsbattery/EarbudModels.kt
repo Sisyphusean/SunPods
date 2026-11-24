@@ -18,10 +18,12 @@ enum class EarbudModel(
     val caseCharges: Double,
     /** Over-ear headphones: one battery, no charging case, buttons and a touch panel instead of per-side touch. */
     val headphones: Boolean = false,
+    /** Whether this model supports LE Audio switching and pairing. */
+    val supportsLeAudio: Boolean = false,
     /** The product line it belongs to, for grouping in the device picker: "1000X", "C", "LinkBuds", "ULT"... */
     val series: String = "",
 ) {
-    WF_1000XM5("xm5", "WF-1000XM5", Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE), 8.0, 12.0, 2.0, series = "1000X"),
+    WF_1000XM5("xm5", "WF-1000XM5", Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE), 8.0, 12.0, 2.0, supportsLeAudio = true, series = "1000X"),
     // Sony: 8.5 h NC on / 12 h off, about 30 h in total with the case (21.5 h in the case).
     WF_C710N("c710n", "WF-C710N", Regex("WF[- ]?C710N", RegexOption.IGNORE_CASE), 8.5, 12.0, 2.5, series = "C"),
     // Sony: 30 h with noise cancelling, 40 h without; no charging case.
@@ -86,7 +88,7 @@ enum class EarbudModel(
 
         fun current(context: Context): EarbudModel {
             val reported = fromName(SettingsStore.modelName(context))
-            if (reported != null) active = reported else chosen(context)?.let { active = it }
+            if (reported != null) active = reported else (chosen(context) ?: SimMode.model(context))?.let { active = it }
             return active
         }
 
@@ -102,21 +104,6 @@ enum class EarbudModel(
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(CHOSEN, model.id).apply()
             active = model
         }
-
-        /** The outcome of weighing what someone picked against what a connected device says it is. */
-        data class Resolution(val model: EarbudModel, val switchedFrom: EarbudModel?)
-
-        /** The device knows best: a different detected model wins, and says what it replaced. */
-        fun resolve(chosen: EarbudModel?, detected: EarbudModel?): Resolution = when {
-            detected == null -> Resolution(chosen ?: WF_1000XM5, null)
-            chosen == null || chosen == detected -> Resolution(detected, null)
-            else -> Resolution(detected, chosen)
-        }
-
-        /** Names to look for when scanning for or picking earbuds to set up. */
-        val scanPattern: java.util.regex.Pattern = java.util.regex.Pattern.compile(
-            ".*(" + entries.joinToString("|") { it.pattern.pattern } + ").*", java.util.regex.Pattern.CASE_INSENSITIVE)
-
     }
 }
 

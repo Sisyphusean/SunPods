@@ -794,6 +794,11 @@ object SettingsStore {
     private const val PREFS = "device_settings"
     private const val KEY = "json"
 
+    fun clear(context: Context, commit: Boolean = false) {
+        val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear()
+        if (commit) editor.commit() else editor.apply()
+    }
+
     /** Just the saved model name, without building the whole settings. */
     fun modelName(context: Context): String? = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)
         ?.let { runCatching { org.json.JSONObject(it).optString("model").ifEmpty { null } }.getOrNull() }

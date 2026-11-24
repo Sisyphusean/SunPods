@@ -28,17 +28,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -109,15 +104,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -133,11 +123,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.regex.Pattern
 
 /** Whether first-run setup has been completed. */
 internal object OnboardingStore {
     private const val KEY = "onboarding_done"
+    private const val HERO_INTRO_KEY = "hero_intro_pending"
     private fun p(c: Context) = c.getSharedPreferences("sunpods_ui", Context.MODE_PRIVATE)
 
     fun done(c: Context): Boolean {
@@ -149,13 +139,20 @@ internal object OnboardingStore {
         return existing
     }
 
-    fun setDone(c: Context, done: Boolean) = p(c).edit().putBoolean(KEY, done).commit()
+    fun setDone(c: Context, done: Boolean) { p(c).edit().putBoolean(KEY, done).commit() }
+
+    fun heroIntroPending(c: Context): Boolean = p(c).getBoolean(HERO_INTRO_KEY, false)
+
+    fun setHeroIntroPending(c: Context, pending: Boolean) = p(c).edit().putBoolean(HERO_INTRO_KEY, pending).apply()
 
     fun hasNearby(c: Context) = Build.VERSION.SDK_INT < 31 ||
         c.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 }
 
-private enum class Step { WELCOME, DEVICE, NEARBY, EARBUDS, LEAUDIO, UPDATES, EXTRAS, DONE }
+internal enum class OnboardingStep { WELCOME, DEVICE, NEARBY, EARBUDS, LEAUDIO, UPDATES, EXTRAS, DONE }
+
+internal fun onboardingSteps(model: EarbudModel, phoneSupportsLeAudio: Boolean): List<OnboardingStep> =
+    OnboardingStep.entries.filter { it != OnboardingStep.LEAUDIO || (phoneSupportsLeAudio && model.supportsLeAudio) }
 
 private fun Context.findActivity(): Activity? {
     var c: Context? = this
@@ -167,7 +164,7 @@ private fun Context.findActivity(): Activity? {
 @Composable
 private fun resumeTick(): Int {
     var tick by remember { mutableIntStateOf(0) }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val o = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) tick++ }
         lifecycle.addObserver(o)
@@ -220,28 +217,66 @@ private fun openNotificationSettings(context: Context) = runCatching {
 
 @Composable
 internal fun Onboarding(vm: SunpodsViewModel, onDone: () -> Unit) {
-    var step by rememberSaveable { mutableStateOf(Step.WELCOME) }
+    var step by rememberSaveable { mutableStateOf(OnboardingStep.WELCOME) }
     val context = LocalContext.current
-    // The LE Audio page only shows on phones that can use it.
-    // Unknown (Bluetooth was off) still shows the step; the step checks properly and skips itself.
+    val scope = rememberCoroutineScope()
+    var selectedModel by rememberSaveable { mutableStateOf(EarbudModel.chosen(context) ?: EarbudModel.WF_1000XM5) }
+    var browsedModel by rememberSaveable { mutableStateOf(selectedModel) }
+    var demoOn by remember { mutableStateOf(BuildConfig.TOOLS && SimMode.active(context)) }
+    // The LE Audio page only shows on phones and models that can use it, so it drops out of
+    // order immediately when !selectedModel.supportsLeAudio without progress-bar flicker.
     val leAudio = remember { LeAudio.support(context) != LeAudio.Support.NOT_SUPPORTED }
-    val order = Step.entries.filter { it != Step.LEAUDIO || leAudio }
-    fun next() { step = order[(order.indexOf(step) + 1).coerceAtMost(order.lastIndex)] }
+    val order = remember(selectedModel, leAudio) { onboardingSteps(selectedModel, leAudio) }
+    fun advanceFrom(fromStep: OnboardingStep, steps: List<OnboardingStep>): OnboardingStep {
+        val idx = steps.indexOf(fromStep)
+        val candidate = steps[(idx + 1).coerceAtMost(steps.lastIndex)]
+        return if (candidate == OnboardingStep.NEARBY && OnboardingStore.hasNearby(context)) {
+            steps[(idx + 2).coerceAtMost(steps.lastIndex)]
+        } else candidate
+    }
+    fun next() { step = advanceFrom(step, order) }
+    fun syncDemoState(enable: Boolean, targetModel: EarbudModel) {
+        if (!BuildConfig.TOOLS) return
+        if (enable) SimMode.startDemo(context, targetModel) else SimMode.stopDemo(context)
+        if (step.ordinal > OnboardingStep.DEVICE.ordinal) EarbudModel.choose(context, selectedModel)
+        vm.reloadCached()
+        demoOn = enable
+    }
+    fun selectModelAndNext(picked: EarbudModel) {
+        val cachedModel = EarbudModel.fromName(SettingsStore.modelName(context))
+        val previousChosen = EarbudModel.chosen(context)
+        val switched = (cachedModel != null && cachedModel != picked) || previousChosen != picked
+        if (BuildConfig.TOOLS && demoOn) {
+            SimMode.startDemo(context, picked)
+        } else if (switched) {
+            resetDeviceState(context, "setup: model switched", closeSession = false)
+            scope.launch(Dispatchers.IO) { SonyControlSessionManager.closeForReset(context, "setup: model switched") }
+        }
+        selectedModel = picked
+        browsedModel = picked
+        EarbudModel.choose(context, picked)
+        vm.reloadCached()
+        step = advanceFrom(OnboardingStep.DEVICE, onboardingSteps(picked, leAudio))
+    }
     // Material predictive back: the step shrinks toward the finger, and letting go returns to it.
     var backProgress by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var backCommitted by remember { mutableStateOf(false) }
-    androidx.activity.compose.PredictiveBackHandler(enabled = step != Step.WELCOME) { events ->
+    androidx.activity.compose.PredictiveBackHandler(enabled = step != OnboardingStep.WELCOME) { events ->
         try {
             events.collect { backProgress = it.progress }
             backCommitted = true
-            step = order[(order.indexOf(step) - 1).coerceAtLeast(0)]
+            var prev = order[(order.indexOf(step) - 1).coerceAtLeast(0)]
+            if (prev == OnboardingStep.NEARBY && OnboardingStore.hasNearby(context)) {
+                prev = OnboardingStep.DEVICE
+            }
+            step = prev
         } catch (e: kotlin.coroutines.cancellation.CancellationException) {
             androidx.compose.animation.core.animate(backProgress, 0f, animationSpec = androidx.compose.animation.core.spring(stiffness = 500f)) { v, _ -> backProgress = v }
         }
     }
     val tick = resumeTick()
     LaunchedEffect(step, tick) {
-        if (step.ordinal > Step.NEARBY.ordinal && !OnboardingStore.hasNearby(context)) step = Step.NEARBY
+        if (step.ordinal > OnboardingStep.NEARBY.ordinal && !OnboardingStore.hasNearby(context)) step = OnboardingStep.NEARBY
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -253,10 +288,10 @@ internal fun Onboarding(vm: SunpodsViewModel, onDone: () -> Unit) {
             androidx.compose.animation.core.spring(stiffness = androidx.compose.animation.core.Spring.StiffnessLow),
             label = "progress"
         )
-        androidx.compose.animation.AnimatedVisibility(step != Step.WELCOME, enter = fadeIn(), exit = fadeOut()) {
+        androidx.compose.animation.AnimatedVisibility(step != OnboardingStep.WELCOME, enter = fadeIn(), exit = fadeOut()) {
             LinearProgressIndicator(
                 progress = { fraction },
-                modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 16.dp).clip(CircleShape)
+                modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = if (BuildConfig.TOOLS) 34.dp else 16.dp).clip(CircleShape)
             )
         }
         AnimatedContent(
@@ -283,34 +318,60 @@ internal fun Onboarding(vm: SunpodsViewModel, onDone: () -> Unit) {
             } else Modifier
           ) {
             when (s) {
-                Step.WELCOME -> WelcomeStep(onStart = ::next)
-                Step.DEVICE -> DeviceStep(vm, onNext = ::next)
-                Step.NEARBY -> NearbyStep(tick, onNext = ::next)
-                Step.EARBUDS -> EarbudsStep(vm, tick, onNext = ::next)
-                Step.LEAUDIO -> LeAudioStep(vm, onNext = ::next)
-                Step.UPDATES -> UpdatesStep(tick, onNext = ::next)
-                Step.EXTRAS -> ExtrasStep(tick, onNext = ::next)
-                Step.DONE -> DoneStep(vm, onDone = onDone, onAnother = {
-                    SimMode.stopDemo(context); vm.reloadCached(); OnboardingStore.setDone(context, false); step = Step.DEVICE
-                })
+                OnboardingStep.WELCOME -> WelcomeStep(onStart = ::next)
+                OnboardingStep.DEVICE -> DeviceStep(
+                    initialModel = selectedModel,
+                    onModelChange = { browsedModel = it },
+                    onContinue = ::selectModelAndNext
+                )
+                OnboardingStep.NEARBY -> NearbyStep(selectedModel, tick, onNext = ::next)
+                OnboardingStep.EARBUDS -> EarbudsStep(
+                    vm = vm,
+                    model = selectedModel,
+                    demo = demoOn,
+                    onEnableDemo = { syncDemoState(true, selectedModel) },
+                    tick = tick,
+                    onNext = ::next
+                )
+                OnboardingStep.LEAUDIO -> LeAudioStep(vm, selectedModel, onNext = { if (step == OnboardingStep.LEAUDIO) next() })
+                OnboardingStep.UPDATES -> UpdatesStep(selectedModel, tick, onNext = ::next)
+                OnboardingStep.EXTRAS -> ExtrasStep(selectedModel, tick, onNext = ::next)
+                OnboardingStep.DONE -> DoneStep(vm, selectedModel, onDone = onDone)
             }
           }
         }
       }
-      // Debug builds only: so this is never taken for real pairing.
-      if (BuildConfig.TOOLS) Text(
-          "Demo", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer,
-          modifier = Modifier.align(Alignment.TopEnd).systemBarsPadding().padding(end = 12.dp)
-              .clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer).padding(horizontal = 8.dp, vertical = 1.dp)
-      )
+      // Debug builds only: explicit Demo toggle pill so real Bluetooth or simulated walkthroughs can be chosen.
+      if (BuildConfig.TOOLS) {
+          val pillColors = MaterialTheme.colorScheme
+          Surface(
+              onClick = {
+                  val target = if (step == OnboardingStep.DEVICE) browsedModel else selectedModel
+                  syncDemoState(!demoOn, target)
+              },
+              shape = CircleShape,
+              color = if (demoOn) pillColors.primaryContainer else pillColors.secondaryContainer,
+              contentColor = if (demoOn) pillColors.onPrimaryContainer else pillColors.onSecondaryContainer,
+              modifier = Modifier
+                  .align(Alignment.TopEnd)
+                  .systemBarsPadding()
+                  .padding(top = 4.dp, end = 16.dp)
+                  .semantics { contentDescription = "Demo mode ${if (demoOn) "on" else "off"}" }
+          ) {
+              Text(
+                  if (demoOn) "Demo: On" else "Demo: Off",
+                  style = MaterialTheme.typography.labelSmall,
+                  modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+              )
+          }
+      }
     }
     }
 }
 
-/** One page: progress at the top, a picture or icon, a title, a short explanation, actions at the bottom. */
+/** One page: a picture or icon, a title, a short explanation, actions at the bottom. */
 @Composable
 private fun Page(
-    progress: Float?,
     icon: ImageVector? = null,
     tone: Color? = null,
     art: (@Composable () -> Unit)? = null,
@@ -324,7 +385,6 @@ private fun Page(
     content: @Composable ColumnScope.() -> Unit = {}
 ) {
     val colors = MaterialTheme.colorScheme
-    @Suppress("UNUSED_VARIABLE") val unusedProgress = progress // the bar lives in the setup shell now
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
         Column(
             Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(top = 32.dp),
@@ -359,8 +419,6 @@ private fun Page(
     }
 }
 
-private fun progressOf(step: Step) = step.ordinal / (Step.entries.size - 1).toFloat()
-
 // -------------------------------------------------------------------------------- 1 welcome
 
 @Composable
@@ -378,12 +436,12 @@ private fun WelcomeStep(onStart: () -> Unit) {
     }
     val colors = MaterialTheme.colorScheme
     Page(
-        progress = null,
         art = {
             // The one live 3D hero: it steps through every supported model (EarbudModel.entries, so new
             // models join by themselves), each in black, even when the user's own model is already known.
             Hero3D(
                 centered = true,
+                caseProgress = 0f,
                 device = EarbudModel.entries.first().id,
                 color = "black",
                 cycleDevices = EarbudModel.entries.map { it.id },
@@ -448,26 +506,20 @@ private fun Feature(icon: ImageVector, title: String, body: String) {
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun DeviceStep(vm: SunpodsViewModel, onNext: () -> Unit) {
-    val context = LocalContext.current
+private fun DeviceStep(
+    initialModel: EarbudModel,
+    onModelChange: (EarbudModel) -> Unit,
+    onContinue: (EarbudModel) -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
-    val reduceMotion = remember { Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) <= 0f }
-    var headphones by rememberSaveable { mutableStateOf(false) }
+    val reduceMotion = rememberReduceMotion()
+    var headphones by rememberSaveable { mutableStateOf(initialModel.headphones) }
+    var selectedModel by rememberSaveable { mutableStateOf(initialModel) }
     val models = remember(headphones) { EarbudModel.entries.filter { it.headphones == headphones } }
-    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = 0) { models.size }
-    val model = models[pager.currentPage.coerceIn(0, models.lastIndex)]
+    LaunchedEffect(selectedModel) { onModelChange(selectedModel) }
     var showAll by rememberSaveable { mutableStateOf(false) }
     var jumpTo by remember { mutableStateOf<EarbudModel?>(null) }
-    fun goTo(i: Int) { scope.launch { if (reduceMotion) pager.scrollToPage(i) else pager.animateScrollToPage(i) } }
-    // A pick from the full list: switch family if needed, then land on that model.
-    LaunchedEffect(jumpTo) {
-        val target = jumpTo ?: return@LaunchedEffect
-        pager.scrollToPage(models.indexOf(target).coerceAtLeast(0))
-        jumpTo = null
-    }
-    // Warm up this family's models and the first of the other, so no swipe lands on an empty hero.
-    val warm = remember(models) { models.take(6).map { it.id } + EarbudModel.entries.first { it.headphones != headphones }.id }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
         Spacer(Modifier.height(32.dp))
@@ -478,77 +530,96 @@ private fun DeviceStep(vm: SunpodsViewModel, onNext: () -> Unit) {
         Spacer(Modifier.height(16.dp))
         FamilySwitch(
             labels = listOf("Earbuds", "Headphones"), selected = if (headphones) 1 else 0, reduceMotion = reduceMotion,
-            onSelect = { i -> val hp = i == 1; if (headphones != hp) { headphones = hp; scope.launch { pager.scrollToPage(0) } } }
-        )
-        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-          val heroH = minOf(320.dp, maxHeight - 120.dp).coerceAtLeast(200.dp)
-          // Wide enough to be big, narrow enough that the earbuds keep a clear margin from the screen edges.
-          val screenW = maxWidth + 48.dp
-          val heroW = minOf(heroH * 1.4f, screenW * 1.077f, (screenW - 64.dp) / 0.65f)
-          Box(Modifier.fillMaxWidth().height(heroH + 100.dp)) {
-            // The hero stays put (wider than the screen, so it is big) and the pager lays over it, so a
-            // swipe anywhere changes the device. The name sits right under the picture.
-            Box(Modifier.align(Alignment.TopCenter).requiredWidth(heroW).height(heroH)) {
-                Hero3D(
-                    device = model.id, color = "black", softSwap = true, centered = true, preload = warm,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-            androidx.compose.foundation.pager.HorizontalPager(
-                state = pager, modifier = Modifier.fillMaxSize(), key = { models[it].id }
-            ) { page ->
-                val m = models[page]
-                Column(
-                    Modifier.fillMaxSize().semantics(mergeDescendants = true) {
-                        contentDescription = "${m.displayName}, ${m.noun}. ${page + 1} of ${models.size}"
-                        val actions = mutableListOf<CustomAccessibilityAction>()
-                        if (page > 0) actions += CustomAccessibilityAction("Previous device") { goTo(page - 1); true }
-                        if (page < models.size - 1) actions += CustomAccessibilityAction("Next device") { goTo(page + 1); true }
-                        customActions = actions
-                    },
-                    verticalArrangement = Arrangement.Bottom, horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        m.displayName, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center, maxLines = 1
-                    )
-                    Spacer(Modifier.height(48.dp))
+            onSelect = { i ->
+                val hp = i == 1
+                if (headphones != hp) {
+                    headphones = hp
+                    selectedModel = EarbudModel.entries.first { it.headphones == hp }
                 }
             }
-            // Page dots; each is a 48dp target that jumps to its device.
-            if (models.size > 1) Row(Modifier.align(Alignment.BottomCenter), verticalAlignment = Alignment.CenterVertically) {
-                models.forEachIndexed { i, m ->
-                    val on = i == pager.currentPage
-                    val w by androidx.compose.animation.core.animateDpAsState(
-                        if (on) 20.dp else 8.dp,
-                        if (reduceMotion) androidx.compose.animation.core.snap() else androidx.compose.animation.core.tween(200, easing = Motion.Arrive),
-                        label = "dot"
-                    )
-                    Box(
-                        Modifier.size(48.dp)
-                            .selectable(selected = on, role = Role.Tab, onClick = { goTo(i) })
-                            .semantics { contentDescription = "Show ${m.displayName}" },
-                        contentAlignment = Alignment.Center
+        )
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+          val heroH = minOf(300.dp, maxHeight - 130.dp).coerceAtLeast(180.dp)
+          Box(Modifier.fillMaxWidth().height(heroH + 110.dp)) {
+            // Key by family so switching between Earbuds and Headphones never shrinks an active PagerState under HorizontalPager.
+            androidx.compose.runtime.key(headphones) {
+                val initialPage = remember(headphones) { models.indexOf(selectedModel).coerceAtLeast(0) }
+                val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = initialPage) { models.size }
+                LaunchedEffect(pager.currentPage, models) {
+                    val m = models.getOrNull(pager.currentPage) ?: models.firstOrNull() ?: return@LaunchedEffect
+                    selectedModel = m
+                }
+                fun goTo(i: Int) {
+                    val clamped = i.coerceIn(0, models.lastIndex)
+                    scope.launch { if (reduceMotion) pager.scrollToPage(clamped) else pager.animateScrollToPage(clamped) }
+                }
+                // A pick from the full list: switch family if needed, then land on that model.
+                LaunchedEffect(jumpTo, models) {
+                    val target = jumpTo ?: return@LaunchedEffect
+                    val idx = models.indexOf(target)
+                    if (idx >= 0) {
+                        pager.scrollToPage(idx)
+                        selectedModel = target
+                        jumpTo = null
+                    }
+                }
+                androidx.compose.foundation.pager.HorizontalPager(
+                    state = pager, modifier = Modifier.fillMaxSize(), key = { models.getOrNull(it)?.id ?: it }
+                ) { page ->
+                    val m = models.getOrNull(page) ?: return@HorizontalPager
+                    Column(
+                        Modifier.fillMaxSize().semantics(mergeDescendants = true) {
+                            contentDescription = "${m.displayName}, ${m.noun}. ${page + 1} of ${models.size}"
+                            val actions = mutableListOf<CustomAccessibilityAction>()
+                            if (page > 0) actions += CustomAccessibilityAction("Previous device") { goTo(page - 1); true }
+                            if (page < models.size - 1) actions += CustomAccessibilityAction("Next device") { goTo(page + 1); true }
+                            customActions = actions
+                        },
+                        verticalArrangement = Arrangement.Top, horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Box(Modifier.size(width = w, height = 8.dp).clip(CircleShape).background(if (on) colors.primary else colors.outlineVariant))
+                        Image(
+                            painter = painterResource(budArt(null, m).pair),
+                            contentDescription = null,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                            modifier = Modifier.fillMaxWidth(0.86f).height(heroH)
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            m.displayName, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center, maxLines = 1
+                        )
+                    }
+                }
+                // Page dots; each is a 48dp target that jumps to its device.
+                if (models.size > 1) Row(Modifier.align(Alignment.BottomCenter), verticalAlignment = Alignment.CenterVertically) {
+                    models.forEachIndexed { i, m ->
+                        val on = i == pager.currentPage
+                        val w by androidx.compose.animation.core.animateDpAsState(
+                            if (on) 20.dp else 8.dp,
+                            if (reduceMotion) androidx.compose.animation.core.snap() else androidx.compose.animation.core.tween(200, easing = Motion.Arrive),
+                            label = "dot"
+                        )
+                        Box(
+                            Modifier.size(48.dp)
+                                .selectable(selected = on, role = Role.Tab, onClick = { goTo(i) })
+                                .semantics { contentDescription = "Show ${m.displayName}" },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(Modifier.size(width = w, height = 8.dp).clip(CircleShape).background(if (on) colors.primary else colors.outlineVariant))
+                        }
                     }
                 }
             }
           }
         }
         Button(
-            onClick = {
-                EarbudModel.choose(context, model)
-                // Debug builds only: the pick also starts the simulated earbuds, right now, so setup can be clicked through for any model.
-                if (BuildConfig.TOOLS) { SimMode.startDemo(context, model); vm.reloadCached() }
-                onNext()
-            },
+            onClick = { onContinue(selectedModel) },
             modifier = Modifier.fillMaxWidth().height(56.dp)
         ) { Text("Continue") }
         TextButton(onClick = { showAll = true }, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("See All") }
     }
     if (showAll) AllDevicesSheet(
-        onPick = { m -> showAll = false; headphones = m.headphones; jumpTo = m },
+        onPick = { m -> showAll = false; selectedModel = m; onContinue(m) },
         onDismiss = { showAll = false }
     )
 }
@@ -659,27 +730,27 @@ private fun AllDevicesSheet(onPick: (EarbudModel) -> Unit, onDismiss: () -> Unit
 // -------------------------------------------------------------------------------- 3 nearby devices
 
 @Composable
-private fun NearbyStep(tick: Int, onNext: () -> Unit) {
+private fun NearbyStep(model: EarbudModel, tick: Int, onNext: () -> Unit) {
     val context = LocalContext.current
     if (Build.VERSION.SDK_INT < 31) { LaunchedEffect(Unit) { onNext() }; return }
     val gate = rememberPermission(listOf(Manifest.permission.BLUETOOTH_CONNECT), tick)
     LaunchedEffect(gate.state) { if (gate.state == Perm.GRANTED) onNext() }
     when (gate.state) {
         Perm.ASK, Perm.GRANTED -> Page(
-            progress = progressOf(Step.NEARBY), icon = Icons.Rounded.Bluetooth,
-            title = "Connect to Your Earbuds or Headphones",
-            body = "SunPods uses Bluetooth to talk to your earbuds or headphones. Android calls this Nearby devices.",
+            icon = Icons.Rounded.Bluetooth,
+            title = "Connect to Your ${model.titleNoun}",
+            body = "SunPods uses Bluetooth to talk to your ${model.displayName}. Android calls this Nearby devices.",
             primary = "Allow", onPrimary = gate.request
         )
         Perm.DENIED -> Page(
-            progress = progressOf(Step.NEARBY), icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
+            icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
             title = "SunPods Needs Nearby Devices",
-            body = "Without it, SunPods can't show battery levels or change settings. It's only used to connect to your earbuds or headphones.",
+            body = "Without it, SunPods can't show battery levels or change settings. It's only used to connect to your ${model.displayName}.",
             primary = "Allow", onPrimary = gate.request,
             secondary = "Open Settings", onSecondary = { openAppSettings(context) }
         )
         Perm.BLOCKED -> Page(
-            progress = progressOf(Step.NEARBY), icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
+            icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
             title = "Turn On Nearby Devices in Settings",
             body = "Android won't ask again. In Settings, tap Permissions, then Nearby devices, then Allow. SunPods continues when you return.",
             primary = "Open Settings", onPrimary = { openAppSettings(context) }
@@ -700,45 +771,47 @@ private sealed interface Buds {
     data class Failed(val message: String) : Buds
 }
 
-@SuppressLint("MissingPermission")
-private fun bondedEarbuds(context: Context): BluetoothDevice? = runCatching { SonyBatteryClient(context).findEarbuds() }.getOrNull()
-
-@SuppressLint("MissingPermission")
-private fun hasBonded(context: Context, model: EarbudModel, found: BluetoothDevice?): Boolean =
-    (found != null && model.matches(found.name)) ||
-        runCatching { context.getSystemService(BluetoothManager::class.java)?.adapter?.bondedDevices?.any { model.matches(it.name) } }.getOrNull() == true
-
 private fun bluetoothOn(context: Context) =
     context.getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled == true
 
 @SuppressLint("MissingPermission")
 @Composable
-private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
+private fun EarbudsStep(
+    vm: SunpodsViewModel,
+    model: EarbudModel,
+    demo: Boolean,
+    onEnableDemo: () -> Unit,
+    tick: Int,
+    onNext: () -> Unit,
+) {
     val context = LocalContext.current
-    // Debug demo (a simulated model was picked): no real pairing; every page is shown for every model.
-    val demo = remember { BuildConfig.TOOLS && SimMode.active(context) }
-    var state by remember { mutableStateOf<Buds>(if (demo) Buds.NotPaired else Buds.Checking) }
-    var refreshed by remember { mutableStateOf(false) }
-    /** "Pair different earbuds": stay on the pairing page even though some earbuds are paired. */
-    var pairNew by remember { mutableStateOf(false) }
+    var state by remember(model) { mutableStateOf<Buds>(if (demo) Buds.NotPaired else Buds.Checking) }
+    var refreshed by remember(model) { mutableStateOf(false) }
+    /** "Pair different earbuds": stay on the pairing page even though this model is paired. */
+    var pairNew by remember(model) { mutableStateOf(false) }
     /** A short line under the pairing steps, e.g. after the search was cancelled. */
-    var note by remember { mutableStateOf<String?>(null) }
-    /** When the paired earbuds started "waiting to connect", to offer help if it drags on. */
-    var waitingSince by remember { mutableStateOf(0L) }
+    var note by remember(model) { mutableStateOf<String?>(null) }
+    /** When the paired device started "waiting to connect", to offer help if it drags on. */
+    var waitingSince by remember(model) { mutableStateOf(0L) }
+    /** Address picked in CompanionDeviceManager, so unrelated bond events don't hijack pairing. */
+    var pairingAddress by remember(model) { mutableStateOf<String?>(null) }
     val busy by vm.busy.collectAsState()
-    val saved by vm.settings.collectAsState()
-    /** What they picked on the last page; a connected device that says otherwise wins. */
-    var model by remember { mutableStateOf(EarbudModel.chosen(context) ?: EarbudModel.active) }
-    /** Set when the connected device wasn't what they picked, for a one-line note. */
-    var switchedFrom by remember { mutableStateOf<EarbudModel?>(null) }
-    fun adopt(detected: EarbudModel?) {
-        val r = EarbudModel.resolve(model, detected)
-        if (r.model != model) { model = r.model; EarbudModel.choose(context, r.model) }
-        if (r.switchedFrom != null) switchedFrom = r.switchedFrom
+    val leScope = rememberCoroutineScope()
+
+    var wasDemo by remember(model) { mutableStateOf(demo) }
+    LaunchedEffect(demo, model) {
+        if (demo == wasDemo) return@LaunchedEffect
+        wasDemo = demo
+        refreshed = false
+        if (demo) {
+            if (state !is Buds.Pairing && state !is Buds.Connected) state = Buds.NotPaired
+        } else {
+            state = Buds.Checking
+        }
     }
 
-    // Watch Bluetooth, pairing and the audio link while this page is open.
-    LaunchedEffect(tick) {
+    // Watch Bluetooth, pairing and the audio link for the chosen model only — never hijack to another model.
+    LaunchedEffect(tick, demo, model) {
         while (true) {
             if (demo) {
                 if (state is Buds.Connected && !refreshed) { refreshed = true; vm.refreshAll() }
@@ -746,11 +819,13 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
                 continue
             }
             val s = state
-            val found = bondedEarbuds(context)
-            val live = found != null && audioLinkUp(context)
-            // The device knows best: if what's connected isn't what they picked, follow the device.
-            if (live) adopt(EarbudModel.fromName(found?.name))
-            else if (EarbudModel.active != model) EarbudModel.choose(context, model) // finding a different bonded pair must not change the pick
+            val (btOn, bonded, live) = withContext(Dispatchers.IO) {
+                val bt = bluetoothOn(context)
+                val b = bondedForModel(context, model)
+                val l = if (bt && b.isNotEmpty()) modelAudioLinkUp(context, model, b) else false
+                Triple(bt, b, l)
+            }
+            if (EarbudModel.active != model) EarbudModel.choose(context, model)
             // Paired some other way while searching, such as through Google's Fast Pair popup.
             if ((s is Buds.Searching || s is Buds.Pairing) && live) {
                 pairNew = false
@@ -758,8 +833,8 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
             }
             if (s !is Buds.Searching && s !is Buds.Pairing && s !is Buds.Failed) {
                 state = when {
-                    !bluetoothOn(context) -> Buds.BluetoothOff
-                    pairNew || !hasBonded(context, model, found) -> Buds.NotPaired
+                    !btOn -> Buds.BluetoothOff
+                    pairNew || bonded.isEmpty() -> Buds.NotPaired
                     live -> Buds.Connected
                     else -> Buds.Waiting
                 }
@@ -770,42 +845,47 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         }
     }
 
-    // Pairing: Android's own device picker (Companion Device Manager) finds the earbuds in
-    // pairing mode without needing location or scan permissions; then we bond with them.
-    // Once the device reports its own model, trust that over the pick.
-    LaunchedEffect(saved.modelName) {
-        if (!demo && state is Buds.Connected) adopt(EarbudModel.fromName(saved.modelName))
-    }
-
     val chooser = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (result.resultCode != Activity.RESULT_OK) {
-            // Closing the picker after pairing through Google's own popup is fine.
-            if (bondedEarbuds(context) != null && audioLinkUp(context)) {
-                note = null; pairNew = false; state = Buds.Connected
-                return@rememberLauncherForActivityResult
+            // Closing the picker after pairing through Google's own popup is fine, if THIS model connected.
+            leScope.launch {
+                if (modelAudioLinkUp(context, model)) {
+                    note = null; pairNew = false; state = Buds.Connected
+                } else {
+                    note = "Search stopped. When ${model.lightHint}, tap Start Searching."
+                    state = Buds.NotPaired
+                }
             }
-            note = "Search stopped. When the light flashes blue, tap Start Searching."
-            state = Buds.NotPaired
             return@rememberLauncherForActivityResult
         }
         note = null
         pairNew = false
         val device = pickedDevice(context, result.data)
         if (device == null) { state = Buds.Failed("Couldn't recognise that device. Try again."); return@rememberLauncherForActivityResult }
+        pairingAddress = device.address
         state = if (device.bondState == BluetoothDevice.BOND_BONDED) Buds.Waiting
         else if (device.createBond()) Buds.Pairing else Buds.Failed("Pairing didn't start. Make sure ${model.lightHint}, then try again.")
     }
 
-    val leScope = rememberCoroutineScope()
-    if (state is Buds.Pairing) {
-        DisposableEffect(Unit) {
+    if (state is Buds.Pairing && !demo) {
+        DisposableEffect(model, pairingAddress) {
             val receiver = object : BroadcastReceiver() {
                 override fun onReceive(c: Context, i: Intent) {
+                    val dev = if (Build.VERSION.SDK_INT >= 33) {
+                        i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                    }
+                    val targetAddr = pairingAddress
+                    if (targetAddr != null && dev != null && !targetAddr.equals(dev.address, ignoreCase = true)) return
                     when (i.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)) {
                         BluetoothDevice.BOND_BONDED -> {
                             state = Buds.Waiting
-                            // Same press, both sides: the LE Audio side too, if Shizuku is set up.
-                            leScope.launch { LePairing.alsoPairLe(context.applicationContext) { DiagnosticsStore.add(context, "Setup: $it") } }
+                            // Same press, both sides: the LE Audio side too, if supported and Shizuku is set up.
+                            if (model.supportsLeAudio) {
+                                leScope.launch { LePairing.alsoPairLe(context.applicationContext) { DiagnosticsStore.add(context, "Setup: $it") } }
+                            }
                         }
                         BluetoothDevice.BOND_NONE -> state = Buds.Failed("Pairing didn't finish. Put them back in pairing mode and try again.")
                     }
@@ -817,16 +897,17 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
     }
 
     // Some phones never answer a search or a pairing request; don't leave a spinner forever.
-    LaunchedEffect(state) {
+    LaunchedEffect(state, demo) {
         when (state) {
             Buds.Searching -> { delay(60_000); if (state is Buds.Searching) state = Buds.Failed("Nothing found. Make sure ${model.lightHint} and your ${model.noun} are next to your phone.") }
-            Buds.Pairing -> { delay(45_000); if (state is Buds.Pairing) state = Buds.Failed("Pairing took too long. Put them back in pairing mode and try again.") }
+            Buds.Pairing -> if (!demo) { delay(45_000); if (state is Buds.Pairing) state = Buds.Failed("Pairing took too long. Put them back in pairing mode and try again.") }
+            Buds.Connected -> if (!refreshed) { refreshed = true; vm.refreshAll() }
             else -> Unit
         }
     }
 
-    fun search() {
-        if (demo) {
+    fun search(forceDemo: Boolean = false) {
+        if (demo || forceDemo) {
             note = null
             state = Buds.Pairing
             leScope.launch { delay(1_500); state = Buds.Connected }
@@ -855,7 +936,6 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         }.onFailure { state = Buds.Failed("Couldn't start searching. Pair them in Bluetooth settings instead.") }
     }
 
-    val progress = progressOf(Step.EARBUDS)
     val battery by vm.battery.collectAsState()
     androidx.compose.animation.AnimatedContent(
         targetState = state,
@@ -864,18 +944,22 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
         label = "earbuds"
     ) { s ->
     when (s) {
-        Buds.Checking -> Page(progress, icon = Icons.Rounded.Headphones, title = "Looking for Your ${model.titleNoun}", body = "One moment.", primary = null) {
+        Buds.Checking -> Page(icon = Icons.Rounded.Headphones, title = "Looking for Your ${model.titleNoun}", body = "One moment.", primary = null) {
             CircularProgressIndicator()
         }
         Buds.BluetoothOff -> Page(
-            progress, icon = Icons.Rounded.BluetoothDisabled,
+            icon = Icons.Rounded.BluetoothDisabled,
             title = "Bluetooth Is Off", body = "Turn on Bluetooth to connect to your ${model.noun}.",
             primary = "Turn On Bluetooth",
             onPrimary = { runCatching { context.startActivity(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }.onFailure { openBluetoothSettings(context) } },
             secondary = "Not Now", onSecondary = onNext
-        )
+        ) {
+            if (BuildConfig.TOOLS && !demo) {
+                TextButton(onClick = onEnableDemo) { Text("Try in Demo Mode") }
+            }
+        }
         Buds.NotPaired -> Page(
-            progress, art = {
+            art = {
                 RenderClip(
                     remember(model) { budArt(0x01, model).pairClip },
                     model.pairClipDescription,
@@ -884,7 +968,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
             },
             title = "Get Ready to Pair",
             body = "Put them in pairing mode, then tap Start Searching.",
-            primary = "Start Searching", onPrimary = ::search,
+            primary = "Start Searching", onPrimary = { search() },
             secondary = "Not Now", onSecondary = onNext
         ) {
             SunCard {
@@ -897,15 +981,19 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
                 Spacer(Modifier.height(16.dp))
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
             }
+            if (BuildConfig.TOOLS && !demo && !pairNew) {
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick = { onEnableDemo(); search(forceDemo = true) }) { Text("Try in Demo Mode") }
+            }
         }
-        Buds.Searching -> Page(progress, icon = Icons.Rounded.BluetoothSearching, title = "Searching", body = "Choose your ${model.displayName} when it appears. Keep them near your phone.", primary = null) {
+        Buds.Searching -> Page(icon = Icons.Rounded.BluetoothSearching, title = "Searching", body = "Choose your ${model.displayName} when it appears. Keep them near your phone.", primary = null) {
             CircularProgressIndicator()
         }
-        Buds.Pairing -> Page(progress, icon = Icons.Rounded.BluetoothSearching, title = "Pairing", body = "If Android asks you to confirm, tap Pair.", primary = null) {
+        Buds.Pairing -> Page(icon = Icons.Rounded.BluetoothSearching, title = "Pairing", body = "If Android asks you to confirm, tap Pair.", primary = null) {
             CircularProgressIndicator()
         }
         Buds.Waiting -> Page(
-            progress, art = {
+            art = {
                 RenderClip(
                     remember(model) { budArt(0x01, model).openClip },
                     if (model.headphones) "The headphones turn to face you." else "The case opens and both earbuds lift out.",
@@ -913,7 +1001,7 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
                 )
             },
             title = if (model.headphones) "Turn On Your Headphones" else "Open the Case Near Your Phone",
-            body = if (model.headphones) "Your headphones are paired. Hold the power button for 2 seconds near your phone, and they'll connect."
+            body = if (model.headphones) "Your ${model.noun} are paired. ${model.wakeHint}, and they'll connect."
                 else "Your earbuds are paired. Open the lid or take them out, and they'll connect.",
             primary = null,
             secondary = "Not Now", onSecondary = onNext
@@ -936,29 +1024,22 @@ private fun EarbudsStep(vm: SunpodsViewModel, tick: Int, onNext: () -> Unit) {
             val read = battery.left != null || battery.right != null
             if (!read && refreshed && !busy) Page(
                 // Linked over Bluetooth, but the control channel didn't answer (Sound Connect holds it, usually).
-                progress, icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
+                icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
                 title = "Can't Reach Your ${model.titleNoun}",
                 body = "Your ${model.noun} are connected, but another app may be using them. Close Sony Sound Connect if it's open, then try again.",
                 primary = "Try Again", onPrimary = { vm.refreshAll() },
                 secondary = "Continue Anyway", onSecondary = onNext
             ) else Page(
-                progress, icon = Icons.Rounded.CheckCircle,
+                icon = Icons.Rounded.CheckCircle,
                 title = "Connected",
                 body = if (read) "Here's your battery, straight from your ${model.noun}." else "Checking battery levels.",
                 primary = "Continue", onPrimary = onNext
             ) {
                 if (read) Levels(battery, model) else CircularProgressIndicator()
-                switchedFrom?.let {
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        "These are ${model.displayName}. We've set up for those.",
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center
-                    )
-                }
             }
         }
         is Buds.Failed -> Page(
-            progress, icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
+            icon = Icons.Rounded.ErrorOutline, tone = MaterialTheme.colorScheme.error,
             title = "Couldn't Pair", body = s.message,
             primary = "Try Again", onPrimary = { state = Buds.NotPaired },
             secondary = "Open Bluetooth Settings", onSecondary = { openBluetoothSettings(context) }
@@ -1001,59 +1082,28 @@ private fun Levels(battery: BatteryState, model: EarbudModel) {
     }
 }
 
-/** The back of the case: USB-C port and, next to it, the pairing button (pulsing). */
-@Composable
-private fun CaseBackArt() {
-    val colors = MaterialTheme.colorScheme
-    val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
-        0f, 1f, infiniteRepeatable(tween(1400), RepeatMode.Restart), label = "ring"
-    )
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Canvas(Modifier.width(220.dp).height(150.dp)) {
-            val w = size.width; val h = size.height
-            val body = Size(w * 0.9f, h * 0.8f)
-            val topLeft = Offset((w - body.width) / 2, (h - body.height) / 2)
-            drawRoundRect(colors.surfaceVariant, topLeft, body, CornerRadius(body.height / 2.2f))
-            drawRoundRect(colors.outline, topLeft, body, CornerRadius(body.height / 2.2f), style = Stroke(2.dp.toPx()))
-            // Lid seam.
-            drawLine(colors.outline, Offset(topLeft.x + body.width * 0.08f, topLeft.y + body.height * 0.42f),
-                Offset(topLeft.x + body.width * 0.92f, topLeft.y + body.height * 0.42f), 1.5.dp.toPx())
-            // USB-C port.
-            val portW = body.width * 0.16f; val portH = body.height * 0.1f
-            val portC = Offset(w / 2, topLeft.y + body.height * 0.72f)
-            drawRoundRect(colors.onSurfaceVariant, Offset(portC.x - portW / 2, portC.y - portH / 2), Size(portW, portH), CornerRadius(portH / 2))
-            // Pairing button, with a pulse.
-            val btn = Offset(portC.x - body.width * 0.2f, portC.y)
-            val r = body.height * 0.06f
-            drawCircle(colors.primary.copy(alpha = (1 - pulse) * 0.5f), radius = r * (1 + 2.2f * pulse), center = btn)
-            drawCircle(colors.primary, radius = r, center = btn)
-        }
-        Text("Back of the case", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
-    }
-}
-
 // -------------------------------------------------------------------------------- 3b LE Audio
 
 /** Offers LE Audio right after pairing, using the same switch as Controls (Shizuku first). */
 @Composable
-private fun LeAudioStep(vm: SunpodsViewModel, onNext: () -> Unit) {
+private fun LeAudioStep(vm: SunpodsViewModel, model: EarbudModel, onNext: () -> Unit) {
     val context = LocalContext.current
     val settings by vm.settings.collectAsState()
     var switching by remember { mutableStateOf(false) }
     var on by remember { mutableStateOf(LeAudio.anyConnected(context)) }
     // The full check (Bluetooth stack plus its LE Audio service) and the earbuds' own answer.
     // If either says no, this step isn't for this phone: move on without showing it.
-    LaunchedEffect(Unit) {
+    LaunchedEffect(model) {
         val phone = withContext(Dispatchers.IO) { LeAudio.verify(context) }
         if (phone == LeAudio.Support.NOT_SUPPORTED || settings.leModeSupported == false) {
-            DiagnosticsStore.add(context, "Onboarding: LE Audio step skipped (phone $phone, earbuds ${settings.leModeSupported})")
+            DiagnosticsStore.add(context, "Onboarding: LE Audio step skipped (model ${model.id}, phone $phone, earbuds ${settings.leModeSupported})")
             onNext()
         }
     }
     Page(
-        progress = progressOf(Step.LEAUDIO), icon = androidx.compose.material.icons.Icons.Rounded.Call,
+        icon = androidx.compose.material.icons.Icons.Rounded.Call,
         title = if (on) "You're on LE Audio" else "Clearer Calls with LE Audio",
-        body = if (on) "Your earbuds are connected with LE Audio. You can switch back to Classic anytime in Controls > Calls."
+        body = if (on) "Your ${model.noun} are connected with LE Audio. You can switch back to Classic anytime in Controls > Calls."
         else "Your voice sounds clearer on calls. Connect to Two Devices and LDAC turn off while it's on. Switch back anytime in Controls > Calls.",
         primary = if (on) "Continue" else "Use LE Audio",
         onPrimary = { if (on) onNext() else switching = true },
@@ -1069,13 +1119,13 @@ private fun LeAudioStep(vm: SunpodsViewModel, onNext: () -> Unit) {
 // -------------------------------------------------------------------------------- 4 stay up to date
 
 @Composable
-private fun UpdatesStep(tick: Int, onNext: () -> Unit) {
+private fun UpdatesStep(model: EarbudModel, tick: Int, onNext: () -> Unit) {
     val context = LocalContext.current
     val notify = if (Build.VERSION.SDK_INT >= 33) rememberPermission(listOf(Manifest.permission.POST_NOTIFICATIONS), tick) else null
     val unrestricted = remember(tick) { BackgroundAccess.unrestricted(context) }
     val allSet = (notify == null || notify.state == Perm.GRANTED) && unrestricted
     Page(
-        progress = progressOf(Step.UPDATES), icon = Icons.Rounded.Notifications,
+        icon = Icons.Rounded.Notifications,
         title = "Stay Up to Date",
         body = "Keep the widget, alerts and automations working when SunPods is closed.",
         primary = if (allSet) "Continue" else "Continue Without These",
@@ -1097,7 +1147,7 @@ private fun UpdatesStep(tick: Int, onNext: () -> Unit) {
                 ) { BackgroundAccess.request(context) }
             }
             Footer(
-                if (allSet) "SunPods checks your ${EarbudModel.active.noun} every few minutes, only while they're connected."
+                if (allSet) "SunPods checks your ${model.noun} every few minutes, only while they're connected."
                 else "Without these, the widget can fall behind and alerts may not arrive."
             )
         }
@@ -1126,7 +1176,7 @@ private fun SetupRow(icon: ImageVector, title: String, body: String, done: Boole
 // -------------------------------------------------------------------------------- 5 extras
 
 @Composable
-private fun ExtrasStep(tick: Int, onNext: () -> Unit) {
+private fun ExtrasStep(model: EarbudModel, tick: Int, onNext: () -> Unit) {
     val context = LocalContext.current
     val location = rememberPermission(listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), tick)
     val background = rememberPermission(listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), tick)
@@ -1138,7 +1188,7 @@ private fun ExtrasStep(tick: Int, onNext: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val refused = !lastSeen && (location.state == Perm.DENIED || location.state == Perm.BLOCKED)
     Page(
-        progress = progressOf(Step.EXTRAS), icon = Icons.Rounded.Tune,
+        icon = Icons.Rounded.Tune,
         title = "Optional Extras",
         body = "Turn these on now or later.",
         primary = "Continue", onPrimary = onNext
@@ -1147,7 +1197,7 @@ private fun ExtrasStep(tick: Int, onNext: () -> Unit) {
             SunCard {
                 SettingRow(
                     Icons.Rounded.LocationOn, "Last Seen",
-                    note = "Where your ${EarbudModel.active.noun} last disconnected",
+                    note = "Where your ${model.noun} last disconnected",
                     modifier = Modifier.toggleable(value = lastSeen, role = androidx.compose.ui.semantics.Role.Switch) { on ->
                         if (!on) { LastSeenStore.setEnabled(context, false); lastSeen = false }
                         else if (location.state == Perm.GRANTED) { LastSeenStore.setEnabled(context, true); lastSeen = true }
@@ -1204,21 +1254,26 @@ private fun HowToRow(n: Int, text: String) {
 // -------------------------------------------------------------------------------- 6 done
 
 @Composable
-private fun DoneStep(vm: SunpodsViewModel, onDone: () -> Unit, onAnother: () -> Unit) {
+private fun DoneStep(vm: SunpodsViewModel, model: EarbudModel, onDone: () -> Unit) {
     val context = LocalContext.current
     val battery by vm.battery.collectAsState()
-    val connected = battery.left != null || battery.right != null
+    val settings by vm.settings.collectAsState()
+    val matchesModel = settings.modelName == null || model.matches(settings.modelName)
+    val connected = matchesModel && (battery.left != null || battery.right != null)
     var pinned by remember { mutableStateOf(false) }
     var picking by remember { mutableStateOf(false) }
     Page(
-        progress = 1f, icon = Icons.Rounded.CheckCircle,
+        icon = Icons.Rounded.CheckCircle,
         title = "You're All Set",
-        body = if (connected) "Your ${EarbudModel.active.noun} are ready." else "SunPods connects as soon as your ${EarbudModel.active.noun} do.",
+        body = if (connected) "Your ${model.noun} are ready." else "SunPods connects as soon as your ${model.noun} do.",
         primary = "Start Using SunPods",
-        onPrimary = { OnboardingStore.setDone(context, true); onDone() },
-        secondary = if (BuildConfig.TOOLS) "Set Up Another Device" else null, onSecondary = onAnother
+        onPrimary = {
+            OnboardingStore.setHeroIntroPending(context, true)
+            OnboardingStore.setDone(context, true)
+            onDone()
+        }
     ) {
-        if (connected) { Levels(battery, EarbudModel.active); Spacer(Modifier.height(24.dp)) }
+        if (connected) { Levels(battery, model); Spacer(Modifier.height(24.dp)) }
         SunCard {
             SetupRow(
                 Icons.Rounded.Widgets, "Add a Widget",

@@ -19,12 +19,12 @@ t0 = time.time()
 lap = lambda what: print(f'{time.time() - t0:6.1f}s  {what}', flush=True)
 
 SHEET_ONLY = os.environ.get('XM_SHEET_ONLY') == '1'   # tools: rebuild the review sheet from the last run
+clip_cols = ['black'] if 'black' in cols else []
 if not SHEET_ONLY:
     for d in (STILLS, CLIPS): shutil.rmtree(d, ignore_errors=True)
-    # the pairing clips are the longest: their colours split over two Chromes
-    half = (len(cols) + 1) // 2
-    jobs = [['node', 'stills.mjs', STILLS, *cols], ['node', 'clips.mjs', CLIPS, 'open', *cols],
-            ['node', 'clips.mjs', CLIPS, 'pair', *cols[:half]]] + ([['node', 'clips.mjs', CLIPS, 'pair', *cols[half:]]] if cols[half:] else [])
+    jobs = [['node', 'stills.mjs', STILLS, *cols]]
+    if clip_cols:
+        jobs += [['node', 'clips.mjs', CLIPS, 'open', *clip_cols], ['node', 'clips.mjs', CLIPS, 'pair', *clip_cols]]
     procs = [subprocess.Popen(j, cwd=HERE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True) for j in jobs]
     for p, j in zip(procs, jobs):
         if p.wait() != 0: sys.exit(f'{" ".join(j[1:3])} failed:\n{p.stderr.read()[-2000:]}')
@@ -47,7 +47,7 @@ if not SHEET_ONLY:
         shutil.copyfile(dst, os.path.join(APP, 'res', 'raw', os.path.basename(dst)))
         return f'{os.path.basename(dst)} {os.path.getsize(dst) // 1024} KB'
     with ThreadPoolExecutor(8) as ex:
-        sizes = list(ex.map(pack, [(k, n, c) for k, n in (('open', 120), ('pair', 210)) for c in cols]))
+        sizes = list(ex.map(pack, [(k, n, c) for k, n in (('open', 120), ('pair', 210)) for c in clip_cols]))
     lap('clips packed into the app: ' + ', '.join(sizes))
 
 # review sheet on the app's dark background
@@ -57,7 +57,8 @@ rows = []
 for c in cols:
     row = [Image.open(os.path.join(APP, 'res', 'drawable-nodpi', f'wh1000xm5_{n}_{c}.png')) for n in ('pair', 'side', 'front', 'case')]
     for clip in ('open', 'pair'):
-        im = Image.open(os.path.join(CLIPS, f'wh1000xm5_anim_{clip}_{c}.webp'))
+        clip_c = c if os.path.exists(os.path.join(APP, 'res', 'raw', f'wh1000xm5_anim_{clip}_{c}.webp')) else 'black'
+        im = Image.open(os.path.join(APP, 'res', 'raw', f'wh1000xm5_anim_{clip}_{clip_c}.webp'))
         for k in range(5):
             im.seek(int(k * (im.n_frames - 1) / 4)); row.append(im.convert('RGBA').copy())
     rows.append(row)

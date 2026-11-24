@@ -5,16 +5,16 @@
 // (render_turntable.py / hero_render.py): same camera, same world, same lights, same shader maths.
 //
 // API (window.sunpods):
-//   setColor('black' | 'silver' | 'pink', instant?)   short crossfade between finishes
-//   setModel('buds' | 'case')                           earbuds hero or charging case
-//   setLid(0..1, instant?)                              case lid, 0 closed, 1 open (Sony's -116 deg)
+//   setColor('black' | 'silver' | 'pink' | 'blue', instant?) short crossfade between finishes
+//   setModel('buds' | 'case')                           earbuds/headphones hero or charging/carry case
+//   setLid(0..1, instant?)                              case lid, 0 closed, 1 open
+//   setCaseProgress(0..1, instant?)                     continuous pack/unpack choreography (0 hero, 1 closed case)
+//   playUnpack()  playPack()                            smooth unpack (1 -> 0) and pack (0 -> 1) across all devices
 //   preload('xm5' | 'c710n' | 'wh1000xm5' | ...)        load and warm a device ahead of setDevice (no visible change)
 //   setDevice(id, fadeMs?)  fadeMs: a slower fade for the Welcome page's cycle
 //   wiggle()  spin()                                     the one-time hint and the TalkBack spin
-//   setDevice('xm5' | 'c710n')                          which earbuds: WF-1000XM5 (default) or WF-C710N
-//     On the WF-C710N (c710n.js, built in code) setColor takes 'black' | 'white' | 'pink' | 'blue'
-//     (Glass Blue); setModel, setLid, wiggle, spin and snapshot work the same. URL: ?device=c710n
-// Android bridge (optional, JavascriptInterface "SunPodsHost"): ready(), settled(), tap().
+//   URL params: ?device=xm5|c710n|wh1000xm5&color=...&model=...&lid=...&caseProgress=0..1&centered=0|1
+// Android bridge (optional, JavascriptInterface "SunPodsHost"): ready(), settled(), tap(), unpacked(), packed().
 import * as THREE from 'three';
 import { GLTFLoader } from './lib/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from './lib/addons/loaders/DRACOLoader.js';
@@ -24,6 +24,18 @@ const DEBUG = params.has('debug');
 const rad = (d) => d * Math.PI / 180;
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 const smooth = (t) => t * t * (3 - 2 * t);
+const merge = (a, b) => {
+  if (!b) return a;
+  const o = Array.isArray(a) ? a.slice() : { ...a };
+  for (const [k, v] of Object.entries(b)) {
+    o[k] = v && typeof v === 'object' && !Array.isArray(v) && a[k] ? merge(a[k], v) : v;
+  }
+  return o;
+};
+const makeFinishCopy = (FINISHES, KEYS, fallback = 'black') => (name, from) => {
+  const src = from || FINISHES[name] || FINISHES[fallback];
+  return Object.fromEntries(KEYS.map((k) => [k, src[k].slice()]));
+};
 
 // ---------------------------------------------------------------------------------------------
 // Finishes. Linear RGB, as in Blender. Black is the approved Blender material set, unchanged.
@@ -144,8 +156,9 @@ function activeRoot() {
 function heroPoints(root) {
   const key = state.device;
   if (ptsCache.has(key)) return ptsCache.get(key);
-  const a0 = state.angle;
-  state.angle = 0; applyPose();
+  const a0 = state.angle, cp0 = state.caseProgress, m0 = state.model, leg0 = legacyLidMode;
+  state.angle = 0; state.caseProgress = 0; state.model = 'buds'; legacyLidMode = false;
+  applyPose();
   root.updateWorldMatrix(true, true);
   const out = [], v = new THREE.Vector3();
   (function walk(o) {
@@ -157,7 +170,8 @@ function heroPoints(root) {
     }
     for (const c of o.children) walk(c);
   })(root);
-  state.angle = a0; applyPose();
+  state.angle = a0; state.caseProgress = cp0; state.model = m0; legacyLidMode = leg0;
+  applyPose();
   const pts = new Float32Array(out);
   if (pts.length) ptsCache.set(key, pts);
   return pts;
@@ -405,31 +419,63 @@ vec3 bumpNormal(vec3 pos, vec3 N, float h, float dist) {   // Cycles Bump node
   return normalize(abs(det) * N - dist * g);
 }
 `;
+const ACES_PARS = /* glsl */`
+vec3 whRRTAndODTFit(vec3 v) {
+  vec3 a = v * (v + 0.0245786) - 0.000090537;
+  vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+  return a / b;
+}
+vec3 whACESFilmic(vec3 color) {
+  const mat3 ACESInputMat = mat3(
+    vec3(0.59719, 0.07600, 0.02840),
+    vec3(0.35458, 0.90834, 0.13383),
+    vec3(0.04823, 0.01566, 0.83777)
+  );
+  const mat3 ACESOutputMat = mat3(
+    vec3(1.60475, -0.10208, -0.00327),
+    vec3(-0.53108, 1.10813, -0.07276),
+    vec3(-0.07367, -0.00605, 1.07602)
+  );
+  color *= 1.05 / 0.6;
+  color = ACESInputMat * color;
+  color = whRRTAndODTFit(color);
+  color = ACESOutputMat * color;
+  return clamp(color, 0.0, 1.0);
+}
+`;
 function patchVertex(shader) {
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nvarying vec3 vObjPos;\nvarying vec3 vObjN;')
     .replace('#include <begin_vertex>', '#include <begin_vertex>\nvObjPos = position;\nvObjN = normal;');
 }
-function patched(mat, key, uniforms = {}, frag = { after: {} }) {
+function patched(mat, key, uniforms = {}, frag = { after: {} }, opts = {}) {
+  const useVertex = opts.vertex !== false;
+  const useRim = opts.rim !== false;
+  const useAces = !!opts.aces;
+  const isBasic = !!opts.basic;
   mat.userData.uniforms = uniforms;
   mat.customProgramCacheKey = () => key;
   mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, uniforms, RIM_U);
-    patchVertex(shader);
-    const ao = !!mat.userData.ao;
+    Object.assign(shader.uniforms, uniforms);
+    if (useRim) Object.assign(shader.uniforms, RIM_U);
+    if (useVertex) patchVertex(shader);
+    const ao = useVertex && !!mat.userData.ao;
     if (ao) {
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nattribute float aOcc;\nvarying float vAO;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvAO = 1.0 - aOcc;');
     }
-    let fs = shader.fragmentShader.replace('#include <clipping_planes_pars_fragment>',
-      '#include <clipping_planes_pars_fragment>\n' + GLSL_PARS + RIM_PARS + (ao ? 'varying float vAO;\n' : '') + (frag.pars || ''));
-    const after = { ...frag.after };
+    const extraPars = (useVertex ? GLSL_PARS : '') + (useRim ? RIM_PARS : '') + (useAces ? ACES_PARS : '') + (ao ? 'varying float vAO;\n' : '') + (frag.pars || '');
+    let fs = shader.fragmentShader.replace('#include <clipping_planes_pars_fragment>', '#include <clipping_planes_pars_fragment>\n' + extraPars);
+    const after = { ...(frag.after || {}) };
     if (ao) after.aomap_fragment = (after.aomap_fragment || '') + AO_GLSL;
-    after.lights_physical_fragment = (after.lights_physical_fragment || '') + SPEC_AA;
-    after.lights_fragment_maps = (after.lights_fragment_maps || '') + RIM_GLSL;
+    if (!isBasic) after.lights_physical_fragment = (after.lights_physical_fragment || '') + SPEC_AA;
+    if (useRim) after.lights_fragment_maps = (after.lights_fragment_maps || '') + RIM_GLSL;
     for (const [chunk, code] of Object.entries(after)) {
       fs = fs.replace(`#include <${chunk}>`, `#include <${chunk}>\n${code}`);
+    }
+    if (useAces && mat.toneMapped !== false) {
+      fs = fs.replace('#include <tonemapping_fragment>', 'gl_FragColor.rgb = whACESFilmic(gl_FragColor.rgb);');
     }
     shader.fragmentShader = fs;
   };
@@ -609,23 +655,49 @@ const DEVICES = {
   c710n: { url: './c710n.js', create: 'createC710N', colors: ['black', 'white', 'pink', 'blue'] },
   wh1000xm5: { url: './wh1000xm5.js', create: 'createWH1000XM5', colors: ['black', 'silver', 'blue', 'pink'] },
 };
+const rawCaseProgress = params.get('caseProgress');
+const hasCaseProgressParam = rawCaseProgress !== null && rawCaseProgress !== '';
+const initDevice = DEVICES[params.get('device')] ? params.get('device') : 'xm5';
+const initLid = clamp01(parseFloat(params.get('lid') || '0') || 0);
+const initModelParam = params.get('model') === 'case' ? 'case' : 'buds';
+const initCaseProgress = hasCaseProgressParam
+  ? clamp01(parseFloat(rawCaseProgress) || 0)
+  : (initModelParam === 'case' ? (initLid > 0 ? 0 : 1) : 0);
+let legacyLidMode = !hasCaseProgressParam && initModelParam === 'case' && initLid > 0;
+let deviceFading = false;
+let modelFading = false;
+
 const state = {
   color: FINISHES[params.get('color')] ? params.get('color') : 'black',
-  model: params.get('model') === 'case' ? 'case' : 'buds',
+  model: hasCaseProgressParam ? (initCaseProgress > 0.0005 ? 'case' : 'buds') : initModelParam,
   angle: 0,
-  lid: clamp01(parseFloat(params.get('lid') || '0') || 0),
+  lid: hasCaseProgressParam ? 0 : initLid,
+  caseProgress: initCaseProgress,
   ready: false,
-  device: DEVICES[params.get('device')] ? params.get('device') : 'xm5',
+  device: initDevice,
 };
 // a device's colour from the URL is checked against its finishes
 if (state.device !== 'xm5') state.color = DEVICES[state.device].colors.includes(params.get('color')) ? params.get('color') : 'black';
-const buds = { root: new THREE.Group(), pivotL: null, pivotR: null, loaded: false };
+const CASE_REST_MAT = blenderMatrixToThree(CASE_REST);
+const buds = { root: new THREE.Group(), pivotL: null, pivotR: null, pivotParent: null, restL: null, restR: null, sourceInv: {}, loaded: false };
 const kase = { root: new THREE.Group(), spin: new THREE.Group(), lid: null, anchors: [], loaded: false };
 buds.root.name = 'buds'; kase.root.name = 'case';
 kase.root.matrixAutoUpdate = false;
-kase.root.matrix.copy(blenderMatrixToThree(CASE_REST));
+kase.root.matrix.copy(CASE_REST_MAT);
 kase.root.add(kase.spin);
 scene.add(buds.root, kase.root);
+
+const _vUp = new THREE.Vector3(0, 1, 0);
+const _p0 = new THREE.Vector3();
+const _p1 = new THREE.Vector3();
+const _s0 = new THREE.Vector3();
+const _s1 = new THREE.Vector3();
+const _q0 = new THREE.Quaternion();
+const _q1 = new THREE.Quaternion();
+const _m0 = new THREE.Matrix4();
+const _mParentInv = new THREE.Matrix4();
+const _mDrop = new THREE.Matrix4();
+const _mDropScale = new THREE.Matrix4();
 
 const draco = new DRACOLoader().setDecoderPath('./lib/draco/').setDecoderConfig({ type: 'wasm' }).setWorkerLimit(1);
 const loader = new GLTFLoader().setDRACOLoader(draco);
@@ -663,8 +735,17 @@ function loadBuds() {
     useOurMaterials(g.scene);
     buds.root.add(g.scene);
     buds.source = { L: g.scene.getObjectByName('EMPTY_BudL'), R: g.scene.getObjectByName('EMPTY_BudR') };
+    buds.restL = { pos: buds.source.L.position.clone() };
+    buds.restR = { pos: buds.source.R.position.clone() };
+    buds.source.L.updateMatrix();
+    buds.source.R.updateMatrix();
+    buds.sourceInv = {
+      L: buds.source.L.matrix.clone().setPosition(0, 0, 0).invert(),
+      R: buds.source.R.matrix.clone().setPosition(0, 0, 0).invert(),
+    };
     buds.pivotL = wrapPivot(buds.source.L);
     buds.pivotR = wrapPivot(buds.source.R);
+    buds.pivotParent = buds.pivotL.parent;
     buds.loaded = true;
   });
   return budsPromise;
@@ -678,40 +759,182 @@ function loadCase() {
       // the earbuds sit in the case in the app-hero pose with the approved shell (shared materials)
       const anchor = g.scene.getObjectByName('EMPTY_Bud' + side);
       for (const child of buds.source[side].children) anchor.add(child.clone());
-      kase.anchors.push({ node: anchor, y: anchor.position.y });
+      kase.anchors.push({ side, node: anchor, y: anchor.position.y });
     }
     kase.loaded = true;
   });
   return casePromise;
 }
 
+// Studio 3-point directional lighting used exclusively when state.device === 'wh1000xm5'
+// (xm5 and c710n keep intensities at 0 and remain 100% visually unchanged).
+const whStudioLights = {
+  key: new THREE.DirectionalLight(0xfff6eb, 0),
+  fill: new THREE.DirectionalLight(0xd4e2ff, 0),
+  rim: new THREE.DirectionalLight(0xeef3ff, 0),
+  rim2: new THREE.DirectionalLight(0xeef3ff, 0),
+};
+whStudioLights.key.position.set(2.4, 5.4, 4.2);
+whStudioLights.fill.position.set(-3.8, 2.5, 2.8);
+whStudioLights.rim.position.set(-1.6, 3.2, -4.0);
+whStudioLights.rim2.position.set(3.2, 2.2, -3.5);
+let sceneProbe = null;
+function syncDeviceLighting(dev) {
+  const isWh = dev === 'wh1000xm5';
+  whStudioLights.key.intensity = isWh ? 1.95 : 0;
+  whStudioLights.fill.intensity = isWh ? 1.05 : 0;
+  whStudioLights.rim.intensity = isWh ? 1.55 : 0;
+  whStudioLights.rim2.intensity = isWh ? 0.95 : 0;
+  if (sceneProbe) sceneProbe.intensity = isWh ? 0.22 : 1.0;
+  scene.environmentIntensity = isWh ? 0.58 : 1.0;
+}
+
+const modPoseState = {
+  color: 'black', model: 'buds', angle: 0, lid: 0, caseProgress: 0, ready: false, device: 'xm5',
+};
+
 function applyPose() {
   const a = rad(state.angle);
-  if (buds.pivotL) { buds.pivotL.rotation.y = a; buds.pivotR.rotation.y = -a; }   // mirrored spin
-  kase.spin.rotation.y = a;
-  if (kase.lid) {
-    const t = state.lid;
-    kase.lid.rotation.x = LID_OPEN * t;
-    for (const an of kase.anchors) {
-      an.node.position.y = an.y + BUD_SEAT * (1 - t);
-      an.node.visible = t > 0.01;
+  let effModel = state.model;
+  let effLid = state.lid;
+
+  if (canvas.style.opacity !== '1' && !deviceFading && !modelFading) {
+    canvas.style.transitionDuration = '';
+    canvas.style.opacity = '1';
+  }
+
+  if (state.device === 'xm5') {
+    if (legacyLidMode) {
+      kase.root.matrix.copy(CASE_REST_MAT);
+      if (buds.pivotL && buds.restL) {
+        buds.pivotL.position.copy(buds.restL.pos); buds.pivotL.quaternion.setFromAxisAngle(_vUp, a); buds.pivotL.scale.set(1, 1, 1);
+        buds.pivotR.position.copy(buds.restR.pos); buds.pivotR.quaternion.setFromAxisAngle(_vUp, -a); buds.pivotR.scale.set(1, 1, 1);
+      }
+      kase.spin.rotation.y = a;
+      if (kase.lid) {
+        kase.lid.rotation.x = LID_OPEN * effLid;
+        for (const an of kase.anchors) {
+          an.node.position.y = an.y + BUD_SEAT * (1 - effLid);
+          an.node.visible = effLid > 0.01;
+        }
+      }
+      buds.root.visible = effModel === 'buds';
+      kase.root.visible = effModel === 'case';
+    } else {
+      const p = clamp01(state.caseProgress);
+      if (p <= 0.0005) {
+        state.model = effModel = 'buds';
+        state.lid = effLid = 0;
+        kase.root.visible = false;
+        kase.root.matrix.copy(CASE_REST_MAT);
+        if (buds.pivotL && buds.restL) {
+          buds.pivotL.position.copy(buds.restL.pos); buds.pivotL.quaternion.setFromAxisAngle(_vUp, a); buds.pivotL.scale.set(1, 1, 1);
+          buds.pivotR.position.copy(buds.restR.pos); buds.pivotR.quaternion.setFromAxisAngle(_vUp, -a); buds.pivotR.scale.set(1, 1, 1);
+        }
+        buds.root.visible = true;
+      } else if (p >= 0.72 || !kase.loaded || !buds.loaded) {
+        const lidT = smooth(clamp01((1 - p) / 0.28));
+        state.model = effModel = 'case';
+        state.lid = effLid = lidT;
+        kase.root.matrix.copy(CASE_REST_MAT);
+        kase.spin.rotation.y = a;
+        if (kase.lid) {
+          kase.lid.rotation.x = LID_OPEN * lidT;
+          for (const an of kase.anchors) {
+            an.node.position.y = an.y + BUD_SEAT * (1 - lidT);
+            an.node.visible = lidT > 0.01;
+          }
+        }
+        buds.root.visible = false;
+        kase.root.visible = true;
+      } else {
+        // Continuous 3D unpack: open case -> earbuds lift on an arc to hero pose -> case glides below viewport.
+        const liftT = smooth(clamp01((0.72 - p) / 0.58));
+        const dropT = smooth(clamp01((0.58 - p) / 0.44));
+        state.model = effModel = 'case';
+        state.lid = effLid = 1;
+
+        // First compute exact seated world poses at the resting (pre-drop) case so unpack starts flush from the wells.
+        kase.root.matrix.copy(CASE_REST_MAT);
+        kase.spin.rotation.y = a;
+        if (kase.lid) kase.lid.rotation.x = LID_OPEN;
+        for (const an of kase.anchors) {
+          an.node.position.y = an.y;
+          an.node.visible = false;
+        }
+        kase.root.updateMatrixWorld(true);
+        buds.pivotParent.updateWorldMatrix(true, false);
+        _mParentInv.copy(buds.pivotParent.matrixWorld).invert();
+
+        const arcY = Math.sin(Math.PI * liftT) * 1.15;
+        const arcZ = Math.sin(Math.PI * liftT) * 0.45;
+        for (const an of kase.anchors) {
+          const side = an.side;
+          const pivot = side === 'L' ? buds.pivotL : buds.pivotR;
+          const rest = side === 'L' ? buds.restL : buds.restR;
+          const spinAng = side === 'L' ? a : -a;
+          _m0.copy(an.node.matrixWorld).multiply(buds.sourceInv[side]).premultiply(_mParentInv);
+          _m0.decompose(_p0, _q0, _s0);
+          _p1.copy(rest.pos);
+          _q1.setFromAxisAngle(_vUp, spinAng);
+          _s1.set(1, 1, 1);
+          pivot.position.lerpVectors(_p0, _p1, liftT);
+          pivot.position.y += arcY;
+          pivot.position.z += arcZ;
+          pivot.quaternion.slerpQuaternions(_q0, _q1, liftT);
+          pivot.scale.lerpVectors(_s0, _s1, liftT);
+        }
+
+        // Now glide and gently shrink the case downward below the frame.
+        const sDrop = 1 - 0.35 * dropT;
+        _mDropScale.makeScale(sDrop, sDrop, sDrop);
+        _mDrop.makeTranslation(0, -5.2 * dropT, 0).multiply(CASE_REST_MAT).multiply(_mDropScale);
+        kase.root.matrix.copy(_mDrop);
+        kase.root.visible = dropT < 0.995;
+        buds.root.visible = true;
+      }
+    }
+  } else {
+    buds.root.visible = false;
+    kase.root.visible = false;
+    if (!legacyLidMode) {
+      const p = clamp01(state.caseProgress);
+      state.model = effModel = p > 0.0005 ? 'case' : 'buds';
+      state.lid = effLid = 0;
     }
   }
-  buds.root.visible = state.model === 'buds' && state.device === 'xm5';
-  kase.root.visible = state.model === 'case' && state.device === 'xm5';
-  for (const [id, slot] of Object.entries(mods)) if (slot.m) slot.m.applyPose(state, state.device === id);
+
+  for (const id in mods) {
+    const slot = mods[id];
+    if (!slot || !slot.m) continue;
+    const m = slot.m;
+    const useNativeCase = !!(m.handlesCaseProgress && !legacyLidMode);
+    modPoseState.color = state.color;
+    modPoseState.angle = state.angle;
+    modPoseState.ready = state.ready;
+    modPoseState.device = state.device;
+    modPoseState.model = useNativeCase ? state.model : effModel;
+    modPoseState.lid = useNativeCase ? state.lid : effLid;
+    modPoseState.caseProgress = useNativeCase ? state.caseProgress : undefined;
+    m.applyPose(modPoseState, state.device === id);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
 // Render on demand: the loop runs only while something moves.
 let raf = 0;
 const anims = new Set();
+const postRenderHooks = [];
 function requestRender() { if (!raf && !document.hidden) raf = requestAnimationFrame(frame); }
 function frame(now) {
   raf = 0;
   for (const a of [...anims]) if (a(now) === false) anims.delete(a);
   applyPose();
   renderer.render(scene, camera);
+  if (postRenderHooks.length) {
+    const hooks = postRenderHooks.splice(0, postRenderHooks.length);
+    for (const fn of hooks) fn();
+  }
   if (DEBUG) api.frames = (api.frames || 0) + 1;
   if (anims.size) requestRender();
 }
@@ -741,10 +964,12 @@ function setColor(name, instant) {
   anims.add(colorAnim); requestRender();
 }
 
-// lid
+// lid (legacy API preserved for tools and direct lid calls)
 let lidAnim = null;
 function setLid(v, instant) {
   const target = clamp01(Number(v) || 0);
+  legacyLidMode = true;
+  cancelCaseAnim();
   if (lidAnim) anims.delete(lidAnim);
   if (instant) { state.lid = target; requestRender(); return; }
   const from = state.lid, t0 = performance.now(), dur = 300 + 500 * Math.abs(target - from);
@@ -756,19 +981,119 @@ function setLid(v, instant) {
   anims.add(lidAnim); requestRender();
 }
 
+// continuous pack/unpack choreography (caseProgress: 0 standalone hero, 1 closed case)
+let caseAnim = null;
+let pendingCaseAction = null;
+function isDeviceLoaded(id, target = state.caseProgress) {
+  if (id === 'xm5') return (target > 0.0005 || state.caseProgress > 0.0005) ? kase.loaded && buds.loaded : buds.loaded;
+  return !!(mods[id] && mods[id].m);
+}
+function cancelCaseAnim() {
+  if (caseAnim) { anims.delete(caseAnim); caseAnim = null; }
+  pendingCaseAction = null;
+}
+function finishCaseTransition(target, kind) {
+  state.caseProgress = target;
+  state.angle = 0;
+  state.model = target > 0.0005 ? 'case' : 'buds';
+  if (target <= 0.0005) state.lid = 0;
+  postRenderHooks.push(() => {
+    if (kind === 'unpack') host('unpacked');
+    else if (kind === 'pack') host('packed');
+  });
+}
+function animateCaseTo(target, kind) {
+  legacyLidMode = false;
+  cancelCaseAnim();
+  const dev = deviceTarget;
+  if (state.device !== dev || !isDeviceLoaded(dev, target)) {
+    pendingCaseAction = { kind, target };
+    if (dev === 'xm5') {
+      const loads = [loadBuds()];
+      if (target > 0.0005 || state.caseProgress > 0.0005) loads.push(loadCase());
+      Promise.all(loads).then(() => {
+        if (pendingCaseAction && pendingCaseAction.kind === kind && deviceTarget === dev && state.device === dev && isDeviceLoaded(dev, target)) {
+          const p = pendingCaseAction; pendingCaseAction = null;
+          animateCaseTo(p.target, p.kind);
+        }
+      });
+    }
+    return;
+  }
+  const startP = state.caseProgress;
+  const dist = Math.abs(target - startP);
+  if (dist <= 0.0005) {
+    finishCaseTransition(target, kind);
+    requestRender();
+    return;
+  }
+  stopMotion();
+  const startAngle = state.angle;
+  const homeAngle = Math.round(startAngle / 360) * 360;
+  const dur = Math.max(200, (target < startP ? 1900 : 1600) * dist);
+  const t0 = performance.now();
+  caseAnim = (now) => {
+    const u = clamp01((now - t0) / dur);
+    const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+    state.caseProgress = startP + (target - startP) * e;
+    if (Math.abs(homeAngle - startAngle) > 0.01) {
+      state.angle = startAngle + (homeAngle - startAngle) * smooth(clamp01(u * 1.4));
+    }
+    if (u < 1) return true;
+    finishCaseTransition(target, kind);
+    caseAnim = null;
+    return false;
+  };
+  anims.add(caseAnim);
+  requestRender();
+}
+function setCaseProgress(v, instant) {
+  const target = clamp01(Number(v) || 0);
+  legacyLidMode = false;
+  cancelCaseAnim();
+  if (instant) {
+    state.caseProgress = target;
+    state.model = target > 0.0005 ? 'case' : 'buds';
+    state.lid = 0;
+    if (deviceTarget === 'xm5' && target > 0.0005 && (!kase.loaded || !buds.loaded)) {
+      Promise.all([loadCase(), loadBuds()]).then(() => requestRender());
+    }
+    if (centered) recenter();
+    requestRender();
+    return;
+  }
+  animateCaseTo(target, null);
+}
+function playUnpack() { animateCaseTo(0, 'unpack'); }
+function playPack() { animateCaseTo(1, 'pack'); }
+
 // model switch: a short fade so the swap never pops
 let modelToken = 0;
 function setModel(m) {
   const want = m === 'case' ? 'case' : 'buds';
   const token = ++modelToken;
+  cancelCaseAnim();
   const ready = deviceTarget !== 'xm5' ? loadMod(deviceTarget) : want === 'case' ? loadCase() : loadBuds();
   ready.then(() => {
     if (token !== modelToken) return;
-    if (state.model === want) { requestRender(); return; }
+    if (state.model === want) {
+      modelFading = false;
+      canvas.style.transitionDuration = '';
+      canvas.style.opacity = '1';
+      if (want === 'buds') { legacyLidMode = false; state.caseProgress = 0; }
+      else if (!legacyLidMode) { state.caseProgress = state.lid > 0 ? 0 : 1; }
+      requestRender(); return;
+    }
+    modelFading = true;
+    canvas.style.transitionDuration = '';
     canvas.style.opacity = '0';
     setTimeout(() => {
+      modelFading = false;
       if (token !== modelToken) return;
       state.model = want; state.angle = 0; stopMotion();
+      if (want === 'buds') { legacyLidMode = false; state.caseProgress = 0; state.lid = 0; }
+      else if (state.lid > 0) { legacyLidMode = true; }
+      else { legacyLidMode = false; state.caseProgress = 1; }
       requestRender();
       requestAnimationFrame(() => { canvas.style.opacity = '1'; });
     }, 170);
@@ -785,10 +1110,10 @@ colorFor[state.device] = state.color;
 // compile() builds a program for every material under what it's given, shown or not. A device's start
 // compiles only what is drawn (stand-in meshes sharing the geometry and materials, lit by the real
 // scene), so its first frame doesn't wait for the case or the other finishes; the rest follows idle.
-function compileShown(root) {
+function compileShown(root, forceVisible = false) {
   const ws = new THREE.Scene();
   const walk = (o) => {
-    if (o !== root && !o.visible) return;
+    if (!forceVisible && o !== root && !o.visible) return;
     if (o.isMesh && o.material) ws.add(new THREE.Mesh(o.geometry, o.material));
     for (const c of o.children) walk(c);
   };
@@ -799,16 +1124,19 @@ function compileShown(root) {
 // earbuds keep their own colour, so a normal start never needs them.
 function modWarm(id) {
   const m = mods[id] && mods[id].m;
-  if (!m || !m.warm) return;
+  if (!m || !m.warm || !m.warm.children || !m.warm.children.length) return;
   const ws = new THREE.Scene(); ws.add(m.warm);
   renderer.compileAsync(ws, camera, scene).then(() => mark('other finishes ready')).catch(() => {});
 }
 function buildMod(id, mod, overrides) {
   const slot = mods[id];
   if (slot.m) scene.remove(slot.m.buds.root, slot.m.kase.root);
-  const m = slot.m = mod[DEVICES[id].create]({ THREE, patched, lin, DEBUG, overrides, caseRest: blenderMatrixToThree(CASE_REST) });
+  const m = slot.m = mod[DEVICES[id].create]({
+    THREE, patched, lin, smooth, merge, makeFinishCopy, DEBUG, overrides, caseRest: blenderMatrixToThree(CASE_REST),
+  });
   scene.add(m.buds.root, m.kase.root);
   slot.finish = m.finishCopy(colorFor[id]);
+  if (typeof m.setColorTarget === 'function') m.setColorTarget(colorFor[id]);
   m.applyFinish(slot.finish);
   return m.ready;
 }
@@ -825,6 +1153,8 @@ function setColorMod(id, name, instant) {
   if (!slot || !slot.m) { loadMod(id).then(() => { if (colorFor[id] === name) setColorMod(id, name, true); }); return; }
   const m = slot.m;
   if (slot.colorAnim) anims.delete(slot.colorAnim);
+  // Swap canvas textures once per finish change rather than regenerating textures per frame.
+  if (typeof m.setColorTarget === 'function') m.setColorTarget(name);
   const from = m.finishCopy(null, slot.finish), to = m.FINISHES[name];
   if (instant || state.device !== id) {
     slot.finish = m.finishCopy(name);
@@ -853,6 +1183,71 @@ function preload(d) {
     loadMod(id).then(() => compileShown(mods[id].m.buds.root)).catch(() => {});
   }
 }
+function flushPendingCaseAction(want) {
+  if (pendingCaseAction && state.device === want && isDeviceLoaded(want, pendingCaseAction.target)) {
+    const p = pendingCaseAction;
+    pendingCaseAction = null;
+    animateCaseTo(p.target, p.kind);
+  }
+}
+async function snapTo(d, c, progress, isCentered) {
+  const want = DEVICES[d] ? d : 'xm5';
+  const colorName = want === 'xm5'
+    ? (FINISHES[c] ? c : 'black')
+    : (DEVICES[want].colors.includes(c) ? c : 'black');
+  const p = clamp01(Number(progress) || 0);
+  const token = ++deviceToken;
+  ++modelToken;
+  stopMotion(); anims.clear(); cancelCaseAnim();
+  if (lidAnim) { anims.delete(lidAnim); lidAnim = null; }
+  deviceFading = false;
+  modelFading = false;
+  legacyLidMode = false;
+  canvas.style.transitionDuration = '0ms';
+  canvas.style.opacity = '1';
+
+  colorFor[deviceTarget] = state.color;
+  deviceTarget = want;
+  colorFor[want] = colorName;
+
+  if (want !== 'xm5') {
+    await loadMod(want);
+  } else if (p > 0.0005) {
+    await Promise.all([loadCase(), loadBuds()]);
+  } else {
+    await loadBuds();
+  }
+  if (token !== deviceToken) return false;
+
+  state.device = want;
+  state.angle = 0;
+  state.caseProgress = p;
+  state.model = p > 0.0005 ? 'case' : 'buds';
+  state.lid = 0;
+  centered = !!isCentered;
+  syncDeviceLighting(want);
+  setColor(colorName, true);
+  applyPose();
+  if (centered) recenter(); else { shift.x = shift.y = 0; fitCamera(viewW || 1, viewH || 1); }
+
+  if (want !== 'xm5' && mods[want] && mods[want].m) {
+    const M = mods[want].m;
+    await compileShown(p > 0.0005 ? M.kase.root : M.buds.root, true);
+    if (p > 0.0005) await compileShown(M.buds.root, true);
+  } else {
+    await compileShown(p > 0.0005 ? kase.root : buds.root, true);
+    if (p > 0.0005) await compileShown(buds.root, true);
+  }
+  if (token !== deviceToken) return false;
+
+  applyPose();
+  renderer.render(scene, camera);
+  requestAnimationFrame(() => {
+    if (token === deviceToken) host('snapped');
+  });
+  return true;
+}
+
 function setDevice(d, fadeMs) {
   const want = DEVICES[d] ? d : 'xm5';
   if (want !== deviceTarget) {
@@ -862,18 +1257,32 @@ function setDevice(d, fadeMs) {
   }
   const token = ++deviceToken;
   const fade = fadeMs > 0 ? Math.min(1000, fadeMs) : 0;   // a slower, softer fade for the Welcome page's cycle
-  const ready = want !== 'xm5' ? loadMod(want) : state.model === 'case' ? loadCase() : loadBuds();
+  const ready = want !== 'xm5' ? loadMod(want) : (state.model === 'case' || (!legacyLidMode && state.caseProgress > 0.0005)) ? loadCase() : loadBuds();
   ready.then(() => {
     if (token !== deviceToken) return;
-    if (state.device === want) { requestRender(); return; }
+    if (state.device === want) {
+      deviceFading = false;
+      canvas.style.transitionDuration = '';
+      canvas.style.opacity = '1';
+      syncDeviceLighting(want);
+      requestRender();
+      flushPendingCaseAction(want);
+      return;
+    }
+    deviceFading = true;
     canvas.style.transitionDuration = fade ? fade + 'ms' : '';
     canvas.style.opacity = '0';
     setTimeout(() => {
+      deviceFading = false;
       if (token !== deviceToken) return;
       state.device = want; state.angle = 0; stopMotion();
-      if (centered) { applyPose(); recenter(); }
+      syncDeviceLighting(want);
+      if (centered) { applyPose(); recenter(); } else { applyPose(); }
       requestRender();
-      requestAnimationFrame(() => { canvas.style.opacity = '1'; });
+      requestAnimationFrame(() => {
+        canvas.style.opacity = '1';
+        flushPendingCaseAction(want);
+      });
     }, fade ? fade + 20 : 170);
   });
 }
@@ -995,6 +1404,10 @@ const api = {
   setColor: (c, instant) => setColor(String(c), !!instant),
   setModel: (m) => setModel(String(m)),
   setLid: (v, instant) => setLid(v, !!instant),
+  setCaseProgress: (v, instant) => setCaseProgress(v, !!instant),
+  playUnpack: () => playUnpack(),
+  playPack: () => playPack(),
+  snapTo: (d, c, p, isCentered) => snapTo(String(d), String(c), p, !!isCentered),
   setDevice: (d, fadeMs) => setDevice(String(d), Number(fadeMs) || 0),
   preload: (d) => preload(String(d)),
   setSize: (w, h) => { w = Number(w); h = Number(h); if (w >= 1 && h >= 1 && (!forcedSize || forcedSize.w !== w || forcedSize.h !== h)) { forcedSize = { w, h }; resize(); } },
@@ -1016,10 +1429,12 @@ async function start() {
   if (state.device !== 'xm5') applyFinish(finish);   // the XM5 materials keep their black finish ready
   setColor(state.color, true);
   const first = state.device !== 'xm5' ? loadMod(state.device)
-    : state.model === 'case' ? loadCase() : loadBuds();   // decodes in the worker meanwhile
+    : (state.model === 'case' || (!legacyLidMode && state.caseProgress > 0.0005)) ? loadCase() : loadBuds();   // decodes in the worker meanwhile
   scene.environment = buildEnvironment();
   mark('environment');
-  const probe = diffuseProbe(); scene.add(probe); if (DEBUG) api._probe = probe;
+  sceneProbe = diffuseProbe(); scene.add(sceneProbe); if (DEBUG) api._probe = sceneProbe;
+  scene.add(whStudioLights.key, whStudioLights.fill, whStudioLights.rim, whStudioLights.rim2);
+  syncDeviceLighting(state.device);
   mark('light probe');
   await first;
   mark('model');
@@ -1028,7 +1443,12 @@ async function start() {
   resize();
   applyPose();
   const M = state.device !== 'xm5' && mods[state.device] ? mods[state.device].m : null;
-  await (M ? compileShown(state.model === 'case' ? M.kase.root : M.buds.root) : renderer.compileAsync(scene, camera));
+  if (M) {
+    await compileShown(state.model === 'case' ? M.kase.root : M.buds.root);
+    if (M.precompileClosedBoth && state.model === 'case') await compileShown(M.buds.root);
+  } else {
+    await renderer.compileAsync(scene, camera);
+  }
   mark('shaders');
   renderer.render(scene, camera);
   mark('first frame, ' + (renderer.info.programs || []).length + ' programs' + (DEBUG ? ': ' + (renderer.info.programs || []).map((p) => p.name).join(' ') : ''));
@@ -1040,17 +1460,18 @@ async function start() {
   if (M) {
     const id = state.device;
     setTimeout(() => {
-      compileShown(state.model === 'case' ? M.buds.root : M.kase.root).then(() => mark('other model ready')).catch(() => {});
+      if (!M.precompileClosedBoth || state.model !== 'case') {
+        compileShown(state.model === 'case' ? M.buds.root : M.kase.root).then(() => mark('other model ready')).catch(() => {});
+      }
       if (DEBUG) modWarm(id);
     }, 600);
     return;
   }
   setTimeout(() => {
     (state.model === 'case' ? loadBuds() : loadCase()).then(() => {
-      kase.root.visible = buds.root.visible = true;
-      return renderer.compileAsync(scene, camera);   // warm the other model's programs while idle
+      // Compile the non-active root offscreen without ever toggling visibility on the live scene.
+      return compileShown(state.model === 'case' ? buds.root : kase.root, true);
     }).then(() => {
-      applyPose();
       draco.dispose();
       mark('other model ready');
     }).catch(() => {});
@@ -1067,13 +1488,25 @@ api.snapshot = () => {
 // ---------------------------------------------------------------------------------------------
 // Preview captures for branding/render/hero3d_preview (only with ?debug).
 if (DEBUG) {
-  api.debugShot = async ({ color = 'black', model = 'buds', angle = 0, lid = 0, w = 1000, h = 712, device = state.device } = {}) => {
+  api.debugShot = async ({ color = 'black', model = 'buds', angle = 0, lid = 0, caseProgress, w = 1000, h = 712, device = state.device } = {}) => {
     const dev = DEVICES[device] ? device : 'xm5';
-    await (dev !== 'xm5' ? loadMod(dev) : model === 'case' ? loadCase() : loadBuds());
-    stopMotion(); anims.clear();
+    const wantCase = model === 'case' || (typeof caseProgress === 'number' && caseProgress > 0.0005);
+    await (dev !== 'xm5' ? loadMod(dev) : wantCase ? loadCase() : loadBuds());
+    stopMotion(); anims.clear(); cancelCaseAnim();
     deviceToken++; deviceTarget = state.device = dev;
+    syncDeviceLighting(dev);
     setColor(color, true);
-    state.model = model; state.angle = angle; state.lid = lid;
+    if (typeof caseProgress === 'number') {
+      legacyLidMode = false;
+      state.caseProgress = clamp01(caseProgress);
+      state.model = state.caseProgress > 0.0005 ? 'case' : 'buds';
+      state.lid = 0;
+    } else {
+      legacyLidMode = model === 'case' && lid > 0;
+      state.model = model; state.lid = lid;
+      state.caseProgress = model === 'case' ? (lid > 0 ? 0 : 1) : 0;
+    }
+    state.angle = angle;
     renderer.setPixelRatio(1);
     renderer.setSize(w, h, false);
     fitCamera(w, h);
@@ -1087,9 +1520,14 @@ if (DEBUG) {
   // Model tools (branding/render/<device>/tools): scene access for fitted-camera boards and clips.
   // debugMod(id) for any device; debugC7 and friends are the WF-C710N tools' names for the same.
   api.debugMod = async (id, load = true) => {
+    if (id === 'xm5') {
+      if (load) await Promise.all([loadCase(), loadBuds()]);
+      return { THREE, scene, camera, renderer, canvas, kase, buds, LID_OPEN, MATS, state, applyPose, fitCamera, resize, stopMotion, anims, setColor, syncDeviceLighting,
+        setDeviceNow: (d) => { deviceToken++; deviceTarget = state.device = d; syncDeviceLighting(d); } };
+    }
     if (load) await loadMod(id);
-    return { THREE, scene, camera, renderer, canvas, M: mods[id] && mods[id].m, C7: mods[id] && mods[id].m, state, applyPose, fitCamera, resize, stopMotion, anims, setColor,
-      setDeviceNow: (d) => { deviceToken++; deviceTarget = state.device = d; } };
+    return { THREE, scene, camera, renderer, canvas, M: mods[id] && mods[id].m, C7: mods[id] && mods[id].m, state, applyPose, fitCamera, resize, stopMotion, anims, setColor, syncDeviceLighting,
+      setDeviceNow: (d) => { deviceToken++; deviceTarget = state.device = d; syncDeviceLighting(d); } };
   };
   api.debugFinishMod = (id, name, f) => { if (mods[id] && mods[id].m) mods[id].m.FINISHES[name] = f; };
   // rebuild a device with trial shape values (tools only)

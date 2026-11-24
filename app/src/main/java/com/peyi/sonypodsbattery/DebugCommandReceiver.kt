@@ -28,7 +28,7 @@ class DebugCommandReceiver : BroadcastReceiver() {
             if (intent.hasExtra("color")) ui.putInt("sim_color", intent.getIntExtra("color", 1))
             ui.commit()
             // A different pair: start without the last pair's saved settings and battery.
-            context.getSharedPreferences("device_settings", Context.MODE_PRIVATE).edit().clear().commit()
+            SettingsStore.clear(context, commit = true)
             Log.i("SunPods", "Debug: simulated earbuds ${if (EarbudModel.fromId(model) != null) model else "off"}")
             android.os.Process.killProcess(android.os.Process.myPid())
             return

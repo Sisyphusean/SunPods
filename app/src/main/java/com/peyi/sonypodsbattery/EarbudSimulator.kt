@@ -230,21 +230,19 @@ internal object SimMode {
 internal fun SimMode.startDemo(context: android.content.Context, model: EarbudModel) {
     if (!BuildConfig.TOOLS) return
     context.getSharedPreferences("sunpods_ui", android.content.Context.MODE_PRIVATE).edit()
-        .putString("sim_model", model.id).putInt("sim_color", 0x01).commit()
+        .putString("sim_model", model.id).putInt("sim_color", 0x01).apply()
     resetDemoDevice(context)
 }
 
-/** End the demo pair and forget the pick, for "Set Up Another Device". */
+/** End the demo pair and forget the pick, for "Run Setup Again". */
 internal fun SimMode.stopDemo(context: android.content.Context) {
     if (!BuildConfig.TOOLS) return
     context.getSharedPreferences("sunpods_ui", android.content.Context.MODE_PRIVATE).edit()
-        .remove("sim_model").remove("chosen_model").commit()
+        .remove("sim_model").remove("chosen_model").apply()
     resetDemoDevice(context)
 }
 
 private fun resetDemoDevice(context: android.content.Context) {
-    context.getSharedPreferences("device_settings", android.content.Context.MODE_PRIVATE).edit().clear().commit()
-    BatteryStore.prefs(context).edit().clear().commit()
-    SonyControlSessionManager.closeForDemo(context)
+    resetDeviceState(context, "demo: another simulated model")
     SimMode.forgetState()
 }

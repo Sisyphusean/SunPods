@@ -25,30 +25,39 @@ function track(keys, f) {
   return keys[keys.length - 1][1];
 }
 
-// poses: [yaw, pitch, roll, tx, ty, scale] of the subject on the fit rig
+// poses: [yaw, pitch, roll, tx, ty, scale] of the subject on the fit rig (1 unit = 10 cm)
 function openState(f) {
-  const pose = track([[0, [-30, 40, 0, 0, -0.02, 0.150]], [18, [-26, 40, 0, 0, -0.02, 0.152]], [56, [-20, 38, 0, 0, -0.06, 0.160]],
-    [70, [-18, 36, 0, 0, -0.12, 0.160]], [108, [-14, 30, 0, 0, -1.75, 0.150]], [119, [-14, 30, 0, 0, -1.80, 0.150]]], f);
+  const pose = track([[0, [-32, 42, 0, 0, -0.02, 1.50]], [18, [-28, 42, 0, 0, -0.02, 1.52]], [56, [-22, 38, 0, 0, -0.06, 1.58]],
+    [70, [-18, 34, 0, 0, -0.14, 1.56]], [108, [-14, 28, 0, 0, -1.75, 1.45]], [119, [-14, 28, 0, 0, -1.80, 1.45]]], f);
   const lid = track([[0, 0], [16, 0], [50, 1], [119, 1]], f);
   const lift = track([[0, 0], [56, 0], [108, 1], [119, 1]], f);
-  return { pose, lid, lift, flyY: 0.0, flyScale: 0.235, arc: 2.0 };
+  return { pose, lid, lift, flyY: -0.1, flyScale: 2.20, arc: 1.15, arcZ: 1.2 };
 }
 // the indicator during pairing: two short blue flashes, a pause, repeat (on 5, off 5, on 5, off 16 frames)
-function blink(f, start) {
-  if (f < start) return 0;
+function blink(f, start, end) {
+  if (f < start || f > end) return 0;
   const k = (f - start) % 31;
   return (k < 5 || (k >= 10 && k < 15)) ? 1 : 0;
 }
 function pairState(f, aim) {
-  const pose = track([[0, aim.hero], [20, aim.hero], [58, aim.button], [140, aim.button], [150, aim.button], [176, aim.led], [209, aim.ledClose]], f);
-  // press: the ring fades in and pulses while the button is held (frames 64 to 140)
+  const pose = track([
+    [0, aim.hero],
+    [18, aim.hero],
+    [54, aim.button],
+    [130, aim.button],
+    [140, aim.button],
+    [164, aim.led],
+    [180, aim.ledClose],
+    [209, aim.hero],
+  ], f);
+  // press: the ring fades in and pulses while the button is held (frames 60 to 130)
   let glow = 0, grow = 0;
-  if (f >= 64 && f <= 140) {
-    const t = (f - 64) / 76;
-    glow = Math.min(1, (f - 64) / 8) * (0.65 + 0.35 * Math.sin(t * Math.PI * 6)) * (f > 134 ? (140 - f) / 6 : 1);
+  if (f >= 60 && f <= 130) {
+    const t = (f - 60) / 70;
+    glow = Math.min(1, (f - 60) / 8) * (0.65 + 0.35 * Math.sin(t * Math.PI * 6)) * (f > 124 ? (130 - f) / 6 : 1);
     grow = t;
   }
-  return { pose, glow, ringGrow: grow, led: blink(f, 150) };
+  return { pose, glow, ringGrow: grow, led: blink(f, 140, 184) };
 }
 
 const page = await openHero({ query: 'device=wh1000xm5', width: SIZE, height: SIZE, log: false });
@@ -64,23 +73,23 @@ for (const clip of which === 'both' ? ['open', 'pair'] : [which]) {
     await page.evaluate(`window.XMCLIP.init('${clip}')`);
     let aim = null;
     if (clip === 'pair') {
-      // the hero view, then zooms centred on the power button and on the indicator
+      // the hero view, then a gentle unclipped zoom toward the power button and status indicator
       const centre = async (pose, part) => {
         const p = pose.slice();
         for (let i = 0; i < 3; i++) {
           const [x, y] = await page.evaluate(`window.XMCLIP.project(${JSON.stringify(p)}, '${part}', ${SIZE})`);
-          p[3] -= (x - SIZE / 2) / SIZE; p[4] += (y - SIZE / 2) / SIZE;
+          p[3] -= ((x - SIZE / 2) / SIZE) * 0.45; p[4] += ((y - SIZE / 2) / SIZE) * 0.35;
         }
-        p[3] -= 0.04; p[4] -= 0.0;   // keep the whole cup (and its hanger) inside the frame: the button sits a little below and right of centre
+        p[4] = Math.max(-0.04, Math.min(0.06, p[4]));
         return p;
       };
-      const [yb, pb] = await page.evaluate(`window.XMCLIP.facing('XM5H_Power')`);
+      const [yb, pb] = await page.evaluate(`window.XMCLIP.facing('powerButton')`);
       const hero = await page.evaluate(`(async () => { const d = await window.sunpods.debugMod('wh1000xm5', false); return d.M.HERO.rot; })()`);
       aim = {
-        hero: [hero[0], hero[1], hero[2], 0, 0, 0.27],
-        button: await centre([yb + 22, pb - 12, 0, 0, 0, 0.58], 'XM5H_Power'),
-        led: await centre([yb + 18, pb - 10, 0, 0, 0, 0.52], 'XM5H_LED'),
-        ledClose: await centre([yb + 14, pb - 8, 0, 0, 0, 0.55], 'XM5H_LED'),
+        hero: [hero[0], hero[1], hero[2], 0, 0, 2.35],
+        button: await centre([yb + 20, pb - 10, 0, 0, 0, 2.65], 'powerButton'),
+        led: await centre([yb + 16, pb - 8, 0, 0, 0, 2.60], 'statusLed'),
+        ledClose: await centre([yb + 14, pb - 7, 0, 0, 0, 2.68], 'statusLed'),
       };
     }
     const n = clip === 'open' ? 120 : 210;

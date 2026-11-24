@@ -154,6 +154,8 @@ function merge(a, b) {
 // ---------------------------------------------------------------------------------------------
 export function createC710N(ctx) {
   const { THREE, patched, lin } = ctx;
+  const smooth = ctx.smooth || ((t) => t * t * (3 - 2 * t));
+  const clamp01 = (x) => Math.min(1, Math.max(0, x));
   // tools only (hero3d ?debug): try shape values without editing this file
   const BUD = ctx.DEBUG && ctx.overrides ? merge(BUD0, ctx.overrides.BUD) : BUD0;
   const CASE = ctx.DEBUG && ctx.overrides ? merge(CASE0, ctx.overrides.CASE) : CASE0;
@@ -1238,12 +1240,19 @@ if (gl_FrontFacing) {
     bud.position.sub(c); pivot.position.add(c);
   }
   budsRoot.add(pivotR, pivotL);
+  const pivotRestR = pivotR.position.clone();
+  const pivotRestL = pivotL.position.clone();
+  budR.updateMatrix();
+  budL.updateMatrix();
+  const budInvR = budR.matrix.clone().invert();
+  const budInvL = budL.matrix.clone().invert();
 
   const kase = buildCase();
   // the case rests like the XM5 case in the hero frame (yaw -16, tilt 14), scaled to the same size
   const CASE_S = 1.0;   // relative to the XM5 case's rest scale (its 6.48 cm case and this one fill the hero alike)
   kase.root.matrixAutoUpdate = false;
   kase.root.matrix.makeTranslation(0, CASE_DY, 0).multiply(ctx.caseRest).multiply(new THREE.Matrix4().makeScale(CASE_S * 6.48 / (2 * CASE.A), CASE_S * 6.48 / (2 * CASE.A), CASE_S * 6.48 / (2 * CASE.A)));
+  const CASE_REST_MAT = kase.root.matrix.clone();
   // earbuds in the case share geometry and materials with the hero pair
   for (const an of kase.anchors) {
     const b = buildBud(an.side);
@@ -1360,25 +1369,113 @@ if (gl_FrontFacing) {
   // Pose (called by hero3d.js every frame it draws)
   const LID_OPEN = rad(CASE.lidOpenDeg);
   const pair = { R: 0, L: 0 };
+  const _vUp = new THREE.Vector3(0, 1, 0);
+  const _p0 = new THREE.Vector3();
+  const _p1 = new THREE.Vector3();
+  const _s0 = new THREE.Vector3();
+  const _s1 = new THREE.Vector3();
+  const _q0 = new THREE.Quaternion();
+  const _q1 = new THREE.Quaternion();
+  const _m0 = new THREE.Matrix4();
+  const _mRootInv = new THREE.Matrix4();
+  const _mDrop = new THREE.Matrix4();
+  const _mDropScale = new THREE.Matrix4();
+
   function applyPose(st, active) {
-    const a = rad(st.angle);
-    pivotR.rotation.y = a; pivotL.rotation.y = -a;            // mirrored spin, like the XM5
-    kase.spin.rotation.y = a;
-    kase.lid.rotation.x = -LID_OPEN * st.lid;
-    // the earbuds stand proud of the rim when the lid is open and settle under it as it closes
-    // (the XM5 case does the same, BUD_SEAT in hero3d.js)
-    for (const an of kase.anchors) {
-      an.node.position.y = an.y - CASE.budSeat.drop * (1 - Math.min(1, st.lid * 1.6)) + (pair[an.side] || 0);
-      an.node.visible = true;
+    if (!active) {
+      budsRoot.visible = false;
+      kase.root.visible = false;
+      return;
     }
-    budsRoot.visible = active && st.model === 'buds';
-    kase.root.visible = active && st.model === 'case';
+    const a = rad(st.angle);
+    const hasProgress = st.caseProgress !== undefined && st.caseProgress !== null;
+    if (!hasProgress) {
+      kase.root.matrix.copy(CASE_REST_MAT);
+      pivotR.position.copy(pivotRestR); pivotR.rotation.set(0, a, 0); pivotR.scale.set(1, 1, 1);
+      pivotL.position.copy(pivotRestL); pivotL.rotation.set(0, -a, 0); pivotL.scale.set(1, 1, 1);
+      kase.spin.rotation.y = a;
+      kase.lid.rotation.x = -LID_OPEN * st.lid;
+      for (const an of kase.anchors) {
+        an.node.position.y = an.y - CASE.budSeat.drop * (1 - Math.min(1, st.lid * 1.6)) + (pair[an.side] || 0);
+        an.node.visible = true;
+      }
+      budsRoot.visible = st.model === 'buds';
+      kase.root.visible = st.model === 'case';
+      return;
+    }
+
+    const p = clamp01(st.caseProgress);
+    if (p <= 0.0005) {
+      kase.root.visible = false;
+      kase.root.matrix.copy(CASE_REST_MAT);
+      pivotR.position.copy(pivotRestR); pivotR.rotation.set(0, a, 0); pivotR.scale.set(1, 1, 1);
+      pivotL.position.copy(pivotRestL); pivotL.rotation.set(0, -a, 0); pivotL.scale.set(1, 1, 1);
+      budsRoot.visible = true;
+      return;
+    }
+
+    if (p >= 0.72) {
+      const lidT = smooth(clamp01((1 - p) / 0.28));
+      kase.root.matrix.copy(CASE_REST_MAT);
+      kase.spin.rotation.y = a;
+      kase.lid.rotation.x = -LID_OPEN * lidT;
+      for (const an of kase.anchors) {
+        an.node.position.y = an.y - CASE.budSeat.drop * (1 - Math.min(1, lidT * 1.6)) + (pair[an.side] || 0);
+        an.node.visible = true;
+      }
+      kase.root.visible = true;
+      budsRoot.visible = false;
+      return;
+    }
+
+    const liftT = smooth(clamp01((0.72 - p) / 0.58));
+    const dropT = smooth(clamp01((0.58 - p) / 0.44));
+
+    // Compute exact seated bud poses from resting open case before applying downward case exit.
+    kase.root.matrix.copy(CASE_REST_MAT);
+    kase.spin.rotation.y = a;
+    kase.lid.rotation.x = -LID_OPEN;
+    for (const an of kase.anchors) {
+      an.node.position.y = an.y + (pair[an.side] || 0);
+      an.node.visible = false;
+    }
+    kase.root.updateMatrixWorld(true);
+    budsRoot.updateWorldMatrix(true, false);
+    _mRootInv.copy(budsRoot.matrixWorld).invert();
+
+    const arcSin = Math.sin(Math.PI * liftT);
+    for (const an of kase.anchors) {
+      const isR = an.side === 'R';
+      const pivot = isR ? pivotR : pivotL;
+      const rest = isR ? pivotRestR : pivotRestL;
+      const inv = isR ? budInvR : budInvL;
+      const spinAng = isR ? a : -a;
+      _m0.copy(an.bud.matrixWorld).multiply(inv).premultiply(_mRootInv);
+      _m0.decompose(_p0, _q0, _s0);
+      _p1.copy(rest);
+      _q1.setFromAxisAngle(_vUp, spinAng);
+      _s1.set(1, 1, 1);
+      pivot.position.lerpVectors(_p0, _p1, liftT);
+      pivot.position.y += arcSin * (isR ? 1.55 : 0.75);
+      pivot.position.z += arcSin * (isR ? -0.45 : 0.95);
+      pivot.quaternion.slerpQuaternions(_q0, _q1, liftT);
+      pivot.scale.lerpVectors(_s0, _s1, liftT);
+    }
+
+    const sDrop = 1 - 0.35 * dropT;
+    _mDropScale.makeScale(sDrop, sDrop, sDrop);
+    _mDrop.makeTranslation(0, -5.2 * dropT, 0).multiply(CASE_REST_MAT).multiply(_mDropScale);
+    kase.root.matrix.copy(_mDrop);
+    kase.root.visible = dropT < 0.995;
+    budsRoot.visible = true;
   }
 
   chunkCache = null;
   return {
     buds: { root: budsRoot, pivotL, pivotR, budL, budR },
     kase,
+    handlesCaseProgress: true,
+    precompileClosedBoth: true,
     FINISHES, KEYS, finishCopy, applyFinish, applyPose, LID_OPEN, ready, warm,
     M, BUD, CASE, BH, pair,
   };

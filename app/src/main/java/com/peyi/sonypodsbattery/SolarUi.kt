@@ -13,10 +13,10 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -42,7 +42,6 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -53,9 +52,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.coroutines.flow.first
-import androidx.compose.runtime.snapshotFlow
 
 // ======================================================================
 // Brand: amber sun on ink. Used unless "Match wallpaper colours" is on.
@@ -129,8 +125,7 @@ private fun modeTitle(mode: ListeningMode?, connected: Boolean, ambient: Int): S
     else -> "Connected"
 }
 
-/** What the Home hero is showing: the closed case, the buds, or a clip between them. */
-internal enum class HeroPhase { CASE, OPENING, BUDS, CLOSING }
+internal fun disconnectedHint(model: EarbudModel): String = "${model.wakeHint}."
 
 @Composable
 internal fun SolarHero(
@@ -140,6 +135,8 @@ internal fun SolarHero(
     model: String,
     color: String = "black",
     device: String = "xm5",
+    animateEntrance: Boolean = false,
+    onEntrancePlayed: () -> Unit = {},
     onCycle: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
@@ -165,51 +162,33 @@ internal fun SolarHero(
     }
     val title = modeTitle(mode, connected, ambientLevel)
 
-    val context = LocalContext.current
-
-    // While the earbuds are away the hero shows the closed case. When they connect the lid opens
-    // and the view moves to the buds; when they disconnect it goes back to the case as the lid
-    // closes. All of it is the one live 3D view, in the earbuds' own colour.
-    var phase by remember { mutableStateOf(if (connected) HeroPhase.BUDS else HeroPhase.CASE) }
-    LaunchedEffect(connected) {
-        val animationsOn = android.provider.Settings.Global.getFloat(
-            context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f
-        ) > 0f
-        // Let a clip in flight finish, so the next one starts from the frame on screen.
-        if (withTimeoutOrNull(7000) { snapshotFlow { phase }.first { it == HeroPhase.CASE || it == HeroPhase.BUDS } } == null) {
-            phase = if (phase == HeroPhase.OPENING) HeroPhase.BUDS else HeroPhase.CASE
+    val reduceMotion = rememberReduceMotion()
+    // Keep full opacity while playUnpack()/playPack() is in flight, and gate taps until unpacked.
+    var prevConnected by remember { mutableStateOf(connected) }
+    var settling by remember { mutableStateOf(connected && animateEntrance && !reduceMotion) }
+    LaunchedEffect(connected, reduceMotion) {
+        if (connected != prevConnected) {
+            prevConnected = connected
+            settling = !reduceMotion
         }
-        if (connected && phase == HeroPhase.CASE) {
-            if (animationsOn) {
-                phase = HeroPhase.OPENING
-                withTimeoutOrNull(6000) { snapshotFlow { phase }.first { it == HeroPhase.BUDS } }
-            }
-            phase = HeroPhase.BUDS
-        } else if (!connected && phase == HeroPhase.BUDS) {
-            if (animationsOn) {
-                phase = HeroPhase.CLOSING
-                withTimeoutOrNull(4000) { snapshotFlow { phase }.first { it == HeroPhase.CASE } }
-            }
-            phase = HeroPhase.CASE
+        // Fallback timeout in case the WebView pauses mid-animation before reporting unpacked()/packed().
+        if (settling) {
+            delay(4_200)
+            settling = false
         }
     }
-    val showCase = phase != HeroPhase.BUDS
 
     val heroAlpha by animateFloatAsState(
-        when {
-            connected -> 1f
-            phase == HeroPhase.CLOSING -> 1f
-            else -> 0.8f
-        },
+        if (connected || settling) 1f else 0.8f,
         tween(400), label = "heroAlpha"
     )
 
     // No card around the hero: the buds float on the page with a soft glow that follows the mode.
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(244.dp)
+                .height(264.dp)
                 .drawBehind {
                     // A wide oval glow that fades out fully inside the hero, so it has no edges.
                     val r = size.height / 2
@@ -230,12 +209,12 @@ internal fun SolarHero(
                 }
                 .semantics { contentDescription = "$model. $title" }
         ) {
-            // The connect clip ends on the hero pose itself, so the cut to the interactive buds
-            // is invisible: both share one layout and the same float, tilt and bump.
+            val maxHeroH = (maxHeight - 10.dp).coerceAtLeast(180.dp)
+            val heroW = minOf(maxWidth * 0.94f, maxHeroH * (1000f / 712f))
+            val heroH = heroW * (712f / 1000f)
             val heroLayer = Modifier
                 .align(Alignment.Center)
-                .fillMaxWidth(0.94f)
-                .aspectRatio(1000f / 712f)
+                .size(width = heroW, height = heroH)
                 .graphicsLayer {
                     translationY = bob * 5.dp.toPx()
                     rotationZ = tilt * 1.5f
@@ -243,19 +222,15 @@ internal fun SolarHero(
                     scaleY = bump.value
                     alpha = heroAlpha
                 }
-            LaunchedEffect(phase) {
-                when (phase) {
-                    HeroPhase.OPENING -> { delay(1_050); phase = HeroPhase.BUDS }
-                    HeroPhase.CLOSING -> { delay(800); phase = HeroPhase.CASE }
-                    else -> Unit
-                }
-            }
             Hero3D(
                 device = device,
                 color = color,
-                model = if (showCase) "case" else "buds",
-                lid = if (phase == HeroPhase.CASE || phase == HeroPhase.CLOSING) 0f else 1f,
-                onTap = if (connected && !showCase) onCycle else null,
+                caseProgress = if (connected) 0f else 1f,
+                animateEntrance = animateEntrance,
+                onEntrancePlayed = onEntrancePlayed,
+                onUnpacked = { if (connected) settling = false },
+                onPacked = { if (!connected) settling = false },
+                onTap = if (connected && !settling) onCycle else null,
                 modifier = heroLayer
             )
         }
@@ -278,7 +253,7 @@ internal fun SolarHero(
         if (!connected) {
             Spacer(Modifier.height(12.dp))
             Text(
-                "Open the case near your phone to connect.",
+                disconnectedHint(EarbudModel.active),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.onSurfaceVariant
             )
