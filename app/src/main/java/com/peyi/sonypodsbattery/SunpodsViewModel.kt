@@ -173,6 +173,10 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         { it.copy(clearBass = clearBass, bands = bands) }
     ) { s, r -> SonyFeatures.setEqBands(s, r, clearBass, bands) }
 
+    fun setWindReduction(on: Boolean) = change("Wind Noise Reduction", { it.copy(windAuto = on) }) { s, r ->
+        SonyFeatures.setWindReduction(s, r, on)
+    }
+
     fun setDsee(on: Boolean) = change("DSEE Extreme", { it.copy(dseeOn = on) }) { s, r ->
         SonyFeatures.setDsee(s, r, on)
     }

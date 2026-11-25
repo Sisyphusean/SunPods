@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.3.0
+
+The WF-1000XM4 joins, in testing: own a pair? Tell us how it goes.
+
+**New**
+- WF-1000XM4 support: battery for each earbud and the case, noise cancelling and Ambient Sound with Focus on Voice, automatic wind noise reduction, the equaliser, DSEE Extreme, sound quality mode, touch controls including Volume Control, Speak-to-Chat, wearing detection, the fit test, voice prompts, turn off and reset
+- The WF-1000XM4 in 3D, in black and Platinum Silver
+- Setup explains how to put the WF-1000XM4 in pairing mode
+
 ## 3.2.0
 
 The WH-1000XM5 headphones join the WF-1000XM5 and WF-C710N, in testing: own a pair? Tell us how it goes.

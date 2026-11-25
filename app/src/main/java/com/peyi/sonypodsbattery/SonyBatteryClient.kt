@@ -451,20 +451,40 @@ class SonyBatteryClient(private val context: Context) {
         val mode: ModeReport? = null
     )
 
-    /** Noise control as the earbuds report it (reply 0x67 or notification 0x69, inquired type 0x15). */
-    data class ModeReport(val mode: ListeningMode, val focusOnVoice: Boolean, val ambientLevel: Int, val raw: String) {
+    /**
+     * Noise control as the earbuds report it (reply 0x67 or notification 0x69). Type 0x17 (the
+     * WF-1000XM5): [c 17 vcs on mode focus level]. Type 0x15 (the WF-1000XM4) has one more byte, the
+     * noise cancelling variant, before focus: 02 dual (wind reduction off), 03 or 05 automatic wind
+     * noise reduction (the app writes 03, the earbuds report 05).
+     */
+    data class ModeReport(
+        val mode: ListeningMode, val focusOnVoice: Boolean, val ambientLevel: Int, val raw: String,
+        /** Type 0x15 only: the noise cancelling variant byte, sent back unchanged with every change. */
+        val ncValue: Int? = null
+    ) {
+        /** Automatic wind noise reduction, on earbuds that have the switch; null otherwise. */
+        val windAuto: Boolean? get() = ncValue?.let { it == NC_WIND_AUTO || it == NC_WIND_AUTO_REPORTED }
+
         companion object {
+            const val NC_DUAL = 0x02
+            const val NC_WIND_AUTO = 0x03
+            const val NC_WIND_AUTO_REPORTED = 0x05
+
             fun parse(p: ByteArray): ModeReport? {
                 if (p.size < 7 || (p[0] != 0x67.toByte() && p[0] != 0x69.toByte()) || (p[1] != 0x15.toByte() && p[1] != 0x17.toByte())) return null
+                if (p[1] == 0x15.toByte() && p.size < 8) return null
+                val long = p[1] == 0x15.toByte()
                 val mode = when {
                     p[3].toInt() == 0 -> ListeningMode.OFF
                     p[4].toInt() == 0 -> ListeningMode.NOISE_CANCELLING
                     p[4].toInt() == 1 -> ListeningMode.AMBIENT
                     else -> return null
                 }
+                val focus = if (long) 6 else 5
                 return ModeReport(
-                    mode, p[5].toInt() == 1, (p[6].toInt() and 0xff).coerceIn(1, 20),
-                    p.joinToString(" ") { "%02x".format(it.toInt() and 0xff) }
+                    mode, p[focus].toInt() == 1, (p[focus + 1].toInt() and 0xff).coerceIn(1, 20),
+                    p.joinToString(" ") { "%02x".format(it.toInt() and 0xff) },
+                    ncValue = if (long) p[5].toInt() and 0xff else null
                 )
             }
         }
@@ -716,7 +736,7 @@ class SonyBatteryClient(private val context: Context) {
                 val p = request(byteArrayOf(0x66, t), 800) ?: continue
                 android.util.Log.i("SunPods", "Noise control reply for type ${"%02x".format(t)}: ${hex(p)}")
                 noiseType = t
-                return ModeReport.parse(p) ?: reportedMode
+                return ModeReport.parse(p)?.also { reportedMode = it } ?: reportedMode
             }
             return reportedMode
         }
@@ -730,13 +750,26 @@ class SonyBatteryClient(private val context: Context) {
          * mode back; if it didn't take, it retries once with confirmation alerts on (94 00 00) and
          * answers any alert, the way Sound Connect does. Returns a line for diagnostics.
          */
-        fun setAmbientSoundMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean): String {
+        fun setAmbientSoundMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean, windAuto: Boolean? = null): String {
             val enabled = if (mode == ListeningMode.OFF) 0 else 1
             val ambient = if (mode == ListeningMode.AMBIENT) 1 else 0
             val type = functions()?.ncAsmType?.toByte()
                 ?: noiseType ?: 0x17.toByte()
             // The XM5 takes noise control on type 0x17; an unknown type is acknowledged but ignored.
-            val payload = byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), if (focusOnVoice) 0x01 else 0x00, ambientLevel.coerceIn(1, 20).toByte())
+            // Type 0x15 carries the wind setting too: change it when asked, else preserve the current
+            // reported setting (reading mode first on a fresh or reopened session so it isn't wiped).
+            if (type == 0x15.toByte() && windAuto == null && reportedMode == null) {
+                runCatching { readMode() }
+            }
+            val wind = when (windAuto) {
+                true -> ModeReport.NC_WIND_AUTO
+                false -> ModeReport.NC_DUAL
+                null -> (reportedMode?.ncValue ?: ModeReport.NC_DUAL)
+            }
+            val focus: Byte = if (focusOnVoice) 0x01 else 0x00
+            val level = ambientLevel.coerceIn(1, 20).toByte()
+            val payload = if (type == 0x15.toByte()) byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), wind.toByte(), focus, level)
+                else byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), focus, level)
             val seen = StringBuilder()
             fun sendAndWatch() {
                 send(payload)
@@ -751,7 +784,7 @@ class SonyBatteryClient(private val context: Context) {
                     false
                 }
             }
-            fun applied(): ModeReport? = readMode()?.takeIf { it.mode == mode }
+            fun applied(): ModeReport? = readMode()?.takeIf { it.mode == mode && (windAuto == null || it.windAuto == windAuto) }
 
             sendAndWatch()
             applied()?.let { return "applied (sent ${hex(payload)};$seen)" }
