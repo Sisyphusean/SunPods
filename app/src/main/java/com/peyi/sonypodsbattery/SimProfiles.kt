@@ -32,6 +32,7 @@ internal object SimProfiles {
         EarbudModel.WF_1000XM5 -> XM5
         EarbudModel.WF_C710N -> C710nProfile.build(color)
         EarbudModel.WH_1000XM5 -> Wh1000xm5Profile.build(color)
+        EarbudModel.WF_1000XM4 -> Wf1000xm4Profile.build(color)
     }
 
     val XM5 = SimProfile(

@@ -48,3 +48,6 @@ branding/render/c710n/*
 # WH-1000XM5 headphones: the boards and references contain Sony's photos; keep only the tools
 branding/render/wh1000xm5/*
 !branding/render/wh1000xm5/tools/
+# WF-1000XM4 earbuds: the boards and references contain Sony's photos; keep only the tools
+branding/render/wf1000xm4/*
+!branding/render/wf1000xm4/tools/

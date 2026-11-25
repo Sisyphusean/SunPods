@@ -22,6 +22,10 @@ internal object VoicePrompts {
 
     data class State(val on: Boolean?, val volume: Int?, val tail: Int?)
 
+    /** Voice guidance without volume (T2 0x41, the WF-1000XM4): SET is [48 01 on/off], and 46 20 gets no answer. */
+    private fun basic(s: SonyBatteryClient.SonySession): Boolean =
+        s.functions()?.table2?.let { 0x41 in it && 0x42 !in it } == true
+
     fun read(s: SonyBatteryClient.SonySession, patient: Boolean = false): State {
         // Right after a change the earbuds can take over a second to answer: then wait longer and
         // ask once more. A routine refresh keeps it short.
@@ -29,7 +33,7 @@ internal object VoicePrompts {
         val raw = s.request(byteArrayOf(GET.toByte(), SETTING.toByte()), wait, T2)
             ?: if (patient) s.request(byteArrayOf(GET.toByte(), SETTING.toByte()), wait, T2) else null
         val onOff = raw?.takeIf { it.size >= 3 }?.let { it[2].toInt() == 0 }
-        val vol = s.request(byteArrayOf(GET.toByte(), VOLUME.toByte()), wait, T2)?.takeIf { it.size >= 3 }
+        val vol = if (basic(s)) null else s.request(byteArrayOf(GET.toByte(), VOLUME.toByte()), wait, T2)?.takeIf { it.size >= 3 }
         return State(onOff, vol?.get(2)?.toInt()?.coerceIn(-2, 2), vol?.getOrNull(3)?.toInt()?.and(0xff))
     }
 
@@ -39,8 +43,9 @@ internal object VoicePrompts {
      * so read the current language first and send it back unchanged.
      */
     fun setOn(s: SonyBatteryClient.SonySession, on: Boolean): Boolean {
-        val language = s.request(byteArrayOf(GET.toByte(), SETTING.toByte()), 800, T2)?.getOrNull(3)
         val v: Byte = if (on) 0x00 else 0x01
+        if (basic(s)) return s.command(byteArrayOf(SET.toByte(), SETTING.toByte(), v), type = T2)
+        val language = s.request(byteArrayOf(GET.toByte(), SETTING.toByte()), 800, T2)?.getOrNull(3)
         val payload = if (language != null) byteArrayOf(SET.toByte(), SETTING.toByte(), v, language)
         else byteArrayOf(SET.toByte(), SETTING.toByte(), v)
         return s.command(payload, type = T2)

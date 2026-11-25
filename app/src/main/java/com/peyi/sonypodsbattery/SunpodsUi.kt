@@ -1503,6 +1503,19 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
                     vm.setListeningMode(ListeningMode.OFF, level.roundToInt(), battery.focusOnVoice)
                 }
             }
+            val settings by vm.settings.collectAsState()
+            AnimatedVisibility(
+                visible = battery.listeningMode == ListeningMode.NOISE_CANCELLING && settings.windAuto != null,
+                enter = revealIn(),
+                exit = revealOut()
+            ) {
+                Column {
+                    RowDivider(inset = 20.dp)
+                    ToggleRow(null, "Automatic Wind Noise Reduction", "Cuts wind noise outdoors. Uses a little more battery.", settings.windAuto == true) {
+                        vm.setWindReduction(it)
+                    }
+                }
+            }
             AnimatedVisibility(
                 visible = battery.listeningMode == ListeningMode.AMBIENT,
                 enter = revealIn(),

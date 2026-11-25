@@ -24,6 +24,8 @@ enum class EarbudModel(
     val series: String = "",
 ) {
     WF_1000XM5("xm5", "WF-1000XM5", Regex("WF[- ]?1000XM5", RegexOption.IGNORE_CASE), 8.0, 12.0, 2.0, supportsLeAudio = true, series = "1000X"),
+    // Sony: 8 h with noise cancelling, 12 h without; 24 / 36 h with the case (two charges).
+    WF_1000XM4("wf1000xm4", "WF-1000XM4", Regex("WF[- ]?1000XM4", RegexOption.IGNORE_CASE), 8.0, 12.0, 2.0, series = "1000X"),
     // Sony: 8.5 h NC on / 12 h off, about 30 h in total with the case (21.5 h in the case).
     WF_C710N("c710n", "WF-C710N", Regex("WF[- ]?C710N", RegexOption.IGNORE_CASE), 8.5, 12.0, 2.5, series = "C"),
     // Sony: 30 h with noise cancelling, 40 h without; no charging case.
@@ -39,18 +41,32 @@ enum class EarbudModel(
     val wakeHint: String get() = if (headphones) "Turn them on near your phone" else "Open the case near your phone"
 
     /** The numbered steps for putting them in pairing mode. */
-    val pairSteps: List<String> get() = if (headphones) listOf(
-        "Turn the headphones off.",
-        "Press and hold the power button for about 5 seconds, until the light flashes blue."
-    ) else listOf(
-        "Put both earbuds in the case and keep the lid open.",
-        "Hold the button on the back for 5 seconds, until the light flashes blue."
-    )
+    val pairSteps: List<String> get() = when {
+        headphones -> listOf(
+            "Turn the headphones off.",
+            "Press and hold the power button for about 5 seconds, until the light flashes blue."
+        )
+        this == WF_1000XM4 -> listOf(
+            "Take both earbuds out of the case and put them in your ears.",
+            "Hold both touch sensors for about 5 seconds, until you hear \"Bluetooth pairing\"."
+        )
+        else -> listOf(
+            "Put both earbuds in the case and keep the lid open.",
+            "Hold the button on the back for 5 seconds, until the light flashes blue."
+        )
+    }
     /** What the pairing clip shows, for screen readers. */
-    val pairClipDescription: String get() = if (headphones) "The power button is held down, then the light flashes blue."
-        else "The case turns round, the button on the back is held down, then the light on the front flashes blue."
+    val pairClipDescription: String get() = when {
+        headphones -> "The power button is held down, then the light flashes blue."
+        this == WF_1000XM4 -> "Both earbuds lift out of the case, then both touch sensors are held until they pulse for pairing."
+        else -> "The case turns round, the button on the back is held down, then the light on the front flashes blue."
+    }
     /** What to check when searching or pairing doesn't work. */
-    val lightHint: String get() = if (headphones) "the light is flashing blue" else "the case light is flashing blue"
+    val lightHint: String get() = when {
+        headphones -> "the light is flashing blue"
+        this == WF_1000XM4 -> "both touch sensors are held for 5 seconds"
+        else -> "the case light is flashing blue"
+    }
 
     /** Only this model, for Android's device picker. */
     val namePattern: java.util.regex.Pattern get() =

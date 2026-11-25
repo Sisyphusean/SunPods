@@ -8,6 +8,7 @@ import org.junit.Test
 class OnboardingModelTest {
     @Test fun `supportsLeAudio is enabled only for WF-1000XM5`() {
         assertTrue(EarbudModel.WF_1000XM5.supportsLeAudio)
+        assertFalse(EarbudModel.WF_1000XM4.supportsLeAudio)
         assertFalse(EarbudModel.WF_C710N.supportsLeAudio)
         assertFalse(EarbudModel.WH_1000XM5.supportsLeAudio)
     }
@@ -113,10 +114,12 @@ class OnboardingModelTest {
     @Test fun `wakeHint and disconnected copy match each model`() {
         assertEquals("Turn them on near your phone", EarbudModel.WH_1000XM5.wakeHint)
         assertEquals("Open the case near your phone", EarbudModel.WF_1000XM5.wakeHint)
+        assertEquals("Open the case near your phone", EarbudModel.WF_1000XM4.wakeHint)
         assertEquals("Open the case near your phone", EarbudModel.WF_C710N.wakeHint)
 
         assertEquals("Turn them on near your phone.", disconnectedHint(EarbudModel.WH_1000XM5))
         assertEquals("Open the case near your phone.", disconnectedHint(EarbudModel.WF_1000XM5))
+        assertEquals("Open the case near your phone.", disconnectedHint(EarbudModel.WF_1000XM4))
         assertEquals("Open the case near your phone.", disconnectedHint(EarbudModel.WF_C710N))
     }
 
@@ -125,7 +128,7 @@ class OnboardingModelTest {
         val headphones = EarbudModel.entries.filter { it.headphones }
         assertTrue(earbuds.isNotEmpty())
         assertTrue(headphones.isNotEmpty())
-        assertEquals(listOf(EarbudModel.WF_1000XM5, EarbudModel.WF_C710N), earbuds)
+        assertEquals(listOf(EarbudModel.WF_1000XM5, EarbudModel.WF_1000XM4, EarbudModel.WF_C710N), earbuds)
         assertEquals(listOf(EarbudModel.WH_1000XM5), headphones)
         // Switching back to earbuds must yield valid index bounds for the previous family size.
         val prevIndexInHeadphones = 0

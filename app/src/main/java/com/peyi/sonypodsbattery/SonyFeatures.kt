@@ -50,7 +50,7 @@ enum class TouchFunction(val code: Int, val label: String, val short: String, va
 }
 
 /** One function the earbuds offer for a touch sensor, with what each gesture then does (action to function codes). */
-data class TouchOption(val function: TouchFunction, val actions: List<Pair<Int, Int>>)
+data class TouchOption(val function: TouchFunction, val actions: List<Pair<Int, Int>>, val code: Int = function.code)
 
 /**
  * The earbuds' own list of what each touch sensor can do (Sony's "capability", GET 0xf0 0x03), the
@@ -79,7 +79,7 @@ object TouchCapability {
                 val actions = mutableListOf<Pair<Int, Int>>()
                 repeat(nActions) { actions += u(i) to u(i + 1); i += 2 }
                 repeat(nCustom) { actions += u(i) to u(i + 1); i += 3 + u(i + 2) }
-                TouchFunction.from(preset)?.let { f -> if (options.none { it.function == f }) options += TouchOption(f, actions) }
+                TouchFunction.from(preset)?.let { f -> if (options.none { it.function == f }) options += TouchOption(f, actions, preset) }
             }
             out[key] = options
         }
@@ -210,6 +210,8 @@ data class DeviceSettings(
     val speakToChat: Boolean? = null,
     val speakToChatSensitivity: SpeakToChatSensitivity? = null,
     val speakToChatTimeout: SpeakToChatTimeout? = null,
+    /** Automatic wind noise reduction (WF-1000XM4); null when the earbuds don't have the switch. */
+    val windAuto: Boolean? = null,
     val pauseWhenRemoved: Boolean? = null,
     val autoOffWhenRemoved: Boolean? = null,
     /** Auto power off as the earbuds hold it: the option in force and the time last chosen ([AutoOff] codes). */
@@ -260,6 +262,8 @@ data class DeviceSettings(
 /** Features SunPods shows only when the earbuds list them (Sound Connect does the same). */
 internal enum class Feature(val test: (SupportedFunctions) -> Boolean) {
     SPEAK_TO_CHAT({ it.has1(Fn.SPEAK_TO_CHAT_1, Fn.SPEAK_TO_CHAT_2) }),
+    /** Automatic wind noise reduction: part of noise control type 0x15 (the WF-1000XM4). */
+    WIND_REDUCTION({ it.ncAsmType == 0x15 }),
     CODEC({ it.has1(Fn.CODEC_INDICATOR) }),
     DSEE({ it.has1(Fn.UPSCALING, Fn.UPSCALING_AUTO_OFF, Fn.UPSCALING_WITH_REASON) }),
     TOUCH({ it.has1(Fn.ASSIGNABLE, Fn.ASSIGNABLE_LIMITED) }),
@@ -358,6 +362,7 @@ internal object SonyFeatures {
     private const val NCASM_GET_PARAM = 0x66
     private const val NCASM_BUTTON = 0x30
     private const val SYSTEM_SPEAK_TO_CHAT = 0x0c
+    private const val SYSTEM_SPEAK_TO_CHAT_1 = 0x02
     private const val SYSTEM_HEAD_GESTURE = 0x0f
     private const val SYSTEM_T2_AUTO_SWITCH = 0x0a
 
@@ -382,6 +387,7 @@ internal object SonyFeatures {
         if (r.has(Feature.DSEE)) r = readDsee(s, r)
         r = readPriority(s, r)
         if (r.has(Feature.SPEAK_TO_CHAT)) r = readSpeakToChat(s, r)
+        if (r.functions?.let(Feature.WIND_REDUCTION.test) == true) r = r.copy(windAuto = s.readMode()?.windAuto ?: r.windAuto)
         if (r.has(Feature.PAUSE_WHEN_REMOVED)) r = readPause(s, r)
         if (r.has(Feature.AUTO_OFF_WHEN_REMOVED)) r = readAutoOff(s, r)
         if (r.has(Feature.TOUCH)) r = readTouch(s, r)
@@ -584,13 +590,22 @@ internal object SonyFeatures {
         return r
     }
 
+    /** Speak-to-Chat's type: 0x02 on earbuds that list only the older function (the WF-1000XM4), else 0x0c. */
+    private fun stcType(r: DeviceSettings): Int =
+        if (r.functions?.let { it.has1(Fn.SPEAK_TO_CHAT_1) && !it.has1(Fn.SPEAK_TO_CHAT_2) } == true) SYSTEM_SPEAK_TO_CHAT_1 else SYSTEM_SPEAK_TO_CHAT
+
     private fun readSpeakToChat(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
         var next = r
-        s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_SPEAK_TO_CHAT))?.let { p ->
+        val type = stcType(r)
+        s.request(bytes(SYSTEM_GET_PARAM, type))?.let { p ->
             if (p.size >= 3) next = next.copy(speakToChat = u(p[2]) == 0)
         }
-        s.request(bytes(SYSTEM_GET_EXT_PARAM, SYSTEM_SPEAK_TO_CHAT))?.let { p ->
-            if (p.size >= 4) next = next.copy(
+        s.request(bytes(SYSTEM_GET_EXT_PARAM, type))?.let { p ->
+            // Type 02 has voice focus between sensitivity and time: [c 02 sens voiceFocus time].
+            if (type == SYSTEM_SPEAK_TO_CHAT_1 && p.size >= 5) next = next.copy(
+                speakToChatSensitivity = SpeakToChatSensitivity.from(u(p[2])),
+                speakToChatTimeout = SpeakToChatTimeout.from(u(p[4]))
+            ) else if (p.size >= 4) next = next.copy(
                 speakToChatSensitivity = SpeakToChatSensitivity.from(u(p[p.size - 2])),
                 speakToChatTimeout = SpeakToChatTimeout.from(u(p[p.size - 1]))
             )
@@ -723,7 +738,7 @@ internal object SonyFeatures {
     }
 
     fun setSpeakToChat(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
-        val ok = s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_SPEAK_TO_CHAT, if (on) 0x00 else 0x01, 0x01))
+        val ok = s.command(bytes(SYSTEM_GET_PARAM + 2, stcType(r), if (on) 0x00 else 0x01, 0x01))
         return readSpeakToChat(s, if (ok) r.copy(speakToChat = on) else r)
     }
 
@@ -733,15 +748,25 @@ internal object SonyFeatures {
         sensitivity: SpeakToChatSensitivity,
         timeout: SpeakToChatTimeout
     ): DeviceSettings {
+        val type = stcType(r)
+        val current = s.request(bytes(SYSTEM_GET_EXT_PARAM, type))
+        // Type 02: [fc 02 sens voiceFocus time], voice focus sent back as the earbuds report it (01 off).
+        val payload = if (type == SYSTEM_SPEAK_TO_CHAT_1) bytes(
+            SYSTEM_GET_EXT_PARAM + 2, type, sensitivity.code, current?.takeIf { it.size >= 5 }?.let { u(it[3]) } ?: 0x01, timeout.code
         // Echo whatever prefix the earbuds report and replace the two trailing fields.
-        val current = s.request(bytes(SYSTEM_GET_EXT_PARAM, SYSTEM_SPEAK_TO_CHAT))
-        val payload = if (current != null && current.size >= 4) current.copyOf().also {
+        ) else if (current != null && current.size >= 4) current.copyOf().also {
             it[0] = (SYSTEM_GET_EXT_PARAM + 2).toByte()
             it[it.size - 2] = sensitivity.code.toByte()
             it[it.size - 1] = timeout.code.toByte()
         } else bytes(SYSTEM_GET_EXT_PARAM + 2, SYSTEM_SPEAK_TO_CHAT, sensitivity.code, timeout.code)
         val ok = s.command(payload)
         return readSpeakToChat(s, if (ok) r.copy(speakToChatSensitivity = sensitivity, speakToChatTimeout = timeout) else r)
+    }
+
+    fun setWindReduction(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
+        val now = s.readMode() ?: throw EarbudsUnavailableException("Couldn't read noise control. Make sure your ${EarbudModel.active.noun} are connected and try again.")
+        s.setAmbientSoundMode(now.mode, now.ambientLevel, now.focusOnVoice, windAuto = on)
+        return r.copy(windAuto = s.readMode()?.windAuto ?: on)
     }
 
     fun setPauseWhenRemoved(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
@@ -767,7 +792,10 @@ internal object SonyFeatures {
         val now = s.request(bytes(SYSTEM_GET_PARAM, SYSTEM_ASSIGNABLE))?.takeIf { it.size >= 5 }
         // Noise control has two codes (0x00 and 0x35); write it back in the form these earbuds report.
         val ambientCode = listOfNotNull(now?.let { u(it[3]) }, now?.let { u(it[4]) })
-            .firstOrNull { TouchFunction.from(it) == TouchFunction.AMBIENT_SOUND_CONTROL } ?: TouchFunction.AMBIENT_SOUND_CONTROL.code
+            .firstOrNull { TouchFunction.from(it) == TouchFunction.AMBIENT_SOUND_CONTROL }
+            // Neither side has it now: the code the earbuds list for it (0x00 on the WF-1000XM4, 0x35 on the XM5).
+            ?: r.touchOptions?.values?.flatten()?.firstOrNull { it.function == TouchFunction.AMBIENT_SOUND_CONTROL }?.code
+            ?: TouchFunction.AMBIENT_SOUND_CONTROL.code
         fun code(f: TouchFunction) = if (f == TouchFunction.AMBIENT_SOUND_CONTROL) ambientCode else f.code
         val l = left?.let(::code) ?: now?.let { u(it[3]) } ?: r.touchLeft?.let(::code)
         val rt = right?.let(::code) ?: now?.let { u(it[4]) } ?: r.touchRight?.let(::code)
@@ -832,7 +860,7 @@ object SettingsStore {
                         GeneralSetting(g.getInt("slot"), g.getString("key"), if (g.has("on")) g.getBoolean("on") else null)
                     }
                 } else null,
-                promptsOn = bool("vg"), promptVolume = int("vgVol"), promptTail = int("vgTail"), colorCode = int("color"),
+                promptsOn = bool("vg"), promptVolume = int("vgVol"), promptTail = int("vgTail"), colorCode = int("color"), windAuto = bool("wind"),
                 leModeSupported = bool("leSup"), leOn = bool("leOn"),
                 functions1 = str("fn1"), functions2 = str("fn2"),
                 readAt = if (o.has("at")) o.getLong("at") else 0L
@@ -878,6 +906,7 @@ object SettingsStore {
             })
         }
         s.promptsOn?.let { o.put("vg", it) }
+        s.windAuto?.let { o.put("wind", it) }
         s.colorCode?.let { o.put("color", it) }
         s.leModeSupported?.let { o.put("leSup", it) }
         s.leOn?.let { o.put("leOn", it) }

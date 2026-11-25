@@ -10,8 +10,9 @@ class ModelChoiceTest {
             assertEquals("${m.displayName} vs ${o.displayName}", m == o, m.namePattern.matcher(o.displayName).matches())
         assertTrue(EarbudModel.WH_1000XM5.namePattern.matcher("WH-1000XM5").matches())
     }
-    @Test fun headphonesGetPowerButtonSteps() {
+    @Test fun modelSpecificPairingSteps() {
         assertTrue(EarbudModel.WH_1000XM5.pairSteps.any { it.contains("power button") })
         assertTrue(EarbudModel.WF_1000XM5.pairSteps.any { it.contains("case") })
+        assertTrue(EarbudModel.WF_1000XM4.pairSteps.any { it.contains("touch sensors") })
     }
 }

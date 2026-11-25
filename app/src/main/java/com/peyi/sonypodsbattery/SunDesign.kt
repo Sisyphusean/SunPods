@@ -154,6 +154,7 @@ internal data class BudArt(
  * The pictures for these earbuds, from their model and the colour code they report (Sony's
  * ModelColor; the "-I" codes 0x11 to 0x1e are the same colours). Unknown colours show black.
  *  WF-1000XM5: 0x01 Black, 0x03 Platinum Silver, 0x06 Smoky Pink.
+ *  WF-1000XM4: 0x01 Black, 0x03 Platinum Silver.
  *  WF-C710N: 0x01 Black, 0x02 White, 0x05 Glass Blue, 0x06 Pink.
  */
 internal fun budArt(colorCode: Int?, model: EarbudModel = EarbudModel.active): BudArt {
@@ -161,6 +162,7 @@ internal fun budArt(colorCode: Int?, model: EarbudModel = EarbudModel.active): B
     return when (model) {
         EarbudModel.WF_C710N -> c710nArt(c)
         EarbudModel.WH_1000XM5 -> wh1000xm5Art(c)
+        EarbudModel.WF_1000XM4 -> wf1000xm4Art(c)
         EarbudModel.WF_1000XM5 -> when (c) {
             0x03 -> BudArt(R.drawable.bud_left_silver, R.drawable.bud_right_silver, R.drawable.bud_case_silver, R.drawable.buds_pair_silver, "silver", R.raw.anim_pair_silver, R.raw.anim_open)
             0x06 -> BudArt(R.drawable.bud_left_pink, R.drawable.bud_right_pink, R.drawable.bud_case_pink, R.drawable.buds_pair_pink, "pink", R.raw.anim_pair_pink, R.raw.anim_open)
@@ -185,6 +187,12 @@ private fun wh1000xm5Art(c: Int?): BudArt = when (c) {
     0x05 -> BudArt(R.drawable.wh1000xm5_side_blue, R.drawable.wh1000xm5_front_blue, R.drawable.wh1000xm5_case_blue, R.drawable.wh1000xm5_pair_blue, "blue", R.raw.wh1000xm5_anim_pair_black, R.raw.wh1000xm5_anim_open_black, model = EarbudModel.WH_1000XM5)
     0x06 -> BudArt(R.drawable.wh1000xm5_side_pink, R.drawable.wh1000xm5_front_pink, R.drawable.wh1000xm5_case_pink, R.drawable.wh1000xm5_pair_pink, "pink", R.raw.wh1000xm5_anim_pair_black, R.raw.wh1000xm5_anim_open_black, model = EarbudModel.WH_1000XM5)
     else -> BudArt(R.drawable.wh1000xm5_side_black, R.drawable.wh1000xm5_front_black, R.drawable.wh1000xm5_case_black, R.drawable.wh1000xm5_pair_black, "black", R.raw.wh1000xm5_anim_pair_black, R.raw.wh1000xm5_anim_open_black, model = EarbudModel.WH_1000XM5)
+}
+
+/** WF-1000XM4 finishes: black and Platinum Silver. */
+private fun wf1000xm4Art(c: Int?): BudArt = when (c) {
+    0x03 -> BudArt(R.drawable.wf1000xm4_bud_left_silver, R.drawable.wf1000xm4_bud_right_silver, R.drawable.wf1000xm4_bud_case_silver, R.drawable.wf1000xm4_buds_pair_silver, "silver", R.raw.wf1000xm4_anim_pair_black, R.raw.wf1000xm4_anim_open_black, model = EarbudModel.WF_1000XM4)
+    else -> BudArt(R.drawable.wf1000xm4_bud_left_black, R.drawable.wf1000xm4_bud_right_black, R.drawable.wf1000xm4_bud_case_black, R.drawable.wf1000xm4_buds_pair_black, "black", R.raw.wf1000xm4_anim_pair_black, R.raw.wf1000xm4_anim_open_black, model = EarbudModel.WF_1000XM4)
 }
 
 /** The current earbuds' pictures; provided by the app shell from the colour the earbuds report. */
