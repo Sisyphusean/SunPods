@@ -2621,32 +2621,35 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
         ToggleRow(Icons.Rounded.Gesture, "Head Gestures", "", settings.headGestures, vm::setHeadGestures)
     }
     val phoneLe = remember { LeAudio.phoneSupports(context) }
-    // The switch and its repair rows walk through earbud steps (the case, both earbuds in), so
-    // headphones don't get them: the WH-1000XM6 goes to LE Audio through Sony Sound Connect.
     val leSwitch = settings.leSwitchOffered
-    val earbuds = !(EarbudModel.fromName(settings.modelName) ?: EarbudModel.active).headphones
+    val model = EarbudModel.fromName(settings.modelName) ?: EarbudModel.active
     if (leSwitch && phoneLe) rows += {
         NavRow(Icons.Rounded.BluetoothAudio, "Connection Mode", if (le) "LE Audio" else "Classic") { choosing = true }
     }
-    // Earbuds that can do LE Audio on a phone that can't: say so instead of hiding it.
+    // Devices that can do LE Audio on a phone that can't: say so instead of hiding it.
     if (leSwitch && !phoneLe) rows += {
         InfoRow("Connection Mode", "Classic")
     }
-    // A switch that didn't complete can leave the earbuds' LE Audio setting on while the phone
+    // A switch that didn't complete can leave the device's LE Audio setting on while the phone
     // still uses Classic, which turns off Connect to 2 devices.
     // Repair rows wait until a switch has had time to settle; mid-switch the links are meant to be in flux.
     val settling = remember(settings.readAt, tick) { SonyControlSessionManager.switchedRecently(context) }
     LaunchedEffect(settling) { if (settling) { delay(30_000); tick++ } }
     // Set to Classic but not connected at all, as after a switch the phone didn't finish.
     val classicUp = remember(settings.readAt, tick) { runCatching { context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.getProfileConnectionState(android.bluetooth.BluetoothProfile.A2DP) == android.bluetooth.BluetoothProfile.STATE_CONNECTED }.getOrDefault(false) }
-    if (earbuds && !settling && !le && !classicUp) rows += {
-        NavRow(Icons.Rounded.RestartAlt, "Reconnect Your Earbuds", null, note = "Not connected") { switching = false }
+    if (leSwitch && !settling && !le && !classicUp) rows += {
+        NavRow(Icons.Rounded.RestartAlt, "Reconnect Your ${model.titleNoun}", null, note = "Not connected") { switching = false }
     }
-    // The reverse: the earbuds are set to Classic but one is still holding on to LE Audio.
-    if (earbuds && !settling && le && (settings.leOn == false || SonyControlSessionManager.classicOnly(context))) rows += {
-        NavRow(Icons.Rounded.RestartAlt, "Finishing the Switch to Classic", null, note = "Case them for 10 seconds, then take them out") { tick++ }
+    // The reverse: the device is set to Classic but still holding on to LE Audio.
+    if (leSwitch && !settling && le && (settings.leOn == false || SonyControlSessionManager.classicOnly(context))) rows += {
+        NavRow(
+            Icons.Rounded.RestartAlt,
+            "Finishing the Switch to Classic",
+            null,
+            note = if (model.headphones) "Turn them off for 10 seconds, then back on" else "Case them for 10 seconds, then take them out"
+        ) { tick++ }
     }
-    if (earbuds && !settling && settings.leOn == true && !le) rows += {
+    if (leSwitch && !settling && settings.leOn == true && !le) rows += {
         NavRow(Icons.Rounded.RestartAlt, "Finish Switching to Classic", null, note = "LE Audio is still on") { switching = false }
     }
     Group(
@@ -2655,8 +2658,8 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
             settings.headGestures != null && !leSwitch -> "With head gestures, nod to answer a call or shake your head to decline."
             !leSwitch -> null
             phoneLe -> "Nod to answer a call or shake your head to decline. LE Audio makes your voice clearer on calls."
-            android.os.Build.VERSION.SDK_INT < 33 -> "Your earbuds support LE Audio, but it needs Android 13 or later. They use Classic on this phone."
-            else -> "Your earbuds support LE Audio, but this phone doesn't, or it's turned off in Developer options. They use Classic on this phone."
+            android.os.Build.VERSION.SDK_INT < 33 -> "Your ${model.noun} support LE Audio, but it needs Android 13 or later. They use Classic on this phone."
+            else -> "Your ${model.noun} support LE Audio, but this phone doesn't, or it's turned off in Developer options. They use Classic on this phone."
         },
         rows = rows
     )
@@ -2673,8 +2676,9 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
             title = { Text(if (on) "Switch to LE Audio?" else "Switch to Classic?") },
             text = {
                 Text(
-                    (if (on) "Your earbuds will reconnect using LE Audio. The first time, SunPods helps you pair them again. Connect to Two Devices and LDAC are off while LE Audio is on."
-                    else "Your earbuds will reconnect using Classic. You may need to pair them again.") + "\n\nWear both earbuds before you switch."
+                    (if (on) "Your ${model.noun} will reconnect using LE Audio. The first time, SunPods helps you pair them again. Connect to Two Devices and LDAC are off while LE Audio is on."
+                    else "Your ${model.noun} will reconnect using Classic. You may need to pair them again.") +
+                        "\n\n" + if (model.headphones) "Keep your headphones turned on before you switch." else "Wear both earbuds before you switch."
                 )
             },
             confirmButton = { TextButton(onClick = { confirm = null; switching = on }) { Text("Switch") } },

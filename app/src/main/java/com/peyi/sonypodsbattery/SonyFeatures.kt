@@ -580,11 +580,11 @@ internal object SonyFeatures {
         return if (p.size >= 3) u(p[2]) == 0 else null
     }
 
-    /** The earbuds' Bluetooth addresses (Classic and LE), for pairing LE Audio if Android needs to. */
+    /** The device's Bluetooth addresses (Classic and LE), parsing 2-address headphones and 3-address earbuds. */
     fun leAddresses(s: SonyBatteryClient.SonySession): List<String> {
         val p = s.request(bytes(LEA_GET_CAPABILITY, 0x00), timeoutMs = 1_000) ?: return emptyList()
-        if (p.size < 53) return emptyList()
-        return listOf(2, 19, 36).map { String(p, it, 17, Charsets.US_ASCII) }.filter { Regex("([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}").matches(it) }
+        if (p.size < 19) return emptyList()
+        return (2..p.size - 17 step 17).map { String(p, it, 17, Charsets.US_ASCII) }.filter { Regex("([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}").matches(it) }
     }
 
     /**

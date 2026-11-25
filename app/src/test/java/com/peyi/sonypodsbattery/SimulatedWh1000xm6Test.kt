@@ -224,6 +224,25 @@ class SimulatedWh1000xm6Test {
         assertTrue(sim.asked(0x66, 0x30))
     }
 
+    @Test fun `leAddresses parses both 2-address headphones and 3-address earbuds`() {
+        val mac1 = "11:22:33:44:55:66"
+        val mac2 = "AA:BB:CC:DD:EE:FF"
+        val mac3 = "C0:11:22:33:44:55"
+        val reply2 = (byteArrayOf(0x41, 0x00) + "$mac1$mac2".toByteArray(Charsets.US_ASCII))
+            .joinToString(" ") { "%02x".format(it.toInt() and 0xff) }
+        val reply3 = (byteArrayOf(0x41, 0x00) + "$mac1$mac2$mac3".toByteArray(Charsets.US_ASCII))
+            .joinToString(" ") { "%02x".format(it.toInt() and 0xff) }
+        val base = "12 01 00 03 00 30 13 00 00\n12 05 01 0a 57 48 2d 31 30 30 30 58 4d 36"
+
+        val s2 = SonyBatteryClient.SonySession(SimulatedEarbuds(SimProfile(EarbudModel.WH_1000XM6, "$base\n12 $reply2")))
+            .also { it.initialize() }
+        assertEquals(listOf(mac1, mac2), SonyFeatures.leAddresses(s2))
+
+        val s3 = SonyBatteryClient.SonySession(SimulatedEarbuds(SimProfile(EarbudModel.WH_1000XM6, "$base\n12 $reply3")))
+            .also { it.initialize() }
+        assertEquals(listOf(mac1, mac2, mac3), SonyFeatures.leAddresses(s3))
+    }
+
     @Test fun `art and simulator entry`() {
         val art = budArt(0x05, EarbudModel.WH_1000XM6)
         assertEquals("wh1000xm6", art.device)
