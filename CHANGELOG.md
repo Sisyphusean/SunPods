@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.4.0
+
+The WH-1000XM6 headphones join, in testing: own a pair? Tell us how it goes.
+
+**New**
+- WH-1000XM6 support: one battery reading across Home, the widgets, the notification and Battery, noise cancelling and Ambient Sound with Focus on Voice, Auto Ambient Sound, the NC/AMB button's cycle, the ten-band equaliser with its own presets, DSEE Extreme, sound quality mode, touch controls on or off, Speak-to-Chat, head gestures, hear your voice on calls, pause when you take them off, two devices at once, voice prompts, Safe Listening, turn off and reset
+- The equaliser shows the bands and presets your earbuds or headphones offer
+
+**Fixes**
+- Safe Listening and Hear Your Voice on Calls say headphones when you use headphones
+
 ## 3.3.0
 
 The WF-1000XM4 joins, in testing: own a pair? Tell us how it goes.

@@ -125,6 +125,7 @@ class MainActivity : ComponentActivity() {
         StartupLog.mark("resume")
         hasPermission = hasBluetoothPermission()
         vm.reloadCached()
+        vm.checkUpdates()
         if (!onboarding && hasPermission) vm.refreshIfStale()
         StartupLog.mark("resume done")
     }

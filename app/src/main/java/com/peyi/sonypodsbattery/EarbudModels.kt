@@ -29,7 +29,9 @@ enum class EarbudModel(
     // Sony: 8.5 h NC on / 12 h off, about 30 h in total with the case (21.5 h in the case).
     WF_C710N("c710n", "WF-C710N", Regex("WF[- ]?C710N", RegexOption.IGNORE_CASE), 8.5, 12.0, 2.5, series = "C"),
     // Sony: 30 h with noise cancelling, 40 h without; no charging case.
-    WH_1000XM5("wh1000xm5", "WH-1000XM5", Regex("WH[- ]?1000XM5", RegexOption.IGNORE_CASE), 30.0, 40.0, 0.0, headphones = true, series = "1000X");
+    WH_1000XM5("wh1000xm5", "WH-1000XM5", Regex("WH[- ]?1000XM5", RegexOption.IGNORE_CASE), 30.0, 40.0, 0.0, headphones = true, series = "1000X"),
+    // Sony: 30 h with noise cancelling, 40 h without (AAC, SBC, LC3); no charging case.
+    WH_1000XM6("wh1000xm6", "WH-1000XM6", Regex("WH[- ]?1000XM6", RegexOption.IGNORE_CASE), 30.0, 40.0, 0.0, headphones = true, supportsLeAudio = true, series = "1000X");
 
     /** What to call them in copy: "earbuds" or "headphones". */
     val noun: String get() = if (headphones) "headphones" else "earbuds"

@@ -455,15 +455,22 @@ class SonyBatteryClient(private val context: Context) {
      * Noise control as the earbuds report it (reply 0x67 or notification 0x69). Type 0x17 (the
      * WF-1000XM5): [c 17 vcs on mode focus level]. Type 0x15 (the WF-1000XM4) has one more byte, the
      * noise cancelling variant, before focus: 02 dual (wind reduction off), 03 or 05 automatic wind
-     * noise reduction (the app writes 03, the earbuds report 05).
+     * noise reduction (the app writes 03, the earbuds report 05). Type 0x19 (the WH-1000XM6) is type
+     * 0x17 plus two bytes, Auto Ambient Sound: [c 19 vcs on mode focus level naOn naSens].
      */
     data class ModeReport(
         val mode: ListeningMode, val focusOnVoice: Boolean, val ambientLevel: Int, val raw: String,
         /** Type 0x15 only: the noise cancelling variant byte, sent back unchanged with every change. */
-        val ncValue: Int? = null
+        val ncValue: Int? = null,
+        /** Type 0x19 only: Auto Ambient Sound (00 off, 01 on) and its sensitivity, sent back with every change. */
+        val naOn: Int? = null,
+        val naSens: Int? = null
     ) {
         /** Automatic wind noise reduction, on earbuds that have the switch; null otherwise. */
         val windAuto: Boolean? get() = ncValue?.let { it == NC_WIND_AUTO || it == NC_WIND_AUTO_REPORTED }
+
+        /** Auto Ambient Sound, on headphones that have it; null otherwise. */
+        val autoAmbient: Boolean? get() = naOn?.let { it == 0x01 }
 
         companion object {
             const val NC_DUAL = 0x02
@@ -471,9 +478,11 @@ class SonyBatteryClient(private val context: Context) {
             const val NC_WIND_AUTO_REPORTED = 0x05
 
             fun parse(p: ByteArray): ModeReport? {
-                if (p.size < 7 || (p[0] != 0x67.toByte() && p[0] != 0x69.toByte()) || (p[1] != 0x15.toByte() && p[1] != 0x17.toByte())) return null
+                if (p.size < 7 || (p[0] != 0x67.toByte() && p[0] != 0x69.toByte()) || (p[1] != 0x15.toByte() && p[1] != 0x17.toByte() && p[1] != 0x19.toByte())) return null
                 if (p[1] == 0x15.toByte() && p.size < 8) return null
+                if (p[1] == 0x19.toByte() && p.size < 9) return null
                 val long = p[1] == 0x15.toByte()
+                val adaptive = p[1] == 0x19.toByte()
                 val mode = when {
                     p[3].toInt() == 0 -> ListeningMode.OFF
                     p[4].toInt() == 0 -> ListeningMode.NOISE_CANCELLING
@@ -484,7 +493,9 @@ class SonyBatteryClient(private val context: Context) {
                 return ModeReport(
                     mode, p[focus].toInt() == 1, (p[focus + 1].toInt() and 0xff).coerceIn(1, 20),
                     p.joinToString(" ") { "%02x".format(it.toInt() and 0xff) },
-                    ncValue = if (long) p[5].toInt() and 0xff else null
+                    ncValue = if (long) p[5].toInt() and 0xff else null,
+                    naOn = if (adaptive) p[7].toInt() and 0xff else null,
+                    naSens = if (adaptive) p[8].toInt() and 0xff else null
                 )
             }
         }
@@ -750,7 +761,10 @@ class SonyBatteryClient(private val context: Context) {
          * mode back; if it didn't take, it retries once with confirmation alerts on (94 00 00) and
          * answers any alert, the way Sound Connect does. Returns a line for diagnostics.
          */
-        fun setAmbientSoundMode(mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean, windAuto: Boolean? = null): String {
+        fun setAmbientSoundMode(
+            mode: ListeningMode, ambientLevel: Int, focusOnVoice: Boolean, windAuto: Boolean? = null,
+            autoAmbient: Boolean? = null, autoAmbientSensitivity: Int? = null
+        ): String {
             val enabled = if (mode == ListeningMode.OFF) 0 else 1
             val ambient = if (mode == ListeningMode.AMBIENT) 1 else 0
             val type = functions()?.ncAsmType?.toByte()
@@ -768,8 +782,18 @@ class SonyBatteryClient(private val context: Context) {
             }
             val focus: Byte = if (focusOnVoice) 0x01 else 0x00
             val level = ambientLevel.coerceIn(1, 20).toByte()
-            val payload = if (type == 0x15.toByte()) byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), wind.toByte(), focus, level)
-                else byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), focus, level)
+            val payload = when (type) {
+                0x15.toByte() -> byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), wind.toByte(), focus, level)
+                0x19.toByte() -> {
+                    // Type 0x19 carries Auto Ambient Sound: change it when asked, else send back what was
+                    // reported (read first on a fresh or reopened session so a mode change never turns it off).
+                    if (reportedMode?.naOn == null) runCatching { readMode() }
+                    val naOn = autoAmbient?.let { if (it) 0x01 else 0x00 } ?: reportedMode?.naOn ?: 0x00
+                    val naSens = autoAmbientSensitivity ?: reportedMode?.naSens ?: 0x00
+                    byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), focus, level, naOn.toByte(), naSens.toByte())
+                }
+                else -> byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), focus, level)
+            }
             val seen = StringBuilder()
             fun sendAndWatch() {
                 send(payload)
@@ -784,7 +808,12 @@ class SonyBatteryClient(private val context: Context) {
                     false
                 }
             }
-            fun applied(): ModeReport? = readMode()?.takeIf { it.mode == mode && (windAuto == null || it.windAuto == windAuto) }
+            fun applied(): ModeReport? = readMode()?.takeIf {
+                it.mode == mode &&
+                    (windAuto == null || it.windAuto == windAuto) &&
+                    (autoAmbient == null || it.autoAmbient == autoAmbient) &&
+                    (autoAmbientSensitivity == null || it.naSens == autoAmbientSensitivity)
+            }
 
             sendAndWatch()
             applied()?.let { return "applied (sent ${hex(payload)};$seen)" }

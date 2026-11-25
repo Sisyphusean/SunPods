@@ -1,0 +1,65 @@
+import os, sys, time, shutil, subprocess
+from concurrent.futures import ThreadPoolExecutor
+from PIL import Image
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+XM = os.path.normpath(os.path.join(HERE, '..'))
+REPO = os.path.normpath(os.path.join(XM, '..', '..', '..'))
+APP = os.path.join(REPO, 'app', 'src', 'main')
+PACK = os.path.join(HERE, 'pack.py')
+cols = sys.argv[1:] or ['black', 'silver', 'blue', 'pink']
+STILLS, CLIPS = os.path.join(XM, 'stills_now'), os.path.join(XM, 'clips_now')
+t0 = time.time()
+lap = lambda what: print(f'{time.time() - t0:6.1f}s  {what}', flush=True)
+
+SHEET_ONLY = os.environ.get('XM_SHEET_ONLY') == '1'
+clip_cols = ['black'] if 'black' in cols else []
+if not SHEET_ONLY:
+    for d in (STILLS, CLIPS): shutil.rmtree(d, ignore_errors=True)
+    jobs = [['node', 'stills.mjs', STILLS, *cols]]
+    if clip_cols:
+        jobs += [['node', 'clips.mjs', CLIPS, 'open', *clip_cols], ['node', 'clips.mjs', CLIPS, 'pair', *clip_cols]]
+    procs = [subprocess.Popen(j, cwd=HERE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True) for j in jobs]
+    for p, j in zip(procs, jobs):
+        if p.wait() != 0: sys.exit(f'{" ".join(j[1:3])} failed:\n{p.stderr.read()[-2000:]}')
+    lap('rendered stills and clip frames')
+
+if not SHEET_ONLY:
+    subprocess.run([sys.executable, 'compose_stills.py', STILLS, *cols], cwd=HERE, check=True, stdout=subprocess.DEVNULL)
+    for c in cols:
+        Image.open(os.path.join(STILLS, f'pair_{c}.png')).convert('RGBA').resize((1000, 712), Image.LANCZOS) \
+            .save(os.path.join(APP, 'assets', 'turntable', f'wh1000xm6_{c}.webp'), 'WEBP', quality=88, method=6)
+    lap('stills and first-launch pictures in the app')
+
+    def pack(job):
+        clip, n, c = job
+        src = os.path.join(CLIPS, f'{clip}_{c}')
+        got = len([f for f in os.listdir(src) if f.endswith('.png')])
+        assert got == n, (src, got, n)
+        dst = os.path.join(CLIPS, f'wh1000xm6_anim_{clip}_{c}.webp')
+        out = subprocess.run([sys.executable, PACK, src, dst, '480', '1', '4'], check=True, capture_output=True, text=True).stdout
+        shutil.copyfile(dst, os.path.join(APP, 'res', 'raw', os.path.basename(dst)))
+        return out.strip()
+    with ThreadPoolExecutor(4) as ex:
+        sizes = list(ex.map(pack, [(k, n, c) for k, n in (('open', 120), ('pair', 210)) for c in clip_cols]))
+    lap('clips packed into the app:\n' + '\n'.join(sizes))
+
+BG = (20, 18, 24)
+T = 200
+rows = []
+for c in cols:
+    row = [Image.open(os.path.join(APP, 'res', 'drawable-nodpi', f'wh1000xm6_{n}_{c}.png')) for n in ('pair', 'side', 'front', 'case')]
+    for clip in ('open', 'pair'):
+        clip_c = c if os.path.exists(os.path.join(APP, 'res', 'raw', f'wh1000xm6_anim_{clip}_{c}.webp')) else 'black'
+        im = Image.open(os.path.join(APP, 'res', 'raw', f'wh1000xm6_anim_{clip}_{clip_c}.webp'))
+        for k in range(5):
+            im.seek(int(k * (im.n_frames - 1) / 4)); row.append(im.convert('RGBA').copy())
+    rows.append(row)
+sheet = Image.new('RGB', (14 * (T + 4), len(rows) * (T + 4)), BG)
+for r, row in enumerate(rows):
+    for i, im in enumerate(row):
+        im = im.convert('RGBA'); im.thumbnail((T, T), Image.LANCZOS)
+        tile = Image.new('RGBA', (T, T), BG + (255,)); tile.alpha_composite(im, ((T - im.width) // 2, (T - im.height) // 2))
+        sheet.paste(tile.convert('RGB'), (i * (T + 4), r * (T + 4)))
+sheet.save(os.path.join(XM, 'review_now.jpg'), quality=88)
+lap('review sheet: ' + os.path.join(XM, 'review_now.jpg'))

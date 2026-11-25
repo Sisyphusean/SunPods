@@ -130,7 +130,7 @@ class OnboardingModelTest {
         assertTrue(earbuds.isNotEmpty())
         assertTrue(headphones.isNotEmpty())
         assertEquals(listOf(EarbudModel.WF_1000XM5, EarbudModel.WF_1000XM4, EarbudModel.WF_C710N), earbuds)
-        assertEquals(listOf(EarbudModel.WH_1000XM5), headphones)
+        assertEquals(listOf(EarbudModel.WH_1000XM5, EarbudModel.WH_1000XM6), headphones)
         // Switching back to earbuds must yield valid index bounds for the previous family size.
         val prevIndexInHeadphones = 0
         assertEquals(EarbudModel.WF_1000XM5, earbuds[prevIndexInHeadphones.coerceIn(0, earbuds.lastIndex)])

@@ -600,6 +600,8 @@ internal object LePairing {
         if (LeAudio.support(context) == LeAudio.Support.NOT_SUPPORTED) return@withContext false
         // Earbuds without LE Audio (the WF-C710N) have no LE side; saved addresses may be another pair's.
         if (SettingsStore.load(context).leModeSupported == false) return@withContext false
+        // Headphones don't pair an LE side this way; they go to LE Audio through Sony Sound Connect.
+        if (EarbudModel.active.headphones) return@withContext false
         val le = EarbudAddresses.le(context).filter { EarbudAddresses.isRandom(it) }
         if (le.isEmpty()) return@withContext false
         ShizukuBluetooth.use(context) { sh ->

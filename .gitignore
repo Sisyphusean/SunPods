@@ -51,3 +51,6 @@ branding/render/wh1000xm5/*
 # WF-1000XM4 earbuds: the boards and references contain Sony's photos; keep only the tools
 branding/render/wf1000xm4/*
 !branding/render/wf1000xm4/tools/
+# WH-1000XM6 headphones: the boards and references contain Sony's photos; keep only the tools
+branding/render/wh1000xm6/*
+!branding/render/wh1000xm6/tools/

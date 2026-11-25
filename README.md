@@ -1,6 +1,6 @@
 # SunPods
 
-An unofficial, free and open source companion app for the Sony WF-1000XM5, WF-1000XM4, WF-C710N and WH-1000XM5 on Android.
+An unofficial, free and open source companion app for the Sony WF-1000XM5, WF-1000XM4, WF-C710N, WH-1000XM5 and WH-1000XM6 on Android.
 Not made by or affiliated with Sony.
 
 [![Build](https://github.com/Sisyphusean/SunPods/actions/workflows/android.yml/badge.svg)](https://github.com/Sisyphusean/SunPods/actions/workflows/android.yml)
@@ -36,7 +36,7 @@ button does the same:
 - **Battery** for each earbud and the case, or for headphones, in the app, a notification, home
   screen widgets and a Quick Settings tile, with an estimate of the listening time left
 - **Noise control**: noise cancelling, ambient sound with level and focus on voice, or off
-- **Equaliser**: Sony's presets, your own five-band curve and Clear Bass
+- **Equaliser**: Sony's presets, your own five-band curve and Clear Bass, or ten bands on the WH-1000XM6
 - **LE Audio**: switch between Classic and LE Audio from the app on supported earbuds, for clearer calls
 - **Touch controls and buttons**: pick what each earbud or headphone button does from the options your
   device offers, with the gestures spelled out
@@ -48,7 +48,7 @@ button does the same:
 - **Automations** for calls and walks, **battery health** over time, and where your device was
   **last seen**
 
-Everything stays on your phone. The only thing SunPods does online is check GitHub once a day for a
+Everything stays on your phone. The only thing SunPods does online is check GitHub for a
 new version, and you can turn that off.
 
 ## Supported earbuds and headphones
@@ -59,7 +59,8 @@ new version, and you can turn that off.
 | **WF-C710N** | 🧪 Testing | Built from Sony's own app and tested on simulated earbuds; [needs a tester](https://github.com/Sisyphusean/SunPods/issues/2) |
 | **WF-1000XM4** | 🧪 Testing | Built from recorded replies (firmware 1.4.2) and tested on simulated earbuds; needs a tester |
 | **WH-1000XM5** | 🧪 Testing | Headphones. Built from Sony's own app and other projects' captures, tested on simulated headphones; needs a tester |
-| WH-1000XM4, WH-1000XM6 | ⏳ Not yet | |
+| **WH-1000XM6** | 🧪 Testing | Headphones. Built from other projects' captures and Sony's own app, tested on simulated headphones; needs a tester |
+| WH-1000XM4 | ⏳ Not yet | |
 | LinkBuds, LinkBuds S, Fit, Open | ⏳ Not yet | |
 | Earbuds from other brands | ❌ Not supported | Sony only |
 

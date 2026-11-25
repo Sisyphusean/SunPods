@@ -37,6 +37,117 @@ enum class EqPreset(val code: Int, val label: String) {
     }
 }
 
+/**
+ * What the equaliser offers on this pair. The classic layout (WF-1000XM5, WF-C710N, WF-1000XM4,
+ * WH-1000XM5): CLEAR BASS and five bands, 21 steps (flat 0x0a), Sony's classic presets ([EqPreset]).
+ * Headphones that list PRESET_EQ_AND_ERRORCODE (0x57, the WH-1000XM6) describe their own:
+ *   capability  50 04 01 -> 51 04 [bands steps n {id L name}*n]
+ *   band info   5a 00    -> 5b 00 [n {type hi lo}*n]   type 01 Hz, 02 kHz, 10 special (1 = CLEAR BASS)
+ * Values go on the wire as 0..steps-1, flat in the middle: dB = wire - (steps - 1) / 2.
+ */
+data class EqLayout(
+    /** Values on the wire, CLEAR BASS included when there is one. */
+    val count: Int,
+    val steps: Int,
+    /** The first value is CLEAR BASS. */
+    val clearBass: Boolean,
+    /** One label per value: "Bass", "400", "1k"... */
+    val labels: List<String>,
+    /** The presets offered, in the order given, with their names. */
+    val presets: List<Pair<Int, String>>,
+    /** The headphones' own layout (PRESET_EQ_AND_ERRORCODE) rather than the classic one. */
+    val described: Boolean
+) {
+    val offset: Int get() = (steps - 1) / 2
+    val min: Int get() = -offset
+    val max: Int get() = steps - 1 - offset
+    /** Bands besides CLEAR BASS. */
+    val bandCount: Int get() = if (clearBass) count - 1 else count
+
+    fun label(code: Int?): String =
+        code?.let { c -> presets.firstOrNull { it.first == c }?.second ?: if (described) defaultName(c) else null } ?: "—"
+
+    /** Custom (0xa0) and the user presets (0xa1 to 0xa5) can be edited; the rest are fixed. */
+    fun isEditable(code: Int?): Boolean = code != null && code in EqPreset.MANUAL.code..0xa5
+
+    /** The presets to offer. The classic Manual preset only shows while it's the one in use. */
+    fun shown(current: Int?): List<Pair<Int, String>> =
+        if (described) presets else presets.filter { it.first != EqPreset.MANUAL.code || current == EqPreset.MANUAL.code }
+
+    /** Where Customise goes from a fixed preset: Custom 1 on the classic layout, else Custom. */
+    val customise: Int? get() =
+        if (!described) EqPreset.CUSTOM_1.code
+        else presets.firstOrNull { it.first == EqPreset.MANUAL.code }?.first ?: presets.firstOrNull { isEditable(it.first) }?.first
+
+    companion object {
+        val CLASSIC = EqLayout(
+            6, 21, true, listOf("Bass", "400", "1k", "2.5k", "6.3k", "16k"),
+            EqPreset.entries.map { it.code to it.label }, described = false
+        )
+        private val TEN_BANDS = listOf("31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k")
+        /** The WH-1000XM6's presets if its own list hasn't come yet (it ignores the classic ones). */
+        private val OWN_PRESETS = listOf(0x30, 0x31, 0x32, 0x33, 0xa0)
+
+        /** Sony's names for presets the headphones list without a name. */
+        fun defaultName(code: Int): String = when (code) {
+            0x30 -> "Heavy"; 0x31 -> "Clear"; 0x32 -> "Hard"; 0x33 -> "Soft"
+            0xa0 -> "Custom"; in 0xa1..0xa5 -> "User ${code - 0xa0}"
+            else -> EqPreset.from(code)?.label ?: "Preset %02X".format(code)
+        }
+
+        /** The layout for these settings: the headphones' own when they list it, else the classic one. */
+        internal fun of(s: DeviceSettings): EqLayout {
+            if (s.functions?.has1(Fn.PRESET_EQ_AND_ERRORCODE) != true) return CLASSIC
+            val cap = s.eqCap?.let(::fromHex)?.let(::parseCapability)
+            val info = s.eqInfo?.let(::fromHex)?.let(::parseBands)
+            val count = cap?.first ?: 10
+            val labels = info?.takeIf { it.size == count }?.map { it.first }
+                ?: if (count == TEN_BANDS.size) TEN_BANDS else (1..count).map { "$it" }
+            return EqLayout(
+                count, cap?.second ?: 13, clearBass = info?.firstOrNull()?.second == true, labels,
+                cap?.third?.map { (id, name) -> id to name.ifBlank { defaultName(id) } } ?: OWN_PRESETS.map { it to defaultName(it) },
+                described = true
+            )
+        }
+
+        /** [51 tt bands steps n {id L name}*n] to (bands, steps, presets); null if it isn't one. */
+        fun parseCapability(p: ByteArray): Triple<Int, Int, List<Pair<Int, String>>>? = runCatching {
+            fun u(i: Int) = p[i].toInt() and 0xff
+            if (u(0) != 0x51 || p.size < 5) return null
+            var i = 5
+            val presets = (0 until u(4)).map {
+                val id = u(i); val len = u(i + 1)
+                val name = String(p, i + 2, len, Charsets.UTF_8).trim()
+                require(i + 2 + len <= p.size)
+                i += 2 + len
+                id to name
+            }
+            Triple(u(2), u(3), presets).takeIf { it.first in 1..20 && it.second >= 3 }
+        }.getOrNull()
+
+        /** [5b tt n {type hi lo}*n] to one (label, is CLEAR BASS) per band; null if it isn't one. */
+        fun parseBands(p: ByteArray): List<Pair<String, Boolean>>? = runCatching {
+            fun u(i: Int) = p[i].toInt() and 0xff
+            if (u(0) != 0x5b || p.size < 3 || p.size < 3 + 3 * u(2)) return null
+            (0 until u(2)).map {
+                val type = u(3 + it * 3); val v = (u(4 + it * 3) shl 8) or u(5 + it * 3)
+                when {
+                    type == 0x10 && v == 1 -> "Bass" to true
+                    type == 0x01 && v >= 1000 -> (if (v % 1000 == 0) "${v / 1000}k" else "${v / 1000}.${v % 1000 / 100}k") to false
+                    type == 0x01 -> "$v" to false
+                    type == 0x02 -> "${v}k" to false
+                    else -> "" to false
+                }
+            }
+        }.getOrNull()
+
+        private fun fromHex(hex: String) = ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+    }
+}
+
+/** The equaliser on this pair; see [EqLayout]. */
+val DeviceSettings.eqLayout: EqLayout get() = EqLayout.of(this)
+
 enum class TouchFunction(val code: Int, val label: String, val short: String, val alsoReadAs: Int? = null) {
     // The XM5 reports and expects 0x35 here; older Sony earbuds used 0x00.
     AMBIENT_SOUND_CONTROL(0x35, "Noise Control", "Ambient", alsoReadAs = 0x00),
@@ -150,7 +261,9 @@ enum class SpeakToChatTimeout(val code: Int, val label: String, val short: Strin
 
 enum class ConnectionPriority(val code: Int, val label: String, val detail: String, val short: String) {
     SOUND_QUALITY(0x00, "Prioritise Sound Quality", "Uses LDAC when your phone supports it", "Sound Quality"),
-    STABLE_CONNECTION(0x01, "Prioritise Stable Connection", "Uses SBC or AAC for a steadier connection in crowded places", "Stability");
+    STABLE_CONNECTION(0x01, "Prioritise Stable Connection", "Uses SBC or AAC for a steadier connection in crowded places", "Stability"),
+    /** Type 05 only (the WH-1000XM6): LE Audio. Shown when the headphones are in it, not offered. */
+    LOW_LATENCY(0x02, "Low Latency", "Uses LE Audio for less delay in games and video", "Low Latency");
 
     /** The WF-C710N has no LDAC: sound quality means AAC there. */
     fun detailFor(model: EarbudModel): String = when {
@@ -161,6 +274,15 @@ enum class ConnectionPriority(val code: Int, val label: String, val detail: Stri
 
     companion object {
         fun from(code: Int?): ConnectionPriority? = entries.firstOrNull { it.code == code }
+    }
+}
+
+/** How readily Auto Ambient Sound reacts (noise control type 0x19, last byte). */
+enum class AutoAmbientSensitivity(val code: Int, val label: String) {
+    STANDARD(0x00, "Standard"), HIGH(0x01, "High"), LOW(0x02, "Low");
+
+    companion object {
+        fun from(code: Int?): AutoAmbientSensitivity? = entries.firstOrNull { it.code == code }
     }
 }
 
@@ -184,7 +306,8 @@ data class GeneralSetting(val slot: Int, val key: String, val on: Boolean?) {
     val subtitle: String get() = GS_TITLES[key]?.second?.replace("{noun}", EarbudModel.active.noun) ?: ""
 
     companion object {
-        private val GS_TITLES = mapOf(
+        // A getter, so the copy follows the pair in use (earbuds or headphones).
+        private val GS_TITLES get() = mapOf(
             "MULTIPOINT_SETTING" to ("Connect to Two Devices" to "Stay connected to your phone and another device at the same time"),
             "SIDETONE_SETTING" to ("Hear Your Voice on Calls" to "Hear yourself in your {noun} while you talk"),
             "TOUCH_PANEL_SETTING" to ("Touch Controls" to "Tap and swipe on the right ear cup to control playback and volume"),
@@ -212,6 +335,12 @@ data class DeviceSettings(
     val speakToChatTimeout: SpeakToChatTimeout? = null,
     /** Automatic wind noise reduction (WF-1000XM4); null when the earbuds don't have the switch. */
     val windAuto: Boolean? = null,
+    /** Auto Ambient Sound and its sensitivity (WH-1000XM6); null when the headphones don't have it. */
+    val autoAmbient: Boolean? = null,
+    val autoAmbientSensitivity: AutoAmbientSensitivity? = null,
+    /** The headphones' own EQ capability and band information replies, as hex; see [EqLayout]. */
+    val eqCap: String? = null,
+    val eqInfo: String? = null,
     val pauseWhenRemoved: Boolean? = null,
     val autoOffWhenRemoved: Boolean? = null,
     /** Auto power off as the earbuds hold it: the option in force and the time last chosen ([AutoOff] codes). */
@@ -257,6 +386,15 @@ data class DeviceSettings(
 
     /** True unless the earbuds' own list says they lack it (so earbuds not yet asked keep everything). */
     internal fun has(feature: Feature): Boolean = functions?.let(feature.test) ?: true
+
+    /** True only when the earbuds' own list says they have it. */
+    internal fun listed(feature: Feature): Boolean = functions?.let(feature.test) == true
+
+    /**
+     * SunPods' own switch between Classic and LE Audio ([LeSwitchSheet]) walks through earbud steps
+     * (the case, both earbuds in), so headphones don't get it: they switch in Sony Sound Connect.
+     */
+    val leSwitchOffered: Boolean get() = leModeSupported == true && !(EarbudModel.fromName(modelName) ?: EarbudModel.active).headphones
 }
 
 /** Features SunPods shows only when the earbuds list them (Sound Connect does the same). */
@@ -264,6 +402,10 @@ internal enum class Feature(val test: (SupportedFunctions) -> Boolean) {
     SPEAK_TO_CHAT({ it.has1(Fn.SPEAK_TO_CHAT_1, Fn.SPEAK_TO_CHAT_2) }),
     /** Automatic wind noise reduction: part of noise control type 0x15 (the WF-1000XM4). */
     WIND_REDUCTION({ it.ncAsmType == 0x15 }),
+    /** Auto Ambient Sound: part of noise control type 0x19 (the WH-1000XM6). */
+    AUTO_AMBIENT({ it.ncAsmType == 0x19 }),
+    /** An equaliser that describes its own bands and presets (the WH-1000XM6's 10 bands); see [EqLayout]. */
+    EQ_DESCRIBED({ it.has1(Fn.PRESET_EQ_AND_ERRORCODE) }),
     CODEC({ it.has1(Fn.CODEC_INDICATOR) }),
     DSEE({ it.has1(Fn.UPSCALING, Fn.UPSCALING_AUTO_OFF, Fn.UPSCALING_WITH_REASON) }),
     TOUCH({ it.has1(Fn.ASSIGNABLE, Fn.ASSIGNABLE_LIMITED) }),
@@ -354,6 +496,10 @@ internal object SonyFeatures {
     private const val AUDIO_CONNECTION_MODE = 0x00
     private const val AUDIO_UPSCALING = 0x01
     private const val AUDIO_CONNECTION_MODE_ALT = 0x02
+    private const val AUDIO_CONNECTION_MODE_LE = 0x05
+    private const val EQEBB_GET_CAPABILITY = 0x50
+    private const val EQEBB_GET_EXT_INFO = 0x5a
+    private const val EQ_PRESET_WITH_ERRORS = 0x04
     private const val DSEE_SHORT_LAYOUT = -1
 
     @Volatile private var prioritySub: Int? = null
@@ -388,11 +534,13 @@ internal object SonyFeatures {
         // setup and follows a different pair of earbuds. The app shows black until it's known.
         r = r.copy(colorCode = readColor(s) ?: r.colorCode)
         if (r.has(Feature.CODEC)) r = readCodec(s, r)
+        if (r.listed(Feature.EQ_DESCRIBED)) r = readEqLayout(s, r)
         r = readEq(s, r)
         if (r.has(Feature.DSEE)) r = readDsee(s, r)
         r = readPriority(s, r)
         if (r.has(Feature.SPEAK_TO_CHAT)) r = readSpeakToChat(s, r)
         if (r.functions?.let(Feature.WIND_REDUCTION.test) == true) r = r.copy(windAuto = (s.reportedMode?.windAuto ?: s.readMode()?.windAuto) ?: r.windAuto)
+        if (r.listed(Feature.AUTO_AMBIENT)) r = withAutoAmbient(r, s.reportedMode ?: s.readMode())
         if (r.has(Feature.PAUSE_WHEN_REMOVED)) r = readPause(s, r)
         if (r.has(Feature.AUTO_OFF_WHEN_REMOVED)) r = readAutoOff(s, r)
         if (r.has(Feature.TOUCH)) r = readTouch(s, r)
@@ -559,11 +707,31 @@ internal object SonyFeatures {
         return r.copy(codec = name)
     }
 
+    /**
+     * The headphones' own EQ (see [EqLayout]): the presets and their names every time (user presets
+     * can be renamed), the band frequencies once, since they never change.
+     */
+    private fun readEqLayout(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
+        val cap = s.request(bytes(EQEBB_GET_CAPABILITY, EQ_PRESET_WITH_ERRORS, LANGUAGE_ENGLISH), timeoutMs = 1_000)
+            ?.takeIf { EqLayout.parseCapability(it) != null }
+        val info = r.eqInfo ?: s.request(bytes(EQEBB_GET_EXT_INFO, EQ_PRESET), timeoutMs = 1_000)
+            ?.takeIf { EqLayout.parseBands(it) != null }?.let(::hex)
+        return r.copy(eqCap = cap?.let(::hex) ?: r.eqCap, eqInfo = info)
+    }
+
     private fun readEq(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
         val p = s.request(bytes(EQEBB_GET_PARAM, EQ_PRESET)) ?: return r
         if (p.size < 3) return r
         val preset = u(p[2])
         val count = if (p.size > 3) u(p[3]) else 0
+        val layout = r.eqLayout
+        if (layout.described) {
+            // [57 00 preset n v1..vn], every band (the WH-1000XM6: ten, 13 steps, flat 06).
+            if (count != layout.count || p.size < 4 + count) return r.copy(eqPresetCode = preset)
+            val values = (0 until count).map { (u(p[4 + it]) - layout.offset).coerceIn(layout.min, layout.max) }
+            return if (layout.clearBass) r.copy(eqPresetCode = preset, clearBass = values[0], bands = values.drop(1))
+            else r.copy(eqPresetCode = preset, clearBass = null, bands = values)
+        }
         if (count >= EQ_BAND_COUNT && p.size >= 4 + EQ_BAND_COUNT) {
             val values = (0 until EQ_BAND_COUNT).map { (u(p[4 + it]) - EQ_OFFSET).coerceIn(-10, 10) }
             return r.copy(eqPresetCode = preset, clearBass = values[0], bands = values.drop(1))
@@ -581,13 +749,28 @@ internal object SonyFeatures {
         }
     }
 
+    /**
+     * Sound quality mode on type 05 (CONNECTION_MODE_CLASSIC_AUDIO_LE_AUDIO, listed as 0xe7), as Sound
+     * Connect drives it: [e7 05 mode], SET [e8 05 mode 00]; 00 sound quality, 01 stable, 02 low latency
+     * (LE Audio). The WF-1000XM5 lists 0xe7 too, but keeps the probe below, the way it was tested,
+     * until its type 05 has been checked on real earbuds.
+     */
+    private fun priorityOnType05(r: DeviceSettings): Boolean =
+        r.functions?.has1(Fn.CONNECTION_MODE_CLASSIC_LE) == true &&
+            (EarbudModel.fromName(r.modelName) ?: EarbudModel.active) != EarbudModel.WF_1000XM5
+
     private fun readPriority(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
+        if (priorityOnType05(r)) {
+            val p = s.request(bytes(AUDIO_GET_PARAM, AUDIO_CONNECTION_MODE_LE), 1_000) ?: return r
+            return if (p.size >= 3) r.copy(priority = ConnectionPriority.from(u(p[2])) ?: r.priority) else r
+        }
         // Sony's table names this CONNECTION_MODE (0x00); Gadgetbridge drives it as 0x02.
         // Use whichever the earbuds answer and remember it for writes.
         val candidates = prioritySub?.let { listOf(it) } ?: listOf(AUDIO_CONNECTION_MODE, AUDIO_CONNECTION_MODE_ALT)
         for (sub in candidates) {
             val p = s.request(bytes(AUDIO_GET_PARAM, sub), 1_000) ?: continue
-            val value = ConnectionPriority.from(u(p[p.size - 1])) ?: continue
+            // Low latency exists only on type 05; here 02 is a value these types don't define.
+            val value = ConnectionPriority.from(u(p[p.size - 1]))?.takeIf { it != ConnectionPriority.LOW_LATENCY } ?: continue
             if (p.size < 3) continue
             prioritySub = sub
             return r.copy(priority = value)
@@ -712,19 +895,36 @@ internal object SonyFeatures {
 
     // ---- writers (each returns settings re-read from the earbuds) ----
 
-    fun setEqPreset(s: SonyBatteryClient.SonySession, r: DeviceSettings, preset: EqPreset): DeviceSettings {
-        val ok = s.command(bytes(EQEBB_GET_PARAM + 2, EQ_PRESET, preset.code, 0x00))
-        return readEq(s, if (ok) r.copy(eqPresetCode = preset.code) else r)
+    fun setEqPreset(s: SonyBatteryClient.SonySession, r: DeviceSettings, preset: EqPreset): DeviceSettings =
+        setEqPreset(s, r, preset.code)
+
+    /** A preset by its code, from [EqLayout.presets]: [58 00 preset 00] keeps the preset's own bands. */
+    fun setEqPreset(s: SonyBatteryClient.SonySession, r: DeviceSettings, code: Int): DeviceSettings {
+        val ok = s.command(bytes(EQEBB_GET_PARAM + 2, EQ_PRESET, code, 0x00))
+        return readEq(s, if (ok) r.copy(eqPresetCode = code) else r)
     }
 
-    fun setEqBands(s: SonyBatteryClient.SonySession, r: DeviceSettings, clearBass: Int, bands: List<Int>): DeviceSettings {
+    /**
+     * Sets the bands of the editable preset in use (else Custom / Manual, 0xa0), in dB. [clearBass]
+     * only on layouts that have it; [bands] are the rest, as many as [EqLayout.bandCount].
+     */
+    fun setEqBands(s: SonyBatteryClient.SonySession, r: DeviceSettings, clearBass: Int?, bands: List<Int>): DeviceSettings {
+        val layout = r.eqLayout
+        if (layout.described) {
+            require(bands.size == layout.bandCount) { "These headphones have ${layout.bandCount} EQ bands" }
+            val target = r.eqPresetCode?.takeIf(layout::isEditable) ?: EqPreset.MANUAL.code
+            val dbs = (if (layout.clearBass) listOf(clearBass ?: 0) else emptyList()) + bands
+            val values = dbs.map { it.coerceIn(layout.min, layout.max) + layout.offset }
+            val ok = s.command(bytes(EQEBB_GET_PARAM + 2, EQ_PRESET, target, values.size, *values.toIntArray()))
+            return readEq(s, if (ok) r.copy(eqPresetCode = target, clearBass = clearBass.takeIf { layout.clearBass }, bands = bands) else r)
+        }
         require(bands.size == 5) { "WF-1000XM5 has five EQ bands" }
         val target = r.eqPreset?.takeIf { it.isCustomisable } ?: EqPreset.MANUAL
-        val values = (listOf(clearBass) + bands).map { it.coerceIn(-10, 10) + EQ_OFFSET }
+        val values = (listOf(clearBass ?: 0) + bands).map { it.coerceIn(-10, 10) + EQ_OFFSET }
         val ok = s.command(byteArrayOf(
             (EQEBB_GET_PARAM + 2).toByte(), EQ_PRESET.toByte(), target.code.toByte(), EQ_BAND_COUNT.toByte()
         ) + values.map { it.toByte() }.toByteArray())
-        return readEq(s, if (ok) r.copy(eqPresetCode = target.code, clearBass = clearBass, bands = bands) else r)
+        return readEq(s, if (ok) r.copy(eqPresetCode = target.code, clearBass = clearBass ?: 0, bands = bands) else r)
     }
 
     fun setDsee(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
@@ -738,7 +938,11 @@ internal object SonyFeatures {
 
     fun setPriority(s: SonyBatteryClient.SonySession, r: DeviceSettings, priority: ConnectionPriority): DeviceSettings {
         // With Connect to Two Devices on, a change of codec priority can need confirming too.
-        s.withConfirmation(timeoutMs = 1_200) { s.command(bytes(AUDIO_GET_PARAM + 2, prioritySub ?: AUDIO_CONNECTION_MODE_ALT, priority.code)) }
+        s.withConfirmation(timeoutMs = 1_200) {
+            // Type 05 has one more byte, which Sound Connect always sends as 00.
+            if (priorityOnType05(r)) s.command(bytes(AUDIO_GET_PARAM + 2, AUDIO_CONNECTION_MODE_LE, priority.code, 0x00))
+            else s.command(bytes(AUDIO_GET_PARAM + 2, prioritySub ?: AUDIO_CONNECTION_MODE_ALT, priority.code))
+        }
         return runCatching { readPriority(s, r) }.getOrDefault(r.copy(priority = priority))
     }
 
@@ -772,6 +976,24 @@ internal object SonyFeatures {
         val now = s.readMode() ?: throw EarbudsUnavailableException("Couldn't read noise control. Make sure your ${EarbudModel.active.noun} are connected and try again.")
         s.setAmbientSoundMode(now.mode, now.ambientLevel, now.focusOnVoice, windAuto = on)
         return r.copy(windAuto = s.reportedMode?.windAuto ?: on)
+    }
+
+    private fun withAutoAmbient(r: DeviceSettings, m: SonyBatteryClient.ModeReport?): DeviceSettings = r.copy(
+        autoAmbient = m?.autoAmbient ?: r.autoAmbient,
+        autoAmbientSensitivity = AutoAmbientSensitivity.from(m?.naSens) ?: r.autoAmbientSensitivity
+    )
+
+    /** Auto Ambient Sound on or off; the mode, level and focus go back as the headphones report them. */
+    fun setAutoAmbient(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
+        val now = s.readMode() ?: throw EarbudsUnavailableException("Couldn't read noise control. Make sure your ${EarbudModel.active.noun} are connected and try again.")
+        s.setAmbientSoundMode(now.mode, now.ambientLevel, now.focusOnVoice, autoAmbient = on)
+        return withAutoAmbient(r.copy(autoAmbient = on), s.readMode())
+    }
+
+    fun setAutoAmbientSensitivity(s: SonyBatteryClient.SonySession, r: DeviceSettings, sensitivity: AutoAmbientSensitivity): DeviceSettings {
+        val now = s.readMode() ?: throw EarbudsUnavailableException("Couldn't read noise control. Make sure your ${EarbudModel.active.noun} are connected and try again.")
+        s.setAmbientSoundMode(now.mode, now.ambientLevel, now.focusOnVoice, autoAmbientSensitivity = sensitivity.code)
+        return withAutoAmbient(r.copy(autoAmbientSensitivity = sensitivity), s.readMode())
     }
 
     fun setPauseWhenRemoved(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
@@ -821,6 +1043,7 @@ internal object SonyFeatures {
 
     private fun bytes(vararg values: Int) = ByteArray(values.size) { values[it].toByte() }
     private fun u(value: Byte) = value.toInt() and 0xff
+    private fun hex(p: ByteArray) = p.joinToString("") { "%02x".format(it.toInt() and 0xff) }
 }
 
 object SettingsStore {
@@ -866,6 +1089,8 @@ object SettingsStore {
                     }
                 } else null,
                 promptsOn = bool("vg"), promptVolume = int("vgVol"), promptTail = int("vgTail"), colorCode = int("color"), windAuto = bool("wind"),
+                autoAmbient = bool("aamb"), autoAmbientSensitivity = AutoAmbientSensitivity.from(int("aambSens")),
+                eqCap = str("eqCap"), eqInfo = str("eqInfo"),
                 leModeSupported = bool("leSup"), leOn = bool("leOn"),
                 functions1 = str("fn1"), functions2 = str("fn2"),
                 readAt = if (o.has("at")) o.getLong("at") else 0L
@@ -912,6 +1137,10 @@ object SettingsStore {
         }
         s.promptsOn?.let { o.put("vg", it) }
         s.windAuto?.let { o.put("wind", it) }
+        s.autoAmbient?.let { o.put("aamb", it) }
+        s.autoAmbientSensitivity?.let { o.put("aambSens", it.code) }
+        s.eqCap?.let { o.put("eqCap", it) }
+        s.eqInfo?.let { o.put("eqInfo", it) }
         s.colorCode?.let { o.put("color", it) }
         s.leModeSupported?.let { o.put("leSup", it) }
         s.leOn?.let { o.put("leOn", it) }

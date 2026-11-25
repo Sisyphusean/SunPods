@@ -1,0 +1,17 @@
+{
+  "_doc": "WH-1000XM6 Sony official transparent Scene7 reference angles",
+  "phones": [
+    { "id": "black_side", "img": "ref_sony/black_side.png", "mask": "alpha", "subject": "phones", "color": "black", "init": [-90, 0, 0] },
+    { "id": "black_front", "img": "ref_sony/black_front.png", "mask": "alpha", "subject": "phones", "color": "black", "init": [0, 3, 0] },
+    { "id": "black_rear", "img": "ref_sony/black_rear.png", "mask": "alpha", "subject": "phones", "color": "black", "init": [180, 3, 0] },
+    { "id": "black_primary", "img": "ref_sony/black_primary.png", "mask": "alpha", "subject": "phones", "color": "black", "init": [-66, -16, -12] },
+    { "id": "black_folded", "img": "ref_sony/black_folded.png", "mask": "alpha", "subject": "phones", "color": "black", "init": [-32, 18, 0], "hp": { "swivel": 0.92, "fold": 0.88, "ext": 0 } },
+    { "id": "silver_primary", "img": "ref_sony/silver_primary.png", "mask": "alpha", "subject": "phones", "color": "silver", "init": [-66, -16, -12] },
+    { "id": "blue_primary", "img": "ref_sony/blue_primary.png", "mask": "alpha", "subject": "phones", "color": "blue", "init": [-66, -16, -12] },
+    { "id": "pink_primary", "img": "ref_sony/pink_primary.png", "mask": "alpha", "subject": "phones", "color": "pink", "init": [-66, -16, -12] }
+  ],
+  "case": [
+    { "id": "black_case", "img": "ref_sony/black_case.png", "mask": "alpha", "subject": "case", "color": "black", "init": [-30, 40, 0] },
+    { "id": "silver_case", "img": "ref_sony/silver_case.png", "mask": "alpha", "subject": "case", "color": "silver", "init": [-30, 40, 0] }
+  ]
+}
