@@ -64,7 +64,7 @@ enum class EarbudModel(
     /** What to check when searching or pairing doesn't work. */
     val lightHint: String get() = when {
         headphones -> "the light is flashing blue"
-        this == WF_1000XM4 -> "both touch sensors are held for 5 seconds"
+        this == WF_1000XM4 -> "you hear \"Bluetooth pairing\""
         else -> "the case light is flashing blue"
     }
 

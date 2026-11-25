@@ -472,7 +472,8 @@ class SonyBatteryClient(private val context: Context) {
 
             fun parse(p: ByteArray): ModeReport? {
                 if (p.size < 7 || (p[0] != 0x67.toByte() && p[0] != 0x69.toByte()) || (p[1] != 0x15.toByte() && p[1] != 0x17.toByte())) return null
-                val long = p[1] == 0x15.toByte() && p.size >= 8
+                if (p[1] == 0x15.toByte() && p.size < 8) return null
+                val long = p[1] == 0x15.toByte()
                 val mode = when {
                     p[3].toInt() == 0 -> ListeningMode.OFF
                     p[4].toInt() == 0 -> ListeningMode.NOISE_CANCELLING
@@ -755,7 +756,11 @@ class SonyBatteryClient(private val context: Context) {
             val type = functions()?.ncAsmType?.toByte()
                 ?: noiseType ?: 0x17.toByte()
             // The XM5 takes noise control on type 0x17; an unknown type is acknowledged but ignored.
-            // Type 0x15 carries the wind setting too: change it when asked, else send back what was reported.
+            // Type 0x15 carries the wind setting too: change it when asked, else preserve the current
+            // reported setting (reading mode first on a fresh or reopened session so it isn't wiped).
+            if (type == 0x15.toByte() && windAuto == null && reportedMode == null) {
+                runCatching { readMode() }
+            }
             val wind = when (windAuto) {
                 true -> ModeReport.NC_WIND_AUTO
                 false -> ModeReport.NC_DUAL
@@ -779,7 +784,7 @@ class SonyBatteryClient(private val context: Context) {
                     false
                 }
             }
-            fun applied(): ModeReport? = readMode()?.takeIf { it.mode == mode }
+            fun applied(): ModeReport? = readMode()?.takeIf { it.mode == mode && (windAuto == null || it.windAuto == windAuto) }
 
             sendAndWatch()
             applied()?.let { return "applied (sent ${hex(payload)};$seen)" }

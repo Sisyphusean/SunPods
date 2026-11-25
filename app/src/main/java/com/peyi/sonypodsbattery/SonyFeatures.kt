@@ -375,10 +375,15 @@ internal object SonyFeatures {
         val model = readString(s, INFO_MODEL)
         // Another pair of earbuds (another model): nothing saved for the last pair applies.
         var r = if (model != null && previous.modelName != null && model != previous.modelName) DeviceSettings() else previous
+        val prevFirmware = previous.firmware
+        val prevFunctions1 = previous.functions1
         r = r.copy(modelName = model ?: r.modelName)
         // Their own list of what they support, read every time: it changes with the connection.
         s.functions()?.let { f -> r = r.copy(functions1 = f.encode1(), functions2 = f.encode2() ?: r.functions2) }
         r = r.copy(firmware = readString(s, INFO_FIRMWARE) ?: r.firmware)
+        if ((prevFirmware != null && prevFirmware != r.firmware) || (prevFunctions1 != null && prevFunctions1 != r.functions1)) {
+            r = r.copy(general = null)
+        }
         // Read every time (it's one short request), so it's right from the first connection in
         // setup and follows a different pair of earbuds. The app shows black until it's known.
         r = r.copy(colorCode = readColor(s) ?: r.colorCode)
@@ -387,7 +392,7 @@ internal object SonyFeatures {
         if (r.has(Feature.DSEE)) r = readDsee(s, r)
         r = readPriority(s, r)
         if (r.has(Feature.SPEAK_TO_CHAT)) r = readSpeakToChat(s, r)
-        if (r.functions?.let(Feature.WIND_REDUCTION.test) == true) r = r.copy(windAuto = s.readMode()?.windAuto ?: r.windAuto)
+        if (r.functions?.let(Feature.WIND_REDUCTION.test) == true) r = r.copy(windAuto = (s.reportedMode?.windAuto ?: s.readMode()?.windAuto) ?: r.windAuto)
         if (r.has(Feature.PAUSE_WHEN_REMOVED)) r = readPause(s, r)
         if (r.has(Feature.AUTO_OFF_WHEN_REMOVED)) r = readAutoOff(s, r)
         if (r.has(Feature.TOUCH)) r = readTouch(s, r)
@@ -766,7 +771,7 @@ internal object SonyFeatures {
     fun setWindReduction(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
         val now = s.readMode() ?: throw EarbudsUnavailableException("Couldn't read noise control. Make sure your ${EarbudModel.active.noun} are connected and try again.")
         s.setAmbientSoundMode(now.mode, now.ambientLevel, now.focusOnVoice, windAuto = on)
-        return r.copy(windAuto = s.readMode()?.windAuto ?: on)
+        return r.copy(windAuto = s.reportedMode?.windAuto ?: on)
     }
 
     fun setPauseWhenRemoved(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {

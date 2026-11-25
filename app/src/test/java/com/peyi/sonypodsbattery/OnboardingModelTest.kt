@@ -39,6 +39,7 @@ class OnboardingModelTest {
             OnboardingStep.DONE,
         )
         assertEquals(expectedWithoutLe, onboardingSteps(EarbudModel.WF_1000XM5, phoneSupportsLeAudio = false))
+        assertEquals(expectedWithoutLe, onboardingSteps(EarbudModel.WF_1000XM4, phoneSupportsLeAudio = true))
         assertEquals(expectedWithoutLe, onboardingSteps(EarbudModel.WF_C710N, phoneSupportsLeAudio = true))
         assertEquals(expectedWithoutLe, onboardingSteps(EarbudModel.WH_1000XM5, phoneSupportsLeAudio = true))
         assertEquals(expectedWithoutLe, onboardingSteps(EarbudModel.WH_1000XM5, phoneSupportsLeAudio = false))

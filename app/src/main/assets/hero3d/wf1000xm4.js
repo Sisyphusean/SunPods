@@ -389,7 +389,7 @@ export function createWF1000XM4(ctx) {
   })();
 
   M.tip = patched(P({
-    roughness: 0.84,
+    roughness: 0.90,
     metalness: 0,
     specularIntensity: 0.35,
     sheen: 0.22,
@@ -417,7 +417,6 @@ float xm4N(vec3 p) {
   float s = dot(vObjPos - uTipO, uTipD);
   diffuseColor.rgb *= 1.0 - 0.35 * smoothstep(${((BUD.tip.at + BUD.tip.len - 0.07) * BH).toFixed(4)}, ${((BUD.tip.at + BUD.tip.len - 0.02) * BH).toFixed(4)}, s) * step(length(vObjPos - uTipO - uTipD * s), ${(BUD.tip.hole * 1.3 * BH).toFixed(4)});
 }`,
-      roughnessmap_fragment: 'roughnessFactor = clamp(roughnessFactor + 0.06, 0.0, 1.0);',
     },
   });
   M.tipHole = P({ color: lin([0.004, 0.004, 0.004]), roughness: 0.92, side: THREE.DoubleSide });
@@ -958,7 +957,7 @@ float xm4N(vec3 p) {
     return out;
   })();
 
-  function buildBud(side) {
+  function buildBud(side, inCase = false) {
     const g = new THREE.Group();
     g.name = 'X4_Bud' + side;
     const mirror = side === 'L';
@@ -984,26 +983,28 @@ float xm4N(vec3 p) {
     const logo = Object.assign(new THREE.Mesh(mirror ? GEO.logoL : GEO.logoR, M.print), { name: 'X4_Logo' });
     g.add(logo);
 
-    for (const c of GEO.contacts) {
-      const m = new THREE.Mesh(
-        new THREE.CylinderGeometry((BUD.inner.contactD * BH) / 2, (BUD.inner.contactD * BH) / 2, 0.008 * BH, 18),
-        M.contact,
-      );
-      m.position.copy(c.p);
-      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), c.n);
-      m.name = 'X4_Contact';
-      g.add(m);
-    }
-    g.add(Object.assign(new THREE.Mesh(GEO.sensor, M.sensor), { name: 'X4_Sensor' }));
-    g.add(Object.assign(new THREE.Mesh(mirror ? GEO.markL : GEO.markR, mirror ? M.markL : M.markR), { name: 'X4_Mark' }));
-    if (mirror) {
-      const dp = GEO.dotL;
-      const dot = new THREE.Mesh(new THREE.SphereGeometry((BUD.inner.dotD * BH) / 2, 14, 8), M.shell);
-      dot.position.copy(dp.p);
-      dot.scale.set(1, 1, 0.45);
-      dot.lookAt(dp.p.clone().add(dp.n));
-      dot.name = 'X4_TactileDot';
-      g.add(dot);
+    if (!inCase) {
+      for (const c of GEO.contacts) {
+        const m = new THREE.Mesh(
+          new THREE.CylinderGeometry((BUD.inner.contactD * BH) / 2, (BUD.inner.contactD * BH) / 2, 0.008 * BH, 18),
+          M.contact,
+        );
+        m.position.copy(c.p);
+        m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), c.n);
+        m.name = 'X4_Contact';
+        g.add(m);
+      }
+      g.add(Object.assign(new THREE.Mesh(GEO.sensor, M.sensor), { name: 'X4_Sensor' }));
+      g.add(Object.assign(new THREE.Mesh(mirror ? GEO.markL : GEO.markR, mirror ? M.markL : M.markR), { name: 'X4_Mark' }));
+      if (mirror) {
+        const dp = GEO.dotL;
+        const dot = new THREE.Mesh(new THREE.SphereGeometry((BUD.inner.dotD * BH) / 2, 14, 8), M.shell);
+        dot.position.copy(dp.p);
+        dot.scale.set(1, 1, 0.45);
+        dot.lookAt(dp.p.clone().add(dp.n));
+        dot.name = 'X4_TactileDot';
+        g.add(dot);
+      }
     }
     const tip = Object.assign(new THREE.Mesh(GEO.tip, M.tip), { name: 'X4_Tip' });
     g.add(tip);
@@ -1507,14 +1508,11 @@ float xm4N(vec3 p) {
   kase.root.matrix.copy(CASE_REST_MAT);
 
   for (const an of kase.anchors) {
-    const b = buildBud(an.side);
+    const b = buildBud(an.side, true);
     b.userData.inCase = true;
     b.scale.multiplyScalar(CASE.budSeat.scale);
     b.userData.face.material = M.faceCase;
     b.userData.shell.material = M.shellCase;
-    b.traverse((o) => {
-      if (/X4_Mark|X4_Contact|X4_Sensor|X4_TactileDot/.test(o.name)) o.visible = false;
-    });
     an.node.add(b);
     an.bud = b;
   }
@@ -1678,14 +1676,11 @@ float xm4N(vec3 p) {
     applyPose,
     LID_OPEN,
     ready,
-    warm: null,
     M,
     BUD,
     CASE,
     BH,
     pair,
     caseInside,
-    seatM,
-    bodyF,
   };
 }

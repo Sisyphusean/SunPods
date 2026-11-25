@@ -952,7 +952,7 @@ private fun HomeScreen(
             exit = revealOut()
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(GroupGap)) {
-                NoiseControl(battery, vm)
+                NoiseControl(battery, settings.windAuto, settings.has(Feature.NC_AMB_BUTTON), vm)
                 NowPlayingCard(vm)
             }
         }
@@ -1484,7 +1484,7 @@ private fun LastSeenMap(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
+private fun NoiseControl(battery: BatteryState, windAuto: Boolean?, hasNcAmbButton: Boolean, vm: SunpodsViewModel) {
     var level by remember(battery.ambientLevel) { mutableFloatStateOf(battery.ambientLevel.toFloat()) }
     Column {
         SectionHeader("Noise Control")
@@ -1503,15 +1503,14 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
                     vm.setListeningMode(ListeningMode.OFF, level.roundToInt(), battery.focusOnVoice)
                 }
             }
-            val settings by vm.settings.collectAsState()
             AnimatedVisibility(
-                visible = battery.listeningMode == ListeningMode.NOISE_CANCELLING && settings.windAuto != null,
+                visible = battery.listeningMode == ListeningMode.NOISE_CANCELLING && windAuto != null,
                 enter = revealIn(),
                 exit = revealOut()
             ) {
                 Column {
                     RowDivider(inset = 20.dp)
-                    ToggleRow(null, "Automatic Wind Noise Reduction", "Cuts wind noise outdoors. Uses a little more battery.", settings.windAuto == true) {
+                    ToggleRow(null, "Automatic Wind Noise Reduction", "Cuts wind noise outdoors. Uses a little more battery.", windAuto == true) {
                         vm.setWindReduction(it)
                     }
                 }
@@ -1547,7 +1546,7 @@ private fun NoiseControl(battery: BatteryState, vm: SunpodsViewModel) {
         }
         val context = LocalContext.current
         val automation = remember(battery.listeningMode, battery.updatedAt) { AutomationStore.active(context) }
-        Footer(automation?.let { "Set automatically: $it. Choose a mode to take over." } ?: if (vm.settings.collectAsState().value.has(Feature.NC_AMB_BUTTON)) "You can also press the NC/AMB button to switch modes." else "You can also tap the earbuds to switch modes.")
+        Footer(automation?.let { "Set automatically: $it. Choose a mode to take over." } ?: if (hasNcAmbButton) "You can also press the NC/AMB button to switch modes." else "You can also tap the earbuds to switch modes.")
     }
 }
 
