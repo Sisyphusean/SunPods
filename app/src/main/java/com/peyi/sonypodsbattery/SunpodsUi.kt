@@ -1426,7 +1426,7 @@ private fun LastSeenCard() {
                 }
             }
         }
-        Footer("Saved only on this phone. SunPods has no internet access.")
+        Footer("Saved only on this phone.")
     }
 }
 
@@ -2404,7 +2404,7 @@ private fun UpdatesGroup(updateVm: SunpodsViewModel? = null) {
                         scope.launch {
                             val latest = Updates.refresh(context)
                             found = latest?.takeIf { Updates.isNewer(it.version, SunpodsInfo.VERSION) }
-                            updateVm?.setAvailableUpdate(found)
+                            updateVm?.setAvailableUpdate(found ?: Updates.available(context))
                             result = when {
                                 latest == null -> "Couldn't reach GitHub"
                                 found != null -> "${latest.version} is out"

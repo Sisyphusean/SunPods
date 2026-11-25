@@ -28,7 +28,6 @@ export const HEADPHONE_DIMENSIONS = {
   sliderTopAnchorY: 0.05,
   sliderBaseExposedLength: 0.092,
   sliderMaxExtension: 0.24,
-  sliderSeamThickness: 0.003,
 
   hingeCutTiltRadians: THREE.MathUtils.degToRad(36),
   yokeTongueLength: 0.275,

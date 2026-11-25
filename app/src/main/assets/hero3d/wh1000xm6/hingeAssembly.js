@@ -161,8 +161,12 @@ export function createSideAssembly(sideSign, tipAnchor, materials) {
   foldPivot.add(swivelPivot);
   sliderTrackGroup.add(foldPivot);
 
+  let currentExtension = null;
+
   function setExtension(extensionRatio) {
     const clampedExtension = clampUnitRange(extensionRatio);
+    if (clampedExtension === currentExtension) return;
+    currentExtension = clampedExtension;
     const travelOffset = clampedExtension * HEADPHONE_DIMENSIONS.sliderMaxExtension;
     const topAnchorY = HEADPHONE_DIMENSIONS.sliderTopAnchorY;
     const bottomSwivelY = -(HEADPHONE_DIMENSIONS.sliderBaseExposedLength + travelOffset);
@@ -193,18 +197,21 @@ export function createSideAssembly(sideSign, tipAnchor, materials) {
   }
 
   function setSwivel(swivelRatio) {
-    currentSwivel = clampUnitRange(swivelRatio);
+    const nextSwivel = clampUnitRange(swivelRatio);
+    if (nextSwivel === currentSwivel) return;
+    currentSwivel = nextSwivel;
     applyArticulation();
   }
 
   function setFold(foldRatio) {
-    currentFold = clampUnitRange(foldRatio);
+    const nextFold = clampUnitRange(foldRatio);
+    if (nextFold === currentFold) return;
+    currentFold = nextFold;
     applyArticulation();
   }
 
   setExtension(0);
-  setSwivel(0);
-  setFold(0);
+  applyArticulation();
 
   return {
     sideAssembly,

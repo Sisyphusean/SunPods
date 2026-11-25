@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { clampUnitRange } from "./dimensions.js";
-import { buildLoftedGeometry, disposeObjectGeometries, evalSuperellipse } from "./geometryUtils.js";
+import { buildLoftedGeometry, createStadiumShape, disposeObjectGeometries, evalSuperellipse } from "./geometryUtils.js";
 import { resolveColorwayKey } from "./materials.js";
 import {
   createFeltColorTexture,
@@ -198,14 +198,9 @@ function createMagneticClaspStrapGeometry() {
 }
 
 function createClaspBarGeometry() {
-  const barShape = new THREE.Shape();
-  const halfLen = 0.038;
   const rad = 0.008;
-  barShape.moveTo(-halfLen, -rad);
-  barShape.lineTo(halfLen, -rad);
-  barShape.absarc(halfLen, 0, rad, -Math.PI / 2, Math.PI / 2, false);
-  barShape.lineTo(-halfLen, rad);
-  barShape.absarc(-halfLen, 0, rad, Math.PI / 2, (Math.PI * 3) / 2, false);
+  const halfLen = 0.038;
+  const barShape = createStadiumShape((halfLen + rad) * 2, rad * 2, false);
 
   const geo = new THREE.ExtrudeGeometry(barShape, {
     depth: 0.008,

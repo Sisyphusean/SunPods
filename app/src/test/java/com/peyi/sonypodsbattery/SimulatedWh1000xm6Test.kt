@@ -241,6 +241,7 @@ class SimulatedWh1000xm6Test {
         val s3 = SonyBatteryClient.SonySession(SimulatedEarbuds(SimProfile(EarbudModel.WH_1000XM6, "$base\n12 $reply3")))
             .also { it.initialize() }
         assertEquals(listOf(mac1, mac2, mac3), SonyFeatures.leAddresses(s3))
+        assertEquals(listOf("02:00:00:00:00:01", "02:00:00:00:00:11"), SonyFeatures.leAddresses(session().second))
     }
 
     @Test fun `art and simulator entry`() {

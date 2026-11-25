@@ -197,10 +197,8 @@ private fun wf1000xm4Art(c: Int?): BudArt = when (c) {
 }
 
 /**
- * WH-1000XM6 finishes; the 3D hero names them black, silver, blue, pink, sandstone and olive. Black
- * (0x01), Platinum Silver (0x03), Midnight Blue (0x05) and Sand Pink (0x06) follow the WH-1000XM5's
- * codes; Sandstone (0x0b Cream or 0x0d Brown) and Olive Gray (0x08 Green or 0x09 Gray) are not
- * confirmed, so both candidates are taken (docs/protocol/wh1000xm6_profile.md section 9).
+ * WH-1000XM6 finishes; the 3D hero supports black, silver, blue and pink (following WH-1000XM5
+ * codes 0x01, 0x03, 0x05 and 0x06; docs/protocol/wh1000xm6_profile.md section 9).
  */
 private fun wh1000xm6Art(c: Int?): BudArt = when (c) {
     0x03 -> BudArt(R.drawable.wh1000xm6_side_silver, R.drawable.wh1000xm6_front_silver, R.drawable.wh1000xm6_case_silver, R.drawable.wh1000xm6_pair_silver, "silver", R.raw.wh1000xm6_anim_pair_black, R.raw.wh1000xm6_anim_open_black, model = EarbudModel.WH_1000XM6)

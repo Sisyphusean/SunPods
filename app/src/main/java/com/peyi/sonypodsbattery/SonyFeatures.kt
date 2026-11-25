@@ -97,7 +97,7 @@ data class EqLayout(
 
         /** The layout for these settings: the headphones' own when they list it, else the classic one. */
         internal fun of(s: DeviceSettings): EqLayout {
-            if (s.functions?.has1(Fn.PRESET_EQ_AND_ERRORCODE) != true) return CLASSIC
+            if (!s.listed(Feature.EQ_DESCRIBED)) return CLASSIC
             val cap = s.eqCap?.let(::fromHex)?.let(::parseCapability)
             val info = s.eqInfo?.let(::fromHex)?.let(::parseBands)
             val count = cap?.first ?: 10
@@ -306,8 +306,7 @@ data class GeneralSetting(val slot: Int, val key: String, val on: Boolean?) {
     val subtitle: String get() = GS_TITLES[key]?.second?.replace("{noun}", EarbudModel.active.noun) ?: ""
 
     companion object {
-        // A getter, so the copy follows the pair in use (earbuds or headphones).
-        private val GS_TITLES get() = mapOf(
+        private val GS_TITLES = mapOf(
             "MULTIPOINT_SETTING" to ("Connect to Two Devices" to "Stay connected to your phone and another device at the same time"),
             "SIDETONE_SETTING" to ("Hear Your Voice on Calls" to "Hear yourself in your {noun} while you talk"),
             "TOUCH_PANEL_SETTING" to ("Touch Controls" to "Tap and swipe on the right ear cup to control playback and volume"),
@@ -511,8 +510,6 @@ internal object SonyFeatures {
 
     private const val AUTO_OFF_WHEN_REMOVED = 0x10
     private const val AUTO_OFF_DISABLED = 0x11
-    private const val EQ_BAND_COUNT = 6
-    private const val EQ_OFFSET = 10
 
     fun readAll(s: SonyBatteryClient.SonySession, previous: DeviceSettings): DeviceSettings {
         val model = readString(s, INFO_MODEL)
@@ -536,7 +533,7 @@ internal object SonyFeatures {
         if (r.has(Feature.DSEE)) r = readDsee(s, r)
         r = readPriority(s, r)
         if (r.has(Feature.SPEAK_TO_CHAT)) r = readSpeakToChat(s, r)
-        if (r.functions?.let(Feature.WIND_REDUCTION.test) == true) r = r.copy(windAuto = (s.reportedMode?.windAuto ?: s.readMode()?.windAuto) ?: r.windAuto)
+        if (r.listed(Feature.WIND_REDUCTION)) r = r.copy(windAuto = (s.reportedMode?.windAuto ?: s.readMode()?.windAuto) ?: r.windAuto)
         if (r.listed(Feature.AUTO_AMBIENT)) r = withAutoAmbient(r, s.reportedMode ?: s.readMode())
         if (r.has(Feature.PAUSE_WHEN_REMOVED)) r = readPause(s, r)
         if (r.has(Feature.AUTO_OFF_WHEN_REMOVED)) r = readAutoOff(s, r)
@@ -722,18 +719,11 @@ internal object SonyFeatures {
         val preset = u(p[2])
         val count = if (p.size > 3) u(p[3]) else 0
         val layout = r.eqLayout
-        if (layout.described) {
-            // [57 00 preset n v1..vn], every band (the WH-1000XM6: ten, 13 steps, flat 06).
-            if (count != layout.count || p.size < 4 + count) return r.copy(eqPresetCode = preset)
-            val values = (0 until count).map { (u(p[4 + it]) - layout.offset).coerceIn(layout.min, layout.max) }
-            return if (layout.clearBass) r.copy(eqPresetCode = preset, clearBass = values[0], bands = values.drop(1))
-            else r.copy(eqPresetCode = preset, clearBass = null, bands = values)
-        }
-        if (count >= EQ_BAND_COUNT && p.size >= 4 + EQ_BAND_COUNT) {
-            val values = (0 until EQ_BAND_COUNT).map { (u(p[4 + it]) - EQ_OFFSET).coerceIn(-10, 10) }
-            return r.copy(eqPresetCode = preset, clearBass = values[0], bands = values.drop(1))
-        }
-        return r.copy(eqPresetCode = preset)
+        val validCount = if (layout.described) count == layout.count else count >= layout.count
+        if (!validCount || p.size < 4 + layout.count) return r.copy(eqPresetCode = preset)
+        val values = (0 until layout.count).map { (u(p[4 + it]) - layout.offset).coerceIn(layout.min, layout.max) }
+        return if (layout.clearBass) r.copy(eqPresetCode = preset, clearBass = values[0], bands = values.drop(1))
+        else r.copy(eqPresetCode = preset, clearBass = null, bands = values)
     }
 
     private fun readDsee(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
@@ -865,7 +855,7 @@ internal object SonyFeatures {
     private fun readTouchCap(s: SonyBatteryClient.SonySession, r: DeviceSettings): DeviceSettings {
         val p = s.request(bytes(SYSTEM_GET_CAPABILITY, SYSTEM_ASSIGNABLE), timeoutMs = 700) ?: return r
         if (TouchCapability.parse(p) == null) return r
-        return r.copy(touchCap = p.joinToString("") { "%02x".format(it.toInt() and 0xff) })
+        return r.copy(touchCap = hex(p))
     }
 
     // Which modes a tap on a "noise control" earbud cycles through: [fb, 03, 01, 00, 01, 00, mode]
@@ -907,21 +897,20 @@ internal object SonyFeatures {
      */
     fun setEqBands(s: SonyBatteryClient.SonySession, r: DeviceSettings, clearBass: Int?, bands: List<Int>): DeviceSettings {
         val layout = r.eqLayout
-        if (layout.described) {
-            require(bands.size == layout.bandCount) { "These headphones have ${layout.bandCount} EQ bands" }
-            val target = r.eqPresetCode?.takeIf(layout::isEditable) ?: EqPreset.MANUAL.code
-            val dbs = (if (layout.clearBass) listOf(clearBass ?: 0) else emptyList()) + bands
-            val values = dbs.map { it.coerceIn(layout.min, layout.max) + layout.offset }
-            val ok = s.command(bytes(EQEBB_GET_PARAM + 2, EQ_PRESET, target, values.size, *values.toIntArray()))
-            return readEq(s, if (ok) r.copy(eqPresetCode = target, clearBass = clearBass.takeIf { layout.clearBass }, bands = bands) else r)
+        require(bands.size == layout.bandCount) {
+            if (layout.described) "These headphones have ${layout.bandCount} EQ bands"
+            else "WF-1000XM5 has five EQ bands"
         }
-        require(bands.size == 5) { "WF-1000XM5 has five EQ bands" }
-        val target = r.eqPreset?.takeIf { it.isCustomisable } ?: EqPreset.MANUAL
-        val values = (listOf(clearBass ?: 0) + bands).map { it.coerceIn(-10, 10) + EQ_OFFSET }
-        val ok = s.command(byteArrayOf(
-            (EQEBB_GET_PARAM + 2).toByte(), EQ_PRESET.toByte(), target.code.toByte(), EQ_BAND_COUNT.toByte()
-        ) + values.map { it.toByte() }.toByteArray())
-        return readEq(s, if (ok) r.copy(eqPresetCode = target.code, clearBass = clearBass ?: 0, bands = bands) else r)
+        val target = r.eqPresetCode?.takeIf(layout::isEditable) ?: EqPreset.MANUAL.code
+        val dbs = (if (layout.clearBass) listOf(clearBass ?: 0) else emptyList()) + bands
+        val values = dbs.map { it.coerceIn(layout.min, layout.max) + layout.offset }
+        val ok = s.command(bytes(EQEBB_GET_PARAM + 2, EQ_PRESET, target, values.size, *values.toIntArray()))
+        val updated = if (ok) r.copy(
+            eqPresetCode = target,
+            clearBass = if (layout.clearBass) clearBass ?: 0 else null,
+            bands = bands
+        ) else r
+        return readEq(s, updated)
     }
 
     fun setDsee(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
@@ -980,18 +969,26 @@ internal object SonyFeatures {
         autoAmbientSensitivity = AutoAmbientSensitivity.from(m?.naSens) ?: r.autoAmbientSensitivity
     )
 
-    /** Auto Ambient Sound on or off; the mode, level and focus go back as the headphones report them. */
-    fun setAutoAmbient(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
+    private inline fun updateAutoAmbient(
+        s: SonyBatteryClient.SonySession,
+        update: DeviceSettings,
+        change: (SonyBatteryClient.ModeReport) -> Unit
+    ): DeviceSettings {
         val now = s.readMode() ?: throw EarbudsUnavailableException("Couldn't read noise control. Make sure your ${EarbudModel.active.noun} are connected and try again.")
-        s.setAmbientSoundMode(now.mode, now.ambientLevel, now.focusOnVoice, autoAmbient = on)
-        return withAutoAmbient(r.copy(autoAmbient = on), s.readMode())
+        change(now)
+        return withAutoAmbient(update, s.reportedMode ?: s.readMode())
     }
 
-    fun setAutoAmbientSensitivity(s: SonyBatteryClient.SonySession, r: DeviceSettings, sensitivity: AutoAmbientSensitivity): DeviceSettings {
-        val now = s.readMode() ?: throw EarbudsUnavailableException("Couldn't read noise control. Make sure your ${EarbudModel.active.noun} are connected and try again.")
-        s.setAmbientSoundMode(now.mode, now.ambientLevel, now.focusOnVoice, autoAmbientSensitivity = sensitivity.code)
-        return withAutoAmbient(r.copy(autoAmbientSensitivity = sensitivity), s.readMode())
-    }
+    /** Auto Ambient Sound on or off; the mode, level and focus go back as the headphones report them. */
+    fun setAutoAmbient(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings =
+        updateAutoAmbient(s, r.copy(autoAmbient = on)) { now ->
+            s.setAmbientSoundMode(now.mode, now.ambientLevel, now.focusOnVoice, autoAmbient = on)
+        }
+
+    fun setAutoAmbientSensitivity(s: SonyBatteryClient.SonySession, r: DeviceSettings, sensitivity: AutoAmbientSensitivity): DeviceSettings =
+        updateAutoAmbient(s, r.copy(autoAmbientSensitivity = sensitivity)) { now ->
+            s.setAmbientSoundMode(now.mode, now.ambientLevel, now.focusOnVoice, autoAmbientSensitivity = sensitivity.code)
+        }
 
     fun setPauseWhenRemoved(s: SonyBatteryClient.SonySession, r: DeviceSettings, on: Boolean): DeviceSettings {
         val ok = s.command(bytes(SYSTEM_GET_PARAM + 2, SYSTEM_PLAYBACK_BY_WEARING, if (on) 0x00 else 0x01))

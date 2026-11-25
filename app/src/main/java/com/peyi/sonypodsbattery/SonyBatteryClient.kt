@@ -742,7 +742,7 @@ class SonyBatteryClient(private val context: Context) {
         fun readMode(): ModeReport? {
             // The type these earbuds list for noise control, else the last one that answered, else probe.
             val listed = functions()?.ncAsmType?.toByte()
-            val types = listed?.let { listOf(it) } ?: noiseType?.let { listOf(it) } ?: listOf<Byte>(0x17, 0x15)
+            val types = listed?.let { listOf(it) } ?: noiseType?.let { listOf(it) } ?: listOf<Byte>(0x17, 0x15, 0x19)
             for (t in types) {
                 val p = request(byteArrayOf(0x66, t), 800) ?: continue
                 android.util.Log.i("SunPods", "Noise control reply for type ${"%02x".format(t)}: ${hex(p)}")
@@ -769,24 +769,20 @@ class SonyBatteryClient(private val context: Context) {
             val ambient = if (mode == ListeningMode.AMBIENT) 1 else 0
             val type = functions()?.ncAsmType?.toByte()
                 ?: noiseType ?: 0x17.toByte()
-            // The XM5 takes noise control on type 0x17; an unknown type is acknowledged but ignored.
-            // Type 0x15 carries the wind setting too: change it when asked, else preserve the current
-            // reported setting (reading mode first on a fresh or reopened session so it isn't wiped).
-            if (type == 0x15.toByte() && windAuto == null && reportedMode == null) {
-                runCatching { readMode() }
-            }
-            val wind = when (windAuto) {
-                true -> ModeReport.NC_WIND_AUTO
-                false -> ModeReport.NC_DUAL
-                null -> (reportedMode?.ncValue ?: ModeReport.NC_DUAL)
-            }
+            // Read current mode on a fresh session so preserved type-0x15 wind / type-0x19 Auto Ambient aren't wiped.
             val focus: Byte = if (focusOnVoice) 0x01 else 0x00
             val level = ambientLevel.coerceIn(1, 20).toByte()
             val payload = when (type) {
-                0x15.toByte() -> byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), wind.toByte(), focus, level)
+                0x15.toByte() -> {
+                    if (windAuto == null && reportedMode == null) runCatching { readMode() }
+                    val wind = when (windAuto) {
+                        true -> ModeReport.NC_WIND_AUTO
+                        false -> ModeReport.NC_DUAL
+                        null -> (reportedMode?.ncValue ?: ModeReport.NC_DUAL)
+                    }
+                    byteArrayOf(0x68, type, 0x01, enabled.toByte(), ambient.toByte(), wind.toByte(), focus, level)
+                }
                 0x19.toByte() -> {
-                    // Type 0x19 carries Auto Ambient Sound: change it when asked, else send back what was
-                    // reported (read first on a fresh or reopened session so a mode change never turns it off).
                     if (reportedMode?.naOn == null) runCatching { readMode() }
                     val naOn = autoAmbient?.let { if (it) 0x01 else 0x00 } ?: reportedMode?.naOn ?: 0x00
                     val naSens = autoAmbientSensitivity ?: reportedMode?.naSens ?: 0x00
