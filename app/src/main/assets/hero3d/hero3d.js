@@ -655,6 +655,7 @@ const DEVICES = {
   c710n: { url: './c710n.js', create: 'createC710N', colors: ['black', 'white', 'pink', 'blue'] },
   wf1000xm4: { url: './wf1000xm4.js', create: 'createWF1000XM4', colors: ['black', 'silver'] },
   wh1000xm5: { url: './wh1000xm5.js', create: 'createWH1000XM5', colors: ['black', 'silver', 'blue', 'pink'] },
+  wh1000xm6: { url: './wh1000xm6.js', create: 'createWH1000XM6', colors: ['black', 'silver', 'blue', 'pink'] },
 };
 const rawCaseProgress = params.get('caseProgress');
 const hasCaseProgressParam = rawCaseProgress !== null && rawCaseProgress !== '';
@@ -781,7 +782,7 @@ whStudioLights.rim.position.set(-1.6, 3.2, -4.0);
 whStudioLights.rim2.position.set(3.2, 2.2, -3.5);
 let sceneProbe = null;
 function syncDeviceLighting(dev) {
-  const isWh = dev === 'wh1000xm5';
+  const isWh = dev === 'wh1000xm5' || dev === 'wh1000xm6';
   whStudioLights.key.intensity = isWh ? 1.95 : 0;
   whStudioLights.fill.intensity = isWh ? 1.05 : 0;
   whStudioLights.rim.intensity = isWh ? 1.55 : 0;

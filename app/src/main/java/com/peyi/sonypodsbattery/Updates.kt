@@ -17,6 +17,8 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -24,11 +26,12 @@ import java.net.URL
 import java.util.concurrent.TimeUnit
 
 /**
- * New versions on GitHub. Once a day, when there's a network, SunPods asks GitHub for the latest
- * release of this app and shows a notification when it's newer than the installed one.
+ * New versions on GitHub. Every 4 hours in the background and on foreground opens (throttled to
+ * 10 minutes with ETag validation), SunPods checks GitHub for the latest release and notifies once
+ * per newer version.
  *
  * This is SunPods' only use of the internet. The request carries nothing about the user or their
- * earbuds, and it can be turned off in Settings.
+ * device, and it can be turned off in Settings.
  */
 internal object Updates {
     const val REPO = "Sisyphusean/SunPods"
@@ -37,6 +40,8 @@ internal object Updates {
     private const val WORK = "update_check"
     private const val CHANNEL = "app_updates"
     private const val NOTE_ID = 4801
+    private const val SCHEDULE_HOURS = 4
+    private val checkMutex = Mutex()
 
     /** A published release: its version, its page, and the APK to install, if it has one. */
     data class Release(val version: String, val url: String, val apk: String? = null, val notes: String? = null, val size: Long? = null)
@@ -50,47 +55,61 @@ internal object Updates {
         schedule(context)
     }
 
-    /** Keeps the daily check scheduled (or cancelled). Safe to call on every app start. */
+    /** Keeps the periodic check scheduled (or cancelled). Safe to call on every app start. */
     fun schedule(context: Context) {
         val work = WorkManager.getInstance(context)
+        val p = prefs(context)
         if (!enabled(context)) {
             work.cancelUniqueWork(WORK)
             return
         }
-        val request = PeriodicWorkRequestBuilder<UpdateWorker>(1, TimeUnit.DAYS)
+        val policy = if (p.getInt("schedule_hours", 0) != SCHEDULE_HOURS) {
+            p.edit().putInt("schedule_hours", SCHEDULE_HOURS).apply()
+            ExistingPeriodicWorkPolicy.UPDATE
+        } else {
+            ExistingPeriodicWorkPolicy.KEEP
+        }
+        val request = PeriodicWorkRequestBuilder<UpdateWorker>(SCHEDULE_HOURS.toLong(), TimeUnit.HOURS)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
-        work.enqueueUniquePeriodicWork(WORK, ExistingPeriodicWorkPolicy.KEEP, request)
+        work.enqueueUniquePeriodicWork(WORK, policy, request)
     }
 
     /** The newest published release, or null if GitHub can't be reached. */
-    suspend fun latest(): Release? = withContext(Dispatchers.IO) {
+    suspend fun latest(): Release? = fetchLatest(etag = null).first
+
+    private suspend fun fetchLatest(etag: String?): Pair<Release?, String?> = withContext(Dispatchers.IO) {
         runCatching {
             val c = URL("https://api.github.com/repos/$REPO/releases/latest").openConnection() as HttpURLConnection
             c.connectTimeout = 10_000
             c.readTimeout = 10_000
             c.setRequestProperty("Accept", "application/vnd.github+json")
             c.setRequestProperty("User-Agent", "SunPods-Android")
+            if (!etag.isNullOrBlank()) c.setRequestProperty("If-None-Match", etag)
             try {
-                if (c.responseCode != 200) null
-                else {
-                    val o = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
-                    if (o.optBoolean("draft") || o.optBoolean("prerelease")) null
-                    else {
-                        val assets = o.optJSONArray("assets")
-                        val asset = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it) }
-                            .firstOrNull { it.optString("name").endsWith(".apk", ignoreCase = true) }
-                        val apk = asset?.optString("browser_download_url")?.takeIf { it.startsWith("https://github.com/$REPO/releases/download/") }
-                        Release(
-                            o.getString("tag_name").trimStart('v', 'V'), o.optString("html_url", RELEASES_PAGE), apk,
-                            o.optString("body").takeIf { it.isNotBlank() }, asset?.optLong("size")?.takeIf { it > 0 }
-                        )
+                when (c.responseCode) {
+                    HttpURLConnection.HTTP_NOT_MODIFIED -> null to etag
+                    200 -> {
+                        val o = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+                        val nextEtag = c.getHeaderField("ETag")
+                        if (o.optBoolean("draft") || o.optBoolean("prerelease")) null to nextEtag
+                        else {
+                            val assets = o.optJSONArray("assets")
+                            val asset = (0 until (assets?.length() ?: 0)).map { assets!!.getJSONObject(it) }
+                                .firstOrNull { it.optString("name").endsWith(".apk", ignoreCase = true) }
+                            val apk = asset?.optString("browser_download_url")?.takeIf { it.startsWith("https://github.com/$REPO/releases/download/") }
+                            Release(
+                                o.getString("tag_name").trimStart('v', 'V'), o.optString("html_url", RELEASES_PAGE), apk,
+                                o.optString("body").takeIf { it.isNotBlank() }, asset?.optLong("size")?.takeIf { it > 0 }
+                            ) to nextEtag
+                        }
                     }
+                    else -> null to null
                 }
             } finally {
                 c.disconnect()
             }
-        }.getOrNull()
+        }.getOrElse { null to null }
     }
 
     /** True when [candidate] (like "2.28.1") is a later version than [current]. */
@@ -106,22 +125,35 @@ internal object Updates {
         return false
     }
 
-    /**
-     * Asks GitHub. Returns the release when it's newer than this app, else null. With [notify], a
-     * newer release is announced once per version.
-     */
-    /** Asks GitHub once and remembers the answer; returns the newest release, newer or not. */
+    /** Asks GitHub using ETag validation and remembers the answer; returns the newest release, newer or not. */
     suspend fun refresh(context: Context): Release? {
-        val release = latest() ?: return null
-        prefs(context).edit()
-            .putLong("checked_at", System.currentTimeMillis())
+        val p = prefs(context)
+        val cached = cachedRelease(p)
+        val sentEtag = if (cached != null) p.getString("etag", null) else null
+        val (release, etag) = fetchLatest(sentEtag)
+        val now = System.currentTimeMillis()
+        if (release == null) {
+            p.edit().putLong("checked_at", now).apply()
+            return if (sentEtag != null && etag == sentEtag) cached else null
+        }
+        p.edit()
+            .putLong("checked_at", now)
             .putString("latest_version", release.version)
             .putString("latest_url", release.url)
             .putString("latest_apk", release.apk)
             .putString("latest_notes", release.notes)
             .putLong("latest_size", release.size ?: 0L)
+            .putString("etag", etag)
             .apply()
         return release
+    }
+
+    private fun cachedRelease(p: android.content.SharedPreferences): Release? {
+        val v = p.getString("latest_version", null) ?: return null
+        return Release(
+            v, p.getString("latest_url", RELEASES_PAGE) ?: RELEASES_PAGE, p.getString("latest_apk", null),
+            p.getString("latest_notes", null), p.getLong("latest_size", 0L).takeIf { it > 0 }
+        )
     }
 
     suspend fun check(context: Context, notify: Boolean): Release? {
@@ -136,13 +168,8 @@ internal object Updates {
 
     /** The newest release seen by any check, if it's newer than this app. No network. */
     fun available(context: Context): Release? {
-        val p = prefs(context)
-        val v = p.getString("latest_version", null) ?: return null
-        if (!isNewer(v, BuildConfig.VERSION_NAME)) return null
-        return Release(
-            v, p.getString("latest_url", RELEASES_PAGE) ?: RELEASES_PAGE, p.getString("latest_apk", null),
-            p.getString("latest_notes", null), p.getLong("latest_size", 0L).takeIf { it > 0 }
-        )
+        val r = cachedRelease(prefs(context)) ?: return null
+        return r.takeIf { isNewer(it.version, BuildConfig.VERSION_NAME) }
     }
 
     /** "Later" on the Home card: hide it until a newer version than this one comes out. */
@@ -159,12 +186,14 @@ internal object Updates {
         return clean.substringBefore(". ").trimEnd('.') .takeIf { it.isNotBlank() }?.let { "$it." }
     }
 
-    /** Checks again if the last check was over 12 hours ago (the daily job can be late). */
+    /** Checks again if the last check was over 10 minutes ago (lightweight with ETag validation, serialized). */
     suspend fun checkIfDue(context: Context): Release? {
         if (!enabled(context)) return available(context)
-        val last = prefs(context).getLong("checked_at", 0L)
-        if (System.currentTimeMillis() - last < 12 * 3_600_000L) return available(context)
-        return check(context, notify = false) ?: available(context)
+        return checkMutex.withLock {
+            val last = prefs(context).getLong("checked_at", 0L)
+            if (System.currentTimeMillis() - last < 10 * 60_000L) return@withLock available(context)
+            check(context, notify = false) ?: available(context)
+        }
     }
 
     fun open(context: Context, url: String) {

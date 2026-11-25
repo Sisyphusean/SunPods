@@ -164,11 +164,13 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun setEqPreset(preset: EqPreset) = change("Equaliser", { it.copy(eqPresetCode = preset.code) }) { s, r ->
-        SonyFeatures.setEqPreset(s, r, preset)
+    /** A preset by its code, from the pair's own list ([EqLayout.presets]). */
+    fun setEqPreset(code: Int) = change("Equaliser", { it.copy(eqPresetCode = code) }) { s, r ->
+        SonyFeatures.setEqPreset(s, r, code)
     }
 
-    fun setEqBands(clearBass: Int, bands: List<Int>) = change(
+    /** [clearBass] is null on layouts without it. */
+    fun setEqBands(clearBass: Int?, bands: List<Int>) = change(
         "Custom Equaliser",
         { it.copy(clearBass = clearBass, bands = bands) }
     ) { s, r -> SonyFeatures.setEqBands(s, r, clearBass, bands) }
@@ -176,6 +178,14 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     fun setWindReduction(on: Boolean) = change("Wind Noise Reduction", { it.copy(windAuto = on) }) { s, r ->
         SonyFeatures.setWindReduction(s, r, on)
     }
+
+    fun setAutoAmbient(on: Boolean) = change("Auto Ambient Sound", { it.copy(autoAmbient = on) }) { s, r ->
+        SonyFeatures.setAutoAmbient(s, r, on)
+    }
+
+    fun setAutoAmbientSensitivity(sensitivity: AutoAmbientSensitivity) = change(
+        "Auto Ambient Sound", { it.copy(autoAmbientSensitivity = sensitivity) }
+    ) { s, r -> SonyFeatures.setAutoAmbientSensitivity(s, r, sensitivity) }
 
     fun setDsee(on: Boolean) = change("DSEE Extreme", { it.copy(dseeOn = on) }) { s, r ->
         SonyFeatures.setDsee(s, r, on)
@@ -250,6 +260,11 @@ class SunpodsViewModel(application: Application) : AndroidViewModel(application)
     internal val updateState: StateFlow<SelfUpdate.State> = _updateState.asStateFlow()
 
     init {
+        checkUpdates()
+    }
+
+    /** Checks GitHub if due (every 10 min on foreground open/resume, ETag cached). */
+    fun checkUpdates() {
         viewModelScope.launch { _update.value = Updates.checkIfDue(app)?.takeUnless { Updates.dismissed(app, it.version) } }
     }
 

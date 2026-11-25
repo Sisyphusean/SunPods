@@ -162,6 +162,7 @@ internal fun budArt(colorCode: Int?, model: EarbudModel = EarbudModel.active): B
     return when (model) {
         EarbudModel.WF_C710N -> c710nArt(c)
         EarbudModel.WH_1000XM5 -> wh1000xm5Art(c)
+        EarbudModel.WH_1000XM6 -> wh1000xm6Art(c)
         EarbudModel.WF_1000XM4 -> wf1000xm4Art(c)
         EarbudModel.WF_1000XM5 -> when (c) {
             0x03 -> BudArt(R.drawable.bud_left_silver, R.drawable.bud_right_silver, R.drawable.bud_case_silver, R.drawable.buds_pair_silver, "silver", R.raw.anim_pair_silver, R.raw.anim_open)
@@ -193,6 +194,17 @@ private fun wh1000xm5Art(c: Int?): BudArt = when (c) {
 private fun wf1000xm4Art(c: Int?): BudArt = when (c) {
     0x03 -> BudArt(R.drawable.wf1000xm4_bud_left_silver, R.drawable.wf1000xm4_bud_right_silver, R.drawable.wf1000xm4_bud_case_silver, R.drawable.wf1000xm4_buds_pair_silver, "silver", R.raw.wf1000xm4_anim_pair_black, R.raw.wf1000xm4_anim_open_black, model = EarbudModel.WF_1000XM4)
     else -> BudArt(R.drawable.wf1000xm4_bud_left_black, R.drawable.wf1000xm4_bud_right_black, R.drawable.wf1000xm4_bud_case_black, R.drawable.wf1000xm4_buds_pair_black, "black", R.raw.wf1000xm4_anim_pair_black, R.raw.wf1000xm4_anim_open_black, model = EarbudModel.WF_1000XM4)
+}
+
+/**
+ * WH-1000XM6 finishes; the 3D hero supports black, silver, blue and pink (following WH-1000XM5
+ * codes 0x01, 0x03, 0x05 and 0x06; docs/protocol/wh1000xm6_profile.md section 9).
+ */
+private fun wh1000xm6Art(c: Int?): BudArt = when (c) {
+    0x03 -> BudArt(R.drawable.wh1000xm6_side_silver, R.drawable.wh1000xm6_front_silver, R.drawable.wh1000xm6_case_silver, R.drawable.wh1000xm6_pair_silver, "silver", R.raw.wh1000xm6_anim_pair_black, R.raw.wh1000xm6_anim_open_black, model = EarbudModel.WH_1000XM6)
+    0x05 -> BudArt(R.drawable.wh1000xm6_side_blue, R.drawable.wh1000xm6_front_blue, R.drawable.wh1000xm6_case_blue, R.drawable.wh1000xm6_pair_blue, "blue", R.raw.wh1000xm6_anim_pair_black, R.raw.wh1000xm6_anim_open_black, model = EarbudModel.WH_1000XM6)
+    0x06 -> BudArt(R.drawable.wh1000xm6_side_pink, R.drawable.wh1000xm6_front_pink, R.drawable.wh1000xm6_case_pink, R.drawable.wh1000xm6_pair_pink, "pink", R.raw.wh1000xm6_anim_pair_black, R.raw.wh1000xm6_anim_open_black, model = EarbudModel.WH_1000XM6)
+    else -> BudArt(R.drawable.wh1000xm6_side_black, R.drawable.wh1000xm6_front_black, R.drawable.wh1000xm6_case_black, R.drawable.wh1000xm6_pair_black, "black", R.raw.wh1000xm6_anim_pair_black, R.raw.wh1000xm6_anim_open_black, model = EarbudModel.WH_1000XM6)
 }
 
 /** The current earbuds' pictures; provided by the app shell from the colour the earbuds report. */

@@ -68,6 +68,8 @@ internal object Fn {
     const val PRESET_EQ = 0x50
     const val PRESET_EQ_NON_CUSTOMIZABLE = 0x52
     const val CUSTOM_EQ = 0x55
+    /** The EQ that describes itself (bands, steps, presets) on EQEBB type 04: the WH-1000XM6's 10 bands. */
+    const val PRESET_EQ_AND_ERRORCODE = 0x57
     const val CODEC_INDICATOR = 0x12
     const val UPSCALING = 0x13          // indicator
     const val UPSCALING_AUTO_OFF = 0xe2
@@ -96,7 +98,7 @@ internal object Fn {
 
     /**
      * Noise control function to the NC/ASM inquired type it's driven on (NcAsmInquiredType):
-     * the WF-1000XM5 lists 0x6b and answers on 0x17.
+     * the WF-1000XM5 lists 0x6b and answers on 0x17, the WH-1000XM6 lists 0x6d and answers on 0x19.
      */
     fun ncAsmType(code: Int): Int? = when (code) {
         0x61 -> 0x01; 0x62 -> 0x11; 0x63 -> 0x12; 0x64 -> 0x13; 0x65 -> 0x14

@@ -952,7 +952,7 @@ private fun HomeScreen(
             exit = revealOut()
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(GroupGap)) {
-                NoiseControl(battery, settings.windAuto, settings.has(Feature.NC_AMB_BUTTON), vm)
+                NoiseControl(battery, settings, vm)
                 NowPlayingCard(vm)
             }
         }
@@ -1426,7 +1426,7 @@ private fun LastSeenCard() {
                 }
             }
         }
-        Footer("Saved only on this phone. SunPods has no internet access.")
+        Footer("Saved only on this phone.")
     }
 }
 
@@ -1484,7 +1484,9 @@ private fun LastSeenMap(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun NoiseControl(battery: BatteryState, windAuto: Boolean?, hasNcAmbButton: Boolean, vm: SunpodsViewModel) {
+private fun NoiseControl(battery: BatteryState, settings: DeviceSettings, vm: SunpodsViewModel) {
+    val windAuto = settings.windAuto
+    val hasNcAmbButton = settings.has(Feature.NC_AMB_BUTTON)
     var level by remember(battery.ambientLevel) { mutableFloatStateOf(battery.ambientLevel.toFloat()) }
     Column {
         SectionHeader("Noise Control")
@@ -1541,6 +1543,23 @@ private fun NoiseControl(battery: BatteryState, windAuto: Boolean?, hasNcAmbButt
                     ToggleRow(null, "Focus on Voice", "Lets voices through more clearly", battery.focusOnVoice) {
                         vm.setListeningMode(ListeningMode.AMBIENT, level.roundToInt(), it)
                     }
+                    if (settings.autoAmbient != null) {
+                        RowDivider(inset = 20.dp)
+                        ToggleRow(null, "Auto Ambient Sound", "Adjusts the ambient sound to the noise around you", settings.autoAmbient == true) {
+                            vm.setAutoAmbient(it)
+                        }
+                        AnimatedVisibility(settings.autoAmbient == true, enter = revealIn(), exit = revealOut()) {
+                            Column {
+                                RowDivider(inset = 20.dp)
+                                var open by remember { mutableStateOf(false) }
+                                NavRow(null, "Detection Sensitivity", settings.autoAmbientSensitivity?.label ?: "—") { open = true }
+                                if (open) {
+                                    ChoiceSheet("Detection Sensitivity", AutoAmbientSensitivity.entries.toList(), settings.autoAmbientSensitivity,
+                                        label = { it.label }, onDismiss = { open = false }, onPick = vm::setAutoAmbientSensitivity)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1592,8 +1611,6 @@ private fun relative(time: Long): String =
 // Sound
 // ======================================================================
 
-private val bandLabels = listOf("Bass", "400", "1k", "2.5k", "6.3k", "16k")
-
 @Composable
 private fun SoundScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
     EqPanel(settings, vm)
@@ -1610,7 +1627,9 @@ private fun SoundScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
                 if (open) {
                     ChoiceSheet(
                         "Connection Priority",
-                        ConnectionPriority.entries.toList(),
+                        // Low Latency moves the headphones to LE Audio and needs pairing again, so it's
+                        // listed only while it's in use (set in Sony Sound Connect).
+                        ConnectionPriority.entries.filter { it != ConnectionPriority.LOW_LATENCY || settings.priority == it },
                         settings.priority,
                         label = { it.label },
                         detail = { it.detailFor(EarbudModel.active) },
@@ -1706,7 +1725,7 @@ private fun LevelMeter(vm: SunpodsViewModel, sensitive: Boolean) {
                         null -> "Listening…"
                         SafeListening.Level.NotPlaying -> "Play something to see the level"
                         SafeListening.Level.OnCall -> "Paused during calls"
-                        SafeListening.Level.NotWorn -> "Put both earbuds in"
+                        SafeListening.Level.NotWorn -> if (EarbudModel.active.headphones) "Put your headphones on" else "Put both earbuds in"
                         is SafeListening.Level.Db -> when {
                             loud -> "Loud. Turn it down for long listens"
                             db!! >= limit - 10 -> "Moderate"
@@ -1734,29 +1753,38 @@ private fun LevelMeter(vm: SunpodsViewModel, sensitive: Boolean) {
     }
 }
 
-/** The sound as a live curve, with sliders under it when the preset can be edited. */
+/**
+ * The sound as a live curve, with sliders under it when the preset can be edited. Bands, range,
+ * labels and presets come from the pair ([EqLayout]): CLEAR BASS and five bands on most, ten on the
+ * WH-1000XM6.
+ */
 @Composable
 private fun EqPanel(settings: DeviceSettings, vm: SunpodsViewModel) {
     val colors = MaterialTheme.colorScheme
-    val source = listOf(settings.clearBass ?: 0) + (settings.bands ?: List(5) { 0 })
-    var values by remember(settings.clearBass, settings.bands) { mutableStateOf(source) }
-    val editable = settings.eqPreset?.isCustomisable == true
-    val commit = { vm.setEqBands(values[0], values.drop(1)) }
+    val layout = remember(settings.functions1, settings.eqCap, settings.eqInfo) { settings.eqLayout }
+    val source = (if (layout.clearBass) listOf(settings.clearBass ?: 0) else emptyList()) +
+        (settings.bands?.takeIf { it.size == layout.bandCount } ?: List(layout.bandCount) { 0 })
+    var values by remember(settings.clearBass, settings.bands, layout) { mutableStateOf(source) }
+    val editable = layout.isEditable(settings.eqPresetCode)
+    fun commit(all: List<Int>) =
+        if (layout.clearBass) vm.setEqBands(all[0], all.drop(1)) else vm.setEqBands(null, all)
+    fun isClearBass(i: Int) = layout.clearBass && i == 0
 
     Column {
         SunCard {
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
-                Text(settings.eqPreset?.label ?: "—", style = MaterialTheme.typography.headlineSmall)
+                Text(layout.label(settings.eqPresetCode), style = MaterialTheme.typography.headlineSmall)
                 Spacer(Modifier.height(16.dp))
-                EqCurve(values, Modifier.fillMaxWidth().height(140.dp))
+                EqCurve(values, layout.max, Modifier.fillMaxWidth().height(140.dp))
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth()) {
-                    bandLabels.forEachIndexed { i, label ->
+                    layout.labels.forEachIndexed { i, label ->
                         Text(
                             label,
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (i == 0) colors.primary else colors.onSurfaceVariant,
+                            color = if (isClearBass(i)) colors.primary else colors.onSurfaceVariant,
                             textAlign = TextAlign.Center,
+                            maxLines = 1,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -1766,18 +1794,18 @@ private fun EqPanel(settings: DeviceSettings, vm: SunpodsViewModel) {
                         values.forEachIndexed { i, v ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    if (i == 0) "Clear Bass" else "${bandLabels[i]} Hz",
+                                    if (isClearBass(i)) "Clear Bass" else "${layout.labels[i]} Hz",
                                     style = MaterialTheme.typography.bodyMedium,
                                     modifier = Modifier.width(84.dp)
                                 )
                                 Slider(
                                     value = v.toFloat(),
                                     onValueChange = { new -> values = values.toMutableList().also { it[i] = new.roundToInt() } },
-                                    onValueChangeFinished = commit,
-                                    valueRange = -10f..10f,
-                                    steps = 19,
+                                    onValueChangeFinished = { commit(values) },
+                                    valueRange = layout.min.toFloat()..layout.max.toFloat(),
+                                    steps = layout.steps - 2,
                                     colors = quietSlider(),
-                                    modifier = Modifier.weight(1f).semantics { contentDescription = "${bandLabels[i]} band" }
+                                    modifier = Modifier.weight(1f).semantics { contentDescription = "${layout.labels[i]} band" }
                                 )
                                 Text(
                                     signed(v),
@@ -1790,29 +1818,31 @@ private fun EqPanel(settings: DeviceSettings, vm: SunpodsViewModel) {
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                val presets = EqPreset.entries.filter { it != EqPreset.MANUAL || settings.eqPreset == EqPreset.MANUAL }
+                // Only the presets these earbuds or headphones offer (the WH-1000XM6 ignores the classic ones).
+                val presets = layout.shown(settings.eqPresetCode)
                 Row(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    presets.forEach { preset ->
+                    presets.forEach { (code, name) ->
                         FilterChip(
-                            selected = settings.eqPreset == preset,
-                            onClick = { vm.setEqPreset(preset) },
-                            label = { Text(preset.label) },
+                            selected = settings.eqPresetCode == code,
+                            onClick = { vm.setEqPreset(code) },
+                            label = { Text(name) },
                             shape = CircleShape
                         )
                     }
                 }
                 Spacer(Modifier.height(8.dp))
+                val customise = layout.customise
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     if (editable) {
                         TextButton(onClick = {
-                            values = List(6) { 0 }
-                            vm.setEqBands(0, List(5) { 0 })
+                            values = List(layout.count) { 0 }
+                            commit(values)
                         }) { Text("Reset to Flat") }
-                    } else {
-                        FilledTonalButton(onClick = { vm.setEqPreset(EqPreset.CUSTOM_1) }) {
+                    } else if (customise != null) {
+                        FilledTonalButton(onClick = { vm.setEqPreset(customise) }) {
                             Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
                             Text("Customise")
@@ -1825,7 +1855,7 @@ private fun EqPanel(settings: DeviceSettings, vm: SunpodsViewModel) {
 }
 
 @Composable
-private fun EqCurve(values: List<Int>, modifier: Modifier) {
+private fun EqCurve(values: List<Int>, max: Int, modifier: Modifier) {
     val colors = MaterialTheme.colorScheme
     val line = colors.primary
     val fill = colors.primary.copy(alpha = 0.12f)
@@ -1839,7 +1869,7 @@ private fun EqCurve(values: List<Int>, modifier: Modifier) {
         val h = size.height
         val step = w / animated.size
         fun x(i: Int) = step * i + step / 2
-        fun y(v: Float) = h / 2 - v / 10f * (h / 2 - 8.dp.toPx())
+        fun y(v: Float) = h / 2 - v / max.coerceAtLeast(1) * (h / 2 - 8.dp.toPx())
         drawLine(grid, Offset(0f, h / 2), Offset(w, h / 2), 1.dp.toPx(), pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(8f, 8f)))
         val pts = listOf(Offset(0f, y(animated.first()))) + animated.indices.map { Offset(x(it), y(animated[it])) } + Offset(w, y(animated.last()))
         val path = Path().apply {
@@ -1924,7 +1954,7 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
     Group(
         null,
         rows = buildList {
-            add { PageRow(Icons.Rounded.Call, Page.CALLS, if (settings.leModeSupported == true) (if (le) "LE Audio" else "Classic") else null) }
+            add { PageRow(Icons.Rounded.Call, Page.CALLS, if (settings.leSwitchOffered) (if (le) "LE Audio" else "Classic") else null) }
             if (hasConnection) {
                 add { PageRow(Icons.Rounded.Bluetooth, Page.CONNECTION, when { le -> "One device"; multipoint == true -> "Two devices"; multipoint == false -> "One device"; else -> null }) }
             }
@@ -2374,7 +2404,7 @@ private fun UpdatesGroup(updateVm: SunpodsViewModel? = null) {
                         scope.launch {
                             val latest = Updates.refresh(context)
                             found = latest?.takeIf { Updates.isNewer(it.version, SunpodsInfo.VERSION) }
-                            updateVm?.setAvailableUpdate(found)
+                            updateVm?.setAvailableUpdate(found ?: Updates.available(context))
                             result = when {
                                 latest == null -> "Couldn't reach GitHub"
                                 found != null -> "${latest.version} is out"
@@ -2386,7 +2416,7 @@ private fun UpdatesGroup(updateVm: SunpodsViewModel? = null) {
                 }
             },
         ),
-        footer = "Once a day SunPods asks GitHub for a new version. Nothing else is sent."
+        footer = "Checks GitHub automatically in the background and when you open the app. Nothing else is sent."
     )
 }
 
@@ -2591,38 +2621,45 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
         ToggleRow(Icons.Rounded.Gesture, "Head Gestures", "", settings.headGestures, vm::setHeadGestures)
     }
     val phoneLe = remember { LeAudio.phoneSupports(context) }
-    if (settings.leModeSupported == true && phoneLe) rows += {
+    val leSwitch = settings.leSwitchOffered
+    val model = EarbudModel.fromName(settings.modelName) ?: EarbudModel.active
+    if (leSwitch && phoneLe) rows += {
         NavRow(Icons.Rounded.BluetoothAudio, "Connection Mode", if (le) "LE Audio" else "Classic") { choosing = true }
     }
-    // Earbuds that can do LE Audio on a phone that can't: say so instead of hiding it.
-    if (settings.leModeSupported == true && !phoneLe) rows += {
+    // Devices that can do LE Audio on a phone that can't: say so instead of hiding it.
+    if (leSwitch && !phoneLe) rows += {
         InfoRow("Connection Mode", "Classic")
     }
-    // A switch that didn't complete can leave the earbuds' LE Audio setting on while the phone
+    // A switch that didn't complete can leave the device's LE Audio setting on while the phone
     // still uses Classic, which turns off Connect to 2 devices.
     // Repair rows wait until a switch has had time to settle; mid-switch the links are meant to be in flux.
     val settling = remember(settings.readAt, tick) { SonyControlSessionManager.switchedRecently(context) }
     LaunchedEffect(settling) { if (settling) { delay(30_000); tick++ } }
     // Set to Classic but not connected at all, as after a switch the phone didn't finish.
     val classicUp = remember(settings.readAt, tick) { runCatching { context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.getProfileConnectionState(android.bluetooth.BluetoothProfile.A2DP) == android.bluetooth.BluetoothProfile.STATE_CONNECTED }.getOrDefault(false) }
-    if (!settling && !le && !classicUp) rows += {
-        NavRow(Icons.Rounded.RestartAlt, "Reconnect Your Earbuds", null, note = "Not connected") { switching = false }
+    if (leSwitch && !settling && !le && !classicUp) rows += {
+        NavRow(Icons.Rounded.RestartAlt, "Reconnect Your ${model.titleNoun}", null, note = "Not connected") { switching = false }
     }
-    // The reverse: the earbuds are set to Classic but one is still holding on to LE Audio.
-    if (!settling && le && (settings.leOn == false || SonyControlSessionManager.classicOnly(context))) rows += {
-        NavRow(Icons.Rounded.RestartAlt, "Finishing the Switch to Classic", null, note = "Case them for 10 seconds, then take them out") { tick++ }
+    // The reverse: the device is set to Classic but still holding on to LE Audio.
+    if (leSwitch && !settling && le && (settings.leOn == false || SonyControlSessionManager.classicOnly(context))) rows += {
+        NavRow(
+            Icons.Rounded.RestartAlt,
+            "Finishing the Switch to Classic",
+            null,
+            note = if (model.headphones) "Turn them off for 10 seconds, then back on" else "Case them for 10 seconds, then take them out"
+        ) { tick++ }
     }
-    if (!settling && settings.leOn == true && !le) rows += {
+    if (leSwitch && !settling && settings.leOn == true && !le) rows += {
         NavRow(Icons.Rounded.RestartAlt, "Finish Switching to Classic", null, note = "LE Audio is still on") { switching = false }
     }
     Group(
         null,
         footer = when {
-            settings.headGestures != null && settings.leModeSupported != true -> "With head gestures, nod to answer a call or shake your head to decline."
-            settings.leModeSupported != true -> null
+            settings.headGestures != null && !leSwitch -> "With head gestures, nod to answer a call or shake your head to decline."
+            !leSwitch -> null
             phoneLe -> "Nod to answer a call or shake your head to decline. LE Audio makes your voice clearer on calls."
-            android.os.Build.VERSION.SDK_INT < 33 -> "Your earbuds support LE Audio, but it needs Android 13 or later. They use Classic on this phone."
-            else -> "Your earbuds support LE Audio, but this phone doesn't, or it's turned off in Developer options. They use Classic on this phone."
+            android.os.Build.VERSION.SDK_INT < 33 -> "Your ${model.noun} support LE Audio, but it needs Android 13 or later. They use Classic on this phone."
+            else -> "Your ${model.noun} support LE Audio, but this phone doesn't, or it's turned off in Developer options. They use Classic on this phone."
         },
         rows = rows
     )
@@ -2639,8 +2676,9 @@ private fun CallsGroup(settings: DeviceSettings, vm: SunpodsViewModel) {
             title = { Text(if (on) "Switch to LE Audio?" else "Switch to Classic?") },
             text = {
                 Text(
-                    (if (on) "Your earbuds will reconnect using LE Audio. The first time, SunPods helps you pair them again. Connect to Two Devices and LDAC are off while LE Audio is on."
-                    else "Your earbuds will reconnect using Classic. You may need to pair them again.") + "\n\nWear both earbuds before you switch."
+                    (if (on) "Your ${model.noun} will reconnect using LE Audio. The first time, SunPods helps you pair them again. Connect to Two Devices and LDAC are off while LE Audio is on."
+                    else "Your ${model.noun} will reconnect using Classic. You may need to pair them again.") +
+                        "\n\n" + if (model.headphones) "Keep your headphones turned on before you switch." else "Wear both earbuds before you switch."
                 )
             },
             confirmButton = { TextButton(onClick = { confirm = null; switching = on }) { Text("Switch") } },

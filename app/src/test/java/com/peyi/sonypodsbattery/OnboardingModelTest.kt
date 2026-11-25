@@ -6,8 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OnboardingModelTest {
-    @Test fun `supportsLeAudio is enabled only for WF-1000XM5`() {
+    @Test fun `supportsLeAudio is enabled only for LE-capable models`() {
         assertTrue(EarbudModel.WF_1000XM5.supportsLeAudio)
+        assertTrue(EarbudModel.WH_1000XM6.supportsLeAudio)
         assertFalse(EarbudModel.WF_1000XM4.supportsLeAudio)
         assertFalse(EarbudModel.WF_C710N.supportsLeAudio)
         assertFalse(EarbudModel.WH_1000XM5.supportsLeAudio)
@@ -28,6 +29,7 @@ class OnboardingModelTest {
             ),
             withLe
         )
+        assertEquals(withLe, onboardingSteps(EarbudModel.WH_1000XM6, phoneSupportsLeAudio = true))
 
         val expectedWithoutLe = listOf(
             OnboardingStep.WELCOME,
@@ -39,6 +41,7 @@ class OnboardingModelTest {
             OnboardingStep.DONE,
         )
         assertEquals(expectedWithoutLe, onboardingSteps(EarbudModel.WF_1000XM5, phoneSupportsLeAudio = false))
+        assertEquals(expectedWithoutLe, onboardingSteps(EarbudModel.WH_1000XM6, phoneSupportsLeAudio = false))
         assertEquals(expectedWithoutLe, onboardingSteps(EarbudModel.WF_1000XM4, phoneSupportsLeAudio = true))
         assertEquals(expectedWithoutLe, onboardingSteps(EarbudModel.WF_C710N, phoneSupportsLeAudio = true))
         assertEquals(expectedWithoutLe, onboardingSteps(EarbudModel.WH_1000XM5, phoneSupportsLeAudio = true))
@@ -130,7 +133,7 @@ class OnboardingModelTest {
         assertTrue(earbuds.isNotEmpty())
         assertTrue(headphones.isNotEmpty())
         assertEquals(listOf(EarbudModel.WF_1000XM5, EarbudModel.WF_1000XM4, EarbudModel.WF_C710N), earbuds)
-        assertEquals(listOf(EarbudModel.WH_1000XM5), headphones)
+        assertEquals(listOf(EarbudModel.WH_1000XM5, EarbudModel.WH_1000XM6), headphones)
         // Switching back to earbuds must yield valid index bounds for the previous family size.
         val prevIndexInHeadphones = 0
         assertEquals(EarbudModel.WF_1000XM5, earbuds[prevIndexInHeadphones.coerceIn(0, earbuds.lastIndex)])
