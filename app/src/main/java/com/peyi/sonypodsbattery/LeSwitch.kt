@@ -85,7 +85,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
     val context = LocalContext.current
     val model = remember(settings.modelName) { EarbudModel.fromName(settings.modelName) ?: EarbudModel.current(context) }
     val scope = rememberCoroutineScope()
-    var state by remember { mutableStateOf<Switch>(Switch.Working("Updating your earbuds…")) }
+    var state by remember { mutableStateOf<Switch>(Switch.Working("Updating your ${model.noun}…")) }
     var flow by remember { mutableStateOf<Job?>(null) }
     var pairing by remember { mutableStateOf(false) }
     var shizuku by remember { mutableStateOf(ShizukuBluetooth.state()) }
@@ -129,7 +129,10 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
         }.getOrDefault(false)
     }
 
-    fun bothEarbudsIn(): Boolean = BatteryStore.load(context).let { (it.left ?: 0) in 1..100 && (it.right ?: 0) in 1..100 }
+    fun readyToSwitch(): Boolean = BatteryStore.load(context).let {
+        if (model.headphones) (it.left ?: 0) in 1..100
+        else (it.left ?: 0) in 1..100 && (it.right ?: 0) in 1..100
+    }
 
     fun toLe() {
         flow = scope.launch {
@@ -139,16 +142,22 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 LeAudio.Support.NOT_SUPPORTED -> {
                     log("phone doesn't support LE Audio (Android ${Build.VERSION.SDK_INT})")
                     state = Switch.Failed(
-                        if (Build.VERSION.SDK_INT < 33) "LE Audio needs Android 13 or later. Your earbuds stay on Classic."
-                        else "Your phone doesn't support LE Audio, or it's turned off in Developer options. Your earbuds stay on Classic."
+                        if (Build.VERSION.SDK_INT < 33) "LE Audio needs Android 13 or later. Your ${model.noun} stay on Classic."
+                        else "Your phone doesn't support LE Audio, or it's turned off in Developer options. Your ${model.noun} stay on Classic."
                     )
                     return@launch
                 }
             }
             // Levels only exist while connected; without a link "wear both earbuds" would be wrong.
             val connected = classicConnected(context) || LeAudio.anyConnected(context)
-            if (!connected) { state = Switch.Failed("Your earbuds aren't connected. Reconnect them in Controls > Calls first."); return@launch }
-            if (!bothEarbudsIn()) { state = Switch.Failed("Wear both earbuds, then try again."); return@launch }
+            if (!connected) { state = Switch.Failed("Your ${model.noun} aren't connected. Reconnect them in Controls > Calls first."); return@launch }
+            if (!readyToSwitch()) {
+                state = Switch.Failed(
+                    if (model.headphones) "Turn on your headphones and connect them, then try again."
+                    else "Wear both earbuds, then try again."
+                )
+                return@launch
+            }
             // Switching needs the phone's pairings changed, which only Shizuku lets SunPods do.
             // Without it nothing is sent to the earbuds, so they can't be left half switched.
             if (ShizukuBluetooth.state() != ShizukuBluetooth.State.READY) {
@@ -157,7 +166,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 state = Switch.PrepareShizuku
                 return@launch
             }
-            state = Switch.Working("Updating your earbuds…")
+            state = Switch.Working("Updating your ${model.noun}…")
             ShizukuWatch.start(context)
             // Checked again right before the earbuds change: the phone may have closed Shizuku.
             if (ShizukuBluetooth.state() != ShizukuBluetooth.State.READY) { pendingLe = true; state = Switch.PrepareShizuku; return@launch }
@@ -169,25 +178,25 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
             // A switch to Classic with Shizuku turns LE Audio off for the earbuds; allow it again.
             if (lePairingExists()) {
                 val allowed = ShizukuBluetooth.use(context) { sh -> EarbudAddresses.le(context).forEach { log("allow LE $it: ${sh.connectLe(it)}") }; true }
-                if (allowed != true) ShizukuWatch.markPending(context, "connect your earbuds on LE Audio")
+                if (allowed != true) ShizukuWatch.markPending(context, "connect your ${model.noun} on LE Audio")
             }
             // A phone that has never paired the earbuds' LE side can't reconnect by itself, so go
             // straight to pairing instead of waiting.
             val firstTime = !lePairingExists()
-            state = Switch.Working(if (firstTime) "Updating your earbuds…" else "Your earbuds are reconnecting. This can take up to a minute.")
+            state = Switch.Working(if (firstTime) "Updating your ${model.noun}…" else "Your ${model.noun} are reconnecting. This can take up to a minute.")
             if (waitUntil(if (firstTime) 4_000 else 60_000) { LeAudio.anyConnected(context) }) {
                 log("on LE Audio without pairing again")
-                state = Switch.Done("Your earbuds are now on LE Audio.")
+                state = Switch.Done("Your ${model.noun} are now on LE Audio.")
                 return@launch
             }
             log("LE Audio needs a new pairing (Shizuku ${ShizukuBluetooth.state()})")
             state = Switch.PairLe
             if (waitUntil(10 * 60_000L) { LeAudio.anyConnected(context) }) {
                 log("on LE Audio after pairing")
-                state = Switch.Done(if (closeOnSuccess) "Your earbuds are now on LE Audio." else "Your earbuds are now on LE Audio. Test your call mic to hear the difference.")
+                state = Switch.Done(if (closeOnSuccess) "Your ${model.noun} are now on LE Audio." else "Your ${model.noun} are now on LE Audio. Test your call mic to hear the difference.")
             } else {
                 // Some phones say they support LE Audio but only accept certain earbuds over it.
-                state = Switch.Failed("Your phone couldn't connect using LE Audio. It may not support LE Audio with these earbuds. Switch back to Classic to keep using them.", canRevert = true)
+                state = Switch.Failed("Your phone couldn't connect using LE Audio. It may not support LE Audio with these ${model.noun}. Switch back to Classic to keep using them.", canRevert = true)
             }
         }
     }
@@ -205,7 +214,7 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 state = Switch.PrepareShizuku
                 return@launch
             }
-            state = Switch.Working("Updating your earbuds…")
+            state = Switch.Working("Updating your ${model.noun}…")
             ShizukuWatch.start(context)
             if (ShizukuBluetooth.state() != ShizukuBluetooth.State.READY) { pendingLe = false; state = Switch.PrepareShizuku; return@launch }
             if (!switchEarbuds(false)) {
@@ -213,46 +222,58 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 // phone keeps dropping). With Shizuku, pair them again; hold the touch sensors for
                 // pairing mode if they've left it.
                 if (ShizukuBluetooth.state() == ShizukuBluetooth.State.READY) {
-                    log("earbuds not reachable, pairing Classic again")
+                    log("${model.noun} not reachable, pairing Classic again")
                     SonyControlSessionManager.releaseLe(context)
-                    state = Switch.Working("Reconnecting… If this takes a while, put your earbuds in and hold both touch sensors for 5 seconds.")
+                    state = Switch.Working(
+                        if (model.headphones) "Reconnecting… If this takes a while, turn your headphones off and hold the power button for 5 seconds."
+                        else "Reconnecting… If this takes a while, put your earbuds in and hold both touch sensors for 5 seconds."
+                    )
                     if (finishClassicWithShizuku(justSwitched = false)) {
                         // The phone is on Classic now, but the earbuds may still be set to LE: they
                         // sometimes ignore the switch over LE while settling in. Over Classic they
                         // take it, then drop and come back, which the repair below handles.
                         ClassicRepair.syncSetting(context)
-                        state = Switch.Done("Your earbuds are connected on Classic.")
+                        state = Switch.Done("Your ${model.noun} are connected on Classic.")
                         return@launch
                     }
-                    state = Switch.Failed("Couldn't reach your earbuds. Put them in your ears and try again.")
+                    state = Switch.Failed(
+                        if (model.headphones) "Couldn't reach your headphones. Turn them on and try again."
+                        else "Couldn't reach your earbuds. Put them in your ears and try again."
+                    )
                     return@launch
                 }
-                state = Switch.Failed("Couldn't switch to Classic. Keep both earbuds in your ears and try again.")
+                state = Switch.Failed(
+                    if (model.headphones) "Couldn't switch to Classic. Keep your headphones turned on and try again."
+                    else "Couldn't switch to Classic. Keep both earbuds in your ears and try again."
+                )
                 return@launch
             }
             // Let go of the earbuds' LE side, or they stay on LE Audio waiting for the phone.
             SonyControlSessionManager.releaseLe(context)
-            state = Switch.Working("Your earbuds are switching to Classic. This can take up to a minute.")
+            state = Switch.Working("Your ${model.noun} are switching to Classic. This can take up to a minute.")
             if (ShizukuBluetooth.state() == ShizukuBluetooth.State.READY) {
                 if (finishClassicWithShizuku()) {
-                    state = Switch.Done("Your earbuds are now on Classic.")
+                    state = Switch.Done("Your ${model.noun} are now on Classic.")
                     return@launch
                 }
                 log("Shizuku couldn't finish the switch, showing the steps")
             } else {
                 if (waitUntil(25_000) { classicConnected(context) && !LeAudio.anyConnected(context) }) {
                     log("on Classic without pairing again")
-                    state = Switch.Done("Your earbuds are now on Classic.")
+                    state = Switch.Done("Your ${model.noun} are now on Classic.")
                     return@launch
                 }
                 if (LeAudio.anyConnected(context)) {
-                    // Without Shizuku the phone can't be told to let go; the case restarts the earbuds.
-                    log("an earbud is still on LE Audio, asking for the case")
-                    state = Switch.Working("Almost done. Put both earbuds in the case, close the lid for 10 seconds, then take them out.")
+                    // Without Shizuku the phone can't be told to let go; restart to drop the LE link.
+                    log("LE Audio still connected, asking for restart")
+                    state = Switch.Working(
+                        if (model.headphones) "Almost done. Turn your headphones off for 10 seconds, then turn them back on."
+                        else "Almost done. Put both earbuds in the case, close the lid for 10 seconds, then take them out."
+                    )
                 }
                 if (waitUntil(90_000) { classicConnected(context) && !LeAudio.anyConnected(context) }) {
                     log("on Classic without pairing again")
-                    state = Switch.Done("Your earbuds are now on Classic.")
+                    state = Switch.Done("Your ${model.noun} are now on Classic.")
                     return@launch
                 }
             }
@@ -260,9 +281,9 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
             state = Switch.PairClassic
             if (waitUntil(10 * 60_000L) { classicConnected(context) }) {
                 log("on Classic after pairing")
-                state = Switch.Done("Your earbuds are now on Classic.")
+                state = Switch.Done("Your ${model.noun} are now on Classic.")
             } else {
-                state = Switch.Failed("Your phone isn't connected to your earbuds yet. Pair them in Bluetooth settings.")
+                state = Switch.Failed("Your phone isn't connected to your ${model.noun} yet. Pair them in Bluetooth settings.")
             }
         }
     }
@@ -411,8 +432,8 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
             Text(
                 when (s) {
                     Switch.PrepareShizuku -> "Turn On Shizuku"
-                    Switch.PairLe -> "Pair Your Earbuds for LE Audio"
-                    Switch.PairClassic -> "Pair Your Earbuds for Classic"
+                    Switch.PairLe -> "Pair Your ${model.titleNoun} for LE Audio"
+                    Switch.PairClassic -> "Pair Your ${model.titleNoun} for Classic"
                     else -> "Switching to $target"
                 },
                 style = MaterialTheme.typography.titleLarge
@@ -423,13 +444,13 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 Switch.PrepareShizuku -> {
                     val running = shizuku != ShizukuBluetooth.State.NOT_RUNNING
                     Text(
-                        "Switching between Classic and LE Audio means pairing your earbuds again. Shizuku, a free helper app, lets SunPods do it for you. Nothing changes until Shizuku is running.",
+                        "Switching between Classic and LE Audio means pairing your ${model.noun} again. Shizuku, a free helper app, lets SunPods do it for you. Nothing changes until Shizuku is running.",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(Modifier.height(16.dp))
                     Checklist("Install Shizuku", "Free on Google Play", done = shizukuInstalled || running, action = "Get") { ShizukuBluetooth.openStore(context) }
                     Checklist("Start Shizuku", "In Shizuku, choose Start via Wireless debugging. Start it again after your phone restarts", done = running, action = "Open", enabled = shizukuInstalled) { ShizukuBluetooth.open(context) }
-                    Checklist("Allow SunPods", "Lets SunPods pair your earbuds through Shizuku", done = shizuku == ShizukuBluetooth.State.READY, action = "Allow", enabled = running) { ShizukuBluetooth.requestPermission() }
+                    Checklist("Allow SunPods", "Lets SunPods pair your ${model.noun} through Shizuku", done = shizuku == ShizukuBluetooth.State.READY, action = "Allow", enabled = running) { ShizukuBluetooth.requestPermission() }
                     Checklist("Keep Shizuku running", "In Battery, choose Unrestricted so your phone doesn't close it", done = shizukuUnrestricted, action = "Open", enabled = shizukuInstalled) { ShizukuWatch.openAppSettings(context, ShizukuBluetooth.PACKAGE) }
                     Checklist("Keep SunPods running", "In Battery, choose Unrestricted so SunPods can fix your connection by itself", done = sunpodsUnrestricted, action = "Open") { ShizukuWatch.openAppSettings(context, context.packageName) }
                     Spacer(Modifier.height(20.dp))
@@ -440,15 +461,20 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                 Switch.PairLe -> {
                     RenderClip(
                         budArt(settings).pairClip,
-                        "The case turns round, the button on the back is held down, then the light on the front flashes blue.",
+                        model.pairClipDescription,
                         Modifier.fillMaxWidth().height(200.dp)
                     )
                     Spacer(Modifier.height(8.dp))
-                    Text("Your earbuds are on LE Audio. Pair them with your phone again to use it.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Your ${model.noun} are on LE Audio. Pair them with your phone again to use it.", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(16.dp))
                     if (shizuku == ShizukuBluetooth.State.READY && !manual) {
-                        Step(1, "Put both earbuds in the case and keep the lid open.")
-                        Step(2, "Hold the button on the back of the case until the light flashes blue. SunPods pairs them as soon as it sees them.")
+                        if (model.headphones) {
+                            Step(1, "Turn the headphones off.")
+                            Step(2, "Press and hold the power button for about 5 seconds, until the light flashes blue. SunPods pairs them as soon as it sees them.")
+                        } else {
+                            Step(1, "Put both earbuds in the case and keep the lid open.")
+                            Step(2, "Hold the button on the back of the case until the light flashes blue. SunPods pairs them as soon as it sees them.")
+                        }
                         Step(3, "If your phone asks to pair, tap Pair.")
                         val error = pairError
                         if (error != null) {
@@ -460,42 +486,54 @@ internal fun LeSwitchSheet(on: Boolean, settings: DeviceSettings, closeOnSuccess
                         }
                     } else {
                         Step(1, "Open Bluetooth settings. Tap the settings icon next to ${model.displayName}, then tap Unpair. Unpair LE_${model.displayName} too if it's there.")
-                        Step(2, "Put both earbuds in the case and keep the lid open. Hold the button on the back of the case until the light flashes blue.")
+                        Step(
+                            2,
+                            if (model.headphones) "Turn the headphones off, then press and hold the power button for about 5 seconds until the light flashes blue."
+                            else "Put both earbuds in the case and keep the lid open. Hold the button on the back of the case until the light flashes blue."
+                        )
                         Step(3, "Come back here and tap Pair Now. If your phone asks to pair, tap Pair.")
-                        PairingStatus(if (pairing) "Pairing your earbuds" else "Waiting for LE Audio")
+                        PairingStatus(if (pairing) "Pairing your ${model.noun}" else "Waiting for LE Audio")
                         Spacer(Modifier.height(20.dp))
                         Button(onClick = { pairLe() }, enabled = !pairing, modifier = Modifier.fillMaxWidth()) { Text("Pair Now") }
                         Spacer(Modifier.height(8.dp))
                         OutlinedButton(onClick = openBluetooth, modifier = Modifier.fillMaxWidth()) { Text("Open Bluetooth Settings") }
                     }
-                    ShizukuNote(shizuku)
+                    ShizukuNote(shizuku, model.noun)
                     Spacer(Modifier.height(8.dp))
                     TextButton(onClick = { toClassic() }, modifier = Modifier.fillMaxWidth()) { Text("Go Back to Classic") }
                 }
                 Switch.PairClassic -> {
                     RenderClip(
                         budArt(settings).pairClip,
-                        "The case turns round, the button on the back is held down, then the light on the front flashes blue.",
+                        model.pairClipDescription,
                         Modifier.fillMaxWidth().height(200.dp)
                     )
                     Spacer(Modifier.height(8.dp))
-                    Text("Your earbuds are on Classic. Pair them with your phone again to use it.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Your ${model.noun} are on Classic. Pair them with your phone again to use it.", style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(16.dp))
                     if (shizuku == ShizukuBluetooth.State.READY) {
-                        Step(1, "Put both earbuds in the case and keep the lid open. Hold the button on the back of the case until the light flashes blue.")
+                        Step(
+                            1,
+                            if (model.headphones) "Turn the headphones off, then press and hold the power button for about 5 seconds until the light flashes blue."
+                            else "Put both earbuds in the case and keep the lid open. Hold the button on the back of the case until the light flashes blue."
+                        )
                         Step(2, "Tap Pair Now. If your phone asks to pair, tap Pair.")
-                        PairingStatus(if (pairing) "Pairing your earbuds" else "Waiting for your earbuds")
+                        PairingStatus(if (pairing) "Pairing your ${model.noun}" else "Waiting for your ${model.noun}")
                         Spacer(Modifier.height(20.dp))
                         Button(onClick = { pairClassic() }, enabled = !pairing, modifier = Modifier.fillMaxWidth()) { Text("Pair Now") }
                     } else {
                         Step(1, "Open Bluetooth settings. Unpair every ${model.displayName} in the list.")
-                        Step(2, "Put both earbuds in the case and keep the lid open. Hold the button on the back of the case until the light flashes blue.")
+                        Step(
+                            2,
+                            if (model.headphones) "Turn the headphones off, then press and hold the power button for about 5 seconds until the light flashes blue."
+                            else "Put both earbuds in the case and keep the lid open. Hold the button on the back of the case until the light flashes blue."
+                        )
                         Step(3, "Under Available devices, tap ${model.displayName}.")
-                        PairingStatus("Waiting for your earbuds")
+                        PairingStatus("Waiting for your ${model.noun}")
                         Spacer(Modifier.height(20.dp))
                         Button(onClick = openBluetooth, modifier = Modifier.fillMaxWidth()) { Text("Open Bluetooth Settings") }
                     }
-                    ShizukuNote(shizuku)
+                    ShizukuNote(shizuku, model.noun)
                 }
                 is Switch.Done -> {
                     Text(s.message, style = MaterialTheme.typography.bodyLarge)
@@ -551,11 +589,11 @@ private fun PairingStatus(text: String) {
 }
 
 @Composable
-private fun ShizukuNote(state: ShizukuBluetooth.State) {
+private fun ShizukuNote(state: ShizukuBluetooth.State, noun: String) {
     when (state) {
         ShizukuBluetooth.State.READY -> {
             Spacer(Modifier.height(12.dp))
-            Text("SunPods will remove the old pairing and pair both earbuds using Shizuku.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("SunPods will remove the old pairing and pair your $noun using Shizuku.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         ShizukuBluetooth.State.NEEDS_PERMISSION -> {
             Spacer(Modifier.height(8.dp))
@@ -598,10 +636,8 @@ internal object LePairing {
     suspend fun alsoPairLe(context: Context, log: (String) -> Unit): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         if (ShizukuBluetooth.state() != ShizukuBluetooth.State.READY) return@withContext false
         if (LeAudio.support(context) == LeAudio.Support.NOT_SUPPORTED) return@withContext false
-        // Earbuds without LE Audio (the WF-C710N) have no LE side; saved addresses may be another pair's.
+        // Devices without LE Audio (like WF-C710N) have no LE side; saved addresses may be another pair's.
         if (SettingsStore.load(context).leModeSupported == false) return@withContext false
-        // Headphones don't pair an LE side this way; they go to LE Audio through Sony Sound Connect.
-        if (EarbudModel.active.headphones) return@withContext false
         val le = EarbudAddresses.le(context).filter { EarbudAddresses.isRandom(it) }
         if (le.isEmpty()) return@withContext false
         ShizukuBluetooth.use(context) { sh ->

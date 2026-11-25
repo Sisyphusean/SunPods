@@ -390,11 +390,8 @@ data class DeviceSettings(
     /** True only when the earbuds' own list says they have it. */
     internal fun listed(feature: Feature): Boolean = functions?.let(feature.test) == true
 
-    /**
-     * SunPods' own switch between Classic and LE Audio ([LeSwitchSheet]) walks through earbud steps
-     * (the case, both earbuds in), so headphones don't get it: they switch in Sony Sound Connect.
-     */
-    val leSwitchOffered: Boolean get() = leModeSupported == true && !(EarbudModel.fromName(modelName) ?: EarbudModel.active).headphones
+    /** True when the connected device supports Sony's Classic / LE Audio switch (`0x42`). */
+    val leSwitchOffered: Boolean get() = leModeSupported == true
 }
 
 /** Features SunPods shows only when the earbuds list them (Sound Connect does the same). */

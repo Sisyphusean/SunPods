@@ -216,9 +216,9 @@ class SimulatedWh1000xm6Test {
         for (f in listOf(Feature.TOUCH, Feature.FIT_TEST, Feature.WIND_REDUCTION))
             assertFalse(f.name, r.has(f))
         assertNull(r.windAuto)
-        // The headphones have the LE Audio setting, but SunPods' switch is for earbuds.
+        // Every LE-capable device offers SunPods' LE Audio switch and onboarding flow.
         assertEquals(true, r.leModeSupported)
-        assertFalse(r.leSwitchOffered)
+        assertTrue(r.leSwitchOffered)
         // The per-side touch read and the earbud noise cycle were never asked for.
         assertFalse(sim.asked(0xf6, 0x03)); assertFalse(sim.asked(0xfa, 0x03))
         assertTrue(sim.asked(0x66, 0x30))

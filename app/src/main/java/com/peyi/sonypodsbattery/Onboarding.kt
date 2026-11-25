@@ -1079,11 +1079,6 @@ private fun Levels(battery: BatteryState, model: EarbudModel) {
 /** Offers LE Audio right after pairing, using the same switch as Controls (Shizuku first). */
 @Composable
 private fun LeAudioStep(vm: SunpodsViewModel, model: EarbudModel, onNext: () -> Unit) {
-    // Headphones go to LE Audio through Sony Sound Connect; the switch here walks through earbud steps.
-    if (model.headphones) {
-        LaunchedEffect(Unit) { onNext() }
-        return
-    }
     val context = LocalContext.current
     val settings by vm.settings.collectAsState()
     var switching by remember { mutableStateOf(false) }
