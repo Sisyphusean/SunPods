@@ -115,11 +115,25 @@ class SimulatedWf1000xm4Test {
         assertEquals(false, r.promptsOn)
     }
 
+    @Test fun `multipoint connects two devices and lists paired devices`() {
+        val (sim, s) = session()
+        var r = SonyFeatures.readAll(s, DeviceSettings())
+        assertEquals(setOf("MULTIPOINT_SETTING"), r.general!!.map { it.key }.toSet())
+        assertEquals(false, r.general!!.first { it.key == "MULTIPOINT_SETTING" }.on)
+        r = SonyFeatures.setGeneral(s, r, 0xd1, on = true)
+        assertEquals(true, r.general!!.first { it.key == "MULTIPOINT_SETTING" }.on)
+        assertTrue(sim.sent("98 00 07 01"))
+        val paired = Multipoint.read(s)!!
+        assertEquals(1, paired.list.size)
+        assertEquals("Pixel", paired.list.first().name)
+        assertEquals("AA:BB:CC:DD:EE:01", paired.list.first().address)
+    }
+
     @Test fun `full read shows what the earbuds have and nothing they lack`() {
         val (sim, s) = session(color = 0x03)
         val r = SonyFeatures.readAll(s, DeviceSettings())
         assertEquals("WF-1000XM4", r.modelName)
-        assertEquals("1.4.2", r.firmware)
+        assertEquals("2.1.0", r.firmware)
         assertEquals(0x03, r.colorCode)
         assertEquals("LDAC", r.codec)
         assertEquals(true, r.dseeOn)

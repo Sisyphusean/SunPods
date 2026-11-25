@@ -408,6 +408,7 @@ private fun Page(
             Text(body, style = MaterialTheme.typography.bodyLarge, color = colors.onSurfaceVariant, textAlign = TextAlign.Center)
             Spacer(Modifier.height(24.dp))
             content()
+            Spacer(Modifier.height(16.dp))
         }
         if (primary != null) {
             Button(onClick = onPrimary, enabled = primaryEnabled, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text(primary) }

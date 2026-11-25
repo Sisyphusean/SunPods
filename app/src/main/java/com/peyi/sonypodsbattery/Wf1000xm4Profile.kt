@@ -1,14 +1,16 @@
 package com.peyi.sonypodsbattery
 
 /**
- * Simulated WF-1000XM4 earbuds on firmware 1.4.2, from recorded replies (Gadgetbridge issue captures;
- * docs/protocol/wf1000xm4_profile.md section 8). The earbuds' address and IDs are made up.
+ * Simulated WF-1000XM4 earbuds on firmware 2.1.0, built from recorded firmware 1.4.2 replies
+ * (Gadgetbridge issue captures; docs/protocol/wf1000xm4_profile.md section 8) plus Sound Connect's
+ * 2.x multipoint general setting and paired-device table records. The earbuds' address and IDs are
+ * made up.
  *
  * What differs from the WF-1000XM5: noise control on type 0x15 with the wind byte, Speak-to-Chat on
  * type 02 with voice focus, touch presets 00 / 20 / 10 / ff (noise control is 00, and Volume Control
  * is a whole-sensor preset), voice prompts without volume (T2 0x41), sound quality mode on type 00,
- * and no LE Audio, multipoint, sidetone, head gestures or Safe Listening. No change asks for a
- * confirmation on 1.4.2.
+ * and no LE Audio, sidetone, head gestures or Safe Listening. Multipoint reconnects and asks for
+ * confirmation (0x07); noise control and other settings do not ask on 1.4.2.
  */
 internal object Wf1000xm4Profile {
     /** [color]: Sony's colour code (0x01 Black, 0x03 Platinum Silver). */
@@ -18,11 +20,11 @@ internal object Wf1000xm4Profile {
             12 01 00 01 00 00 00 00 00
             12 03 00 05 11 30 32 3a 30 30 3a 30 30 3a 30 30 3a 30 30 3a 34 30
             12 05 01 0a 57 46 2d 31 30 30 30 58 4d 34
-            12 05 02 05 31 2e 34 2e 32
+            12 05 02 05 32 2e 31 2e 30
             12 05 03 30 ${"%02x".format(color)}
             12 05 04 05 10 01 40 80 60
-            12 07 00 1b 10 ff 12 ff 13 ff 14 ff 23 ff 25 15 11 ff 27 ff 29 ff 2a ff 92 ff 32 1a 50 07 68 03 70 01 90 ff a1 08 c1 ff e1 09 e2 0a f1 17 f2 05 f3 0f f4 0d 93 ff f6 14 f9 1b
-            14 07 00 01 41 18
+            12 07 00 1c 10 ff 12 ff 13 ff 14 ff 23 ff 25 15 11 ff 27 ff 29 ff 2a ff 92 ff 32 1a 50 07 68 03 70 01 90 ff a1 08 c1 ff d1 20 e1 09 e2 0a f1 17 f2 05 f3 0f f4 0d 93 ff f6 14 f9 1b
+            14 07 00 02 41 18 32 ff
             12 13 01 01 01
             12 13 02 10
             12 13 03 02 01
@@ -66,10 +68,25 @@ internal object Wf1000xm4Profile {
             12 a7 20 0f
             12 a7 21 06
             12 93 03 00
+            12 d1 d1 00 01 12 4d 55 4c 54 49 50 4f 49 4e 54 5f 53 45 54 54 49 4e 47 00
+            12 d3 d1 00
+            12 d7 d1 00 01
             14 41 01 03 00 00 00 01 0f 01 02 03 04 05 06 07 08 09 0a 0b 0d 0f 10 f0
             14 43 01 00 00
             14 47 01 00 01
+            14 31 00 08 02 00
+            14 31 02 08 02 00
+            14 33 00 00 00
+            14 37 00 01 41 41 3a 42 42 3a 43 43 3a 44 44 3a 45 45 3a 30 31 01 05 50 69 78 65 6c 01
         """,
+        confirm = { _, table, p ->
+            when {
+                table != SonyProtocol.DATA_MDR || p.size < 2 -> null
+                // Connect to Two Devices reconnects the earbuds, so they ask first.
+                SimProfiles.u(p[0]) == 0xd8 && SimProfiles.u(p[1]) == 0xd1 -> 0x07
+                else -> null
+            }
+        },
         onSet = { state, table, p ->
             // Automatic wind noise reduction: the app writes 03, the earbuds report 05 (recorded).
             if (table == SonyProtocol.DATA_MDR && p.size >= 8 && SimProfiles.u(p[0]) == 0x68 && SimProfiles.u(p[1]) == 0x15 && SimProfiles.u(p[5]) == 0x03) {

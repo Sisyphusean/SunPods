@@ -14,30 +14,32 @@
 
 const FINISHES = {
   black: {
-    shell: [0.036, 0.036, 0.039],
-    face: [0.044, 0.044, 0.048],
-    tip: [0.042, 0.042, 0.046],
+    shell: [0.011, 0.011, 0.013],
+    face: [0.015, 0.015, 0.017],
+    tip: [0.013, 0.013, 0.015],
     metal: [0.77, 0.50, 0.34],
+    slitRim: [0.16, 0.12, 0.09],
     metalIn: [0.008, 0.008, 0.009],
     print: [0.75, 0.53, 0.33],
-    caseShell: [0.038, 0.038, 0.041],
-    caseInner: [0.022, 0.022, 0.024],
+    caseShell: [0.012, 0.012, 0.014],
+    caseInner: [0.008, 0.008, 0.009],
     casePrint: [0.34, 0.32, 0.30],
     lift: [0, 0, 0],
-    seatShade: [0.72, 0.72, 0.72],
+    seatShade: [0.78, 0.78, 0.78],
     sparkle: [0, 0, 0],
   },
   silver: {
-    shell: [0.585, 0.565, 0.505],
-    face: [0.660, 0.638, 0.570],
-    tip: [0.460, 0.448, 0.415],
+    shell: [0.50, 0.48, 0.43],
+    face: [0.56, 0.54, 0.48],
+    tip: [0.36, 0.35, 0.32],
     metal: [0.75, 0.63, 0.36],
+    slitRim: [0.38, 0.35, 0.28],
     metalIn: [0.018, 0.018, 0.016],
     print: [0.64, 0.52, 0.28],
-    caseShell: [0.605, 0.585, 0.522],
-    caseInner: [0.495, 0.478, 0.425],
+    caseShell: [0.52, 0.50, 0.45],
+    caseInner: [0.42, 0.40, 0.36],
     casePrint: [0.58, 0.48, 0.28],
-    lift: [0.025, 0.025, 0.025],
+    lift: [0, 0, 0],
     seatShade: [0.88, 0.88, 0.88],
     sparkle: [1, 1, 1],
   },
@@ -55,9 +57,9 @@ const BUD0 = {
   nozzle: { from: [0.24, -0.25, -0.47], dir: [0.24, 0.02, -1.0], len: 0.28, r0: 0.23, r1: 0.15 },
   blend: { chin: 0.10, back: 0.14, neck: 0.12, face: 0.03 },
   core: [0.18, -0.20, -0.38],
-  tip: { at: 0.22, len: 0.34, r: 0.235, rBack: 0.045, rFront: 0.075, hole: 0.075, holeDepth: 0.06 },
+  tip: { at: 0.22, len: 0.31, r: 0.228, rBack: 0.042, rFront: 0.095, hole: 0.072, holeDepth: 0.06 },
   boss: { at: [0.30, -0.44, -0.04], dir: [0.06, -0.14, 1.0], r: 0.118, len: 0.175, ring: [0.60, 0.38], collar: 0.006 },
-  slit: { th: 120, rad: 0.374, len: 0.145, w: 0.032, rim: 0.007 },
+  slit: { th: 120, rad: 0.374, len: 0.115, w: 0.024, rim: 0.0035 },
   logo: { y0: 0.03, y1: 0.30, z: -0.16, h: 0.075 },
   inner: {
     contacts: [[0.02, -0.34], [0.09, -0.39], [0.16, -0.33]],
@@ -133,7 +135,7 @@ function makeResinGrainTextures(THREE, maxAniso = 4) {
   if (typeof document === 'undefined') {
     const data = new Uint8Array(size * size * 4);
     for (let i = 0; i < size * size; i++) {
-      const v = Math.round((0.72 + (hash2d(i % size, Math.floor(i / size)) - 0.5) * 0.16) * 255);
+      const v = Math.round((0.50 + (hash2d(i % size, Math.floor(i / size)) - 0.5) * 0.16) * 255);
       data[i * 4] = data[i * 4 + 1] = data[i * 4 + 2] = v;
       data[i * 4 + 3] = 255;
     }
@@ -160,7 +162,7 @@ function makeResinGrainTextures(THREE, maxAniso = 4) {
       const fine = hash2d(x, y);
       const val = 0.5 * cell + 0.5 * fine;
       const bByte = Math.round((0.40 + val * 0.28) * 255);
-      const rByte = Math.round((0.72 + (1 - val) * 0.18) * 255);
+      const rByte = Math.round((0.50 + (1 - val) * 0.18) * 255);
       const idx = (y * size + x) * 4;
       bImg.data[idx] = bImg.data[idx + 1] = bImg.data[idx + 2] = bByte;
       bImg.data[idx + 3] = 255;
@@ -278,26 +280,26 @@ export function createWF1000XM4(ctx) {
   atlas.minFilter = THREE.LinearMipmapLinearFilter;
   const ATL = { sony: [0.04, 0.03, 0.96, 0.47], markL: [0, 0.5, 0.25, 1], markR: [0.25, 0.5, 0.5, 1] };
 
-  // Materials: recycled resin PBR with clearcoat = 0, matte roughness >= 0.72.
+  // Materials: satin-matte recycled resin PBR (clearcoat = 0 avoids flat case-lid studio glare).
   const grain = makeResinGrainTextures(THREE, 4);
   const M = {};
   const P = (o) => new THREE.MeshPhysicalMaterial(o);
-  const resinMat = (roughness, sheen = 0.08) => P({
+  const resinMat = (roughness, sheen = 0.02) => P({
     roughness,
     metalness: 0,
     roughnessMap: grain.rough,
     bumpMap: grain.bump,
-    bumpScale: 0.0022,
+    bumpScale: 0.0014,
     specularIntensity: 0.42,
     sheen,
     sheenRoughness: 0.85,
-    sheenColor: new THREE.Color(0.08, 0.08, 0.08),
+    sheenColor: new THREE.Color(0.03, 0.03, 0.03),
     clearcoat: 0,
   });
 
-  M.shell = resinMat(0.78, 0.06);
-  M.shellCase = resinMat(0.84, 0.05);
-  M.face = patched(resinMat(0.72, 0.08), 'xm4-face', { uSparkle: { value: 0 } }, {
+  M.shell = resinMat(0.56, 0.02);
+  M.shellCase = resinMat(0.64, 0.02);
+  M.face = patched(resinMat(0.48, 0.03), 'xm4-face', { uSparkle: { value: 0 } }, {
     pars: 'uniform float uSparkle;\nfloat xm4Hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }\n',
     after: {
       color_fragment: `
@@ -308,11 +310,12 @@ export function createWF1000XM4(ctx) {
 }`,
     },
   });
-  M.faceCase = resinMat(0.80, 0.06);
+  M.faceCase = resinMat(0.56, 0.02);
   M.discEdge = P({ roughness: 0.42, metalness: 0, specularIntensity: 0.55, clearcoat: 0 });
   M.groove = P({ roughness: 0.90, metalness: 0, clearcoat: 0 });
 
   M.metal = P({ metalness: 1, roughness: 0.28, clearcoat: 0 });
+  M.slitRim = P({ metalness: 0.65, roughness: 0.40, clearcoat: 0 });
   M.metalFace = P({ metalness: 1, roughness: 0.22, clearcoat: 0 });
   M.metalIn = P({ roughness: 0.65, metalness: 0, clearcoat: 0 });
   M.collar = P({ roughness: 0.78, metalness: 0, clearcoat: 0 });
@@ -386,12 +389,12 @@ export function createWF1000XM4(ctx) {
   })();
 
   M.tip = patched(P({
-    roughness: 0.90,
+    roughness: 0.84,
     metalness: 0,
     specularIntensity: 0.35,
-    sheen: 0.85,
-    sheenRoughness: 0.65,
-    sheenColor: new THREE.Color(0.09, 0.09, 0.09),
+    sheen: 0.22,
+    sheenRoughness: 0.72,
+    sheenColor: new THREE.Color(0.04, 0.04, 0.04),
     clearcoat: 0,
   }), 'xm4-foam', { uTipO: { value: tipAxis.o }, uTipD: { value: tipAxis.d } }, {
     pars: `uniform vec3 uTipO, uTipD;
@@ -428,12 +431,23 @@ float xm4N(vec3 p) {
     BUD.inner.sensorH * BH,
   );
 
-  // Case materials (opaque by default -> clean early-Z rejection).
-  M.caseShell = resinMat(0.76, 0.06);
-  M.caseRim = P({ roughness: 0.80, metalness: 0, clearcoat: 0 });
-  M.caseBaseRim = resinMat(0.76, 0.05);
-  M.caseInner = resinMat(0.84, 0.04);
-  M.casePocket = resinMat(0.88, 0.03);
+  // Case materials (opaque by default; higher true roughness avoids ceiling-light blowout on the flat lid).
+  const caseMat = (roughness) => P({
+    roughness,
+    metalness: 0,
+    bumpMap: grain.bump,
+    bumpScale: 0.0014,
+    specularIntensity: 0.18,
+    sheen: 0.02,
+    sheenRoughness: 0.85,
+    sheenColor: new THREE.Color(0.03, 0.03, 0.03),
+    clearcoat: 0,
+  });
+  M.caseShell = caseMat(0.84);
+  M.caseRim = P({ roughness: 0.78, metalness: 0, clearcoat: 0 });
+  M.caseBaseRim = caseMat(0.84);
+  M.caseInner = caseMat(0.88);
+  M.casePocket = caseMat(0.90);
   M.caseRecess = P({ color: lin([0.012, 0.012, 0.014]), roughness: 0.88, metalness: 0, clearcoat: 0 });
   M.casePrint = P({
     roughness: 0.28,
@@ -691,11 +705,13 @@ float xm4N(vec3 p) {
     }
     for (let k = 1; k <= 6; k++) {
       const t = k / 7;
-      prof.push([R + 0.012 * R * Math.sin(Math.PI * t), rb + (L - rb - rf) * t]);
+      const rAt = R * (1 - 0.20 * t);
+      prof.push([rAt + 0.008 * R * Math.sin(Math.PI * t), rb + (L - rb - rf) * t]);
     }
+    const rTip = R * 0.80;
     for (let k = 0; k <= 10; k++) {
       const a = (k / 10) * (Math.PI / 2);
-      prof.push([R - rf + rf * Math.cos(a), L - rf + rf * Math.sin(a)]);
+      prof.push([rTip - rf + rf * Math.cos(a), L - rf + rf * Math.sin(a)]);
     }
     prof.push([ro + 0.006 * BH, L - 0.002 * BH]);
     prof.push([ro, L - 0.010 * BH]);
@@ -752,8 +768,8 @@ float xm4N(vec3 p) {
       const idx = [];
       const rings = [
         [rxOut, ryOut, hOut],
-        [rxOut * 0.96, ryOut * 0.96, hOut + 0.004 * BH],
-        [rxIn * 1.04, ryIn * 1.04, hOut + 0.004 * BH],
+        [rxOut * 0.96, ryOut * 0.96, hOut + 0.0015 * BH],
+        [rxIn * 1.04, ryIn * 1.04, hOut + 0.0015 * BH],
         [rxIn, ryIn, hIn],
       ];
       for (const [rx, ry, h] of rings) {
@@ -963,7 +979,7 @@ float xm4N(vec3 p) {
       g.add(Object.assign(new THREE.Mesh(geo, mat), { name }));
     }
 
-    g.add(Object.assign(new THREE.Mesh(GEO.slit.rim, M.metal), { name: 'X4_SlitRim' }));
+    g.add(Object.assign(new THREE.Mesh(GEO.slit.rim, M.slitRim), { name: 'X4_SlitRim' }));
     g.add(Object.assign(new THREE.Mesh(GEO.slit.core, M.slitCore), { name: 'X4_Slit' }));
     const logo = Object.assign(new THREE.Mesh(mirror ? GEO.logoL : GEO.logoR, M.print), { name: 'X4_Logo' });
     g.add(logo);
@@ -1517,6 +1533,7 @@ float xm4N(vec3 p) {
     M.groove.color.setRGB(f.shell[0] * 0.35, f.shell[1] * 0.35, f.shell[2] * 0.35);
     M.collar.color.setRGB(f.shell[0] * 0.72, f.shell[1] * 0.72, f.shell[2] * 0.72);
     for (const m of [M.metal, M.metalFace, M.contact]) set(m.color, f.metal);
+    set(M.slitRim.color, f.slitRim);
     set(M.metalIn.color, f.metalIn);
     set(M.print.color, f.print);
     set(M.tip.color, f.tip);

@@ -1921,12 +1921,15 @@ private fun ControlsScreen(settings: DeviceSettings, vm: SunpodsViewModel) {
             if (settings.promptsOn != null || settings.promptVolume != null) add { PageRow(Icons.Rounded.Campaign, Page.VOICE_PROMPTS, onOff(settings.promptsOn)) }
         }
     )
+    val hasConnection = settings.general.orEmpty().isNotEmpty() || settings.autoSwitch != null || DemoMode.on(context)
     Group(
         null,
-        rows = listOf(
-            { PageRow(Icons.Rounded.Call, Page.CALLS, if (settings.leModeSupported == true) (if (le) "LE Audio" else "Classic") else null) },
-            { PageRow(Icons.Rounded.Bluetooth, Page.CONNECTION, when { le -> "One device"; multipoint == true -> "Two devices"; multipoint == false -> "One device"; else -> null }) }
-        )
+        rows = buildList {
+            add { PageRow(Icons.Rounded.Call, Page.CALLS, if (settings.leModeSupported == true) (if (le) "LE Audio" else "Classic") else null) }
+            if (hasConnection) {
+                add { PageRow(Icons.Rounded.Bluetooth, Page.CONNECTION, when { le -> "One device"; multipoint == true -> "Two devices"; multipoint == false -> "One device"; else -> null }) }
+            }
+        }
     )
 }
 

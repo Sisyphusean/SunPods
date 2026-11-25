@@ -36,10 +36,11 @@ const lin = (keys, f) => {   // linear (for the progress arc)
 
 // poses: [yaw, pitch, roll, tx, ty, scale]
 function openState(f) {
-  const pose = track([[0, [-28, 22, 0, 0, -0.02, 0.60]], [18, [-24, 22, 0, 0, -0.02, 0.62]], [60, [-18, 20, 0, 0, -0.06, 0.65]],
-    [100, [-14, 18, 0, 0, -0.10, 0.65]], [119, [-13, 18, 0, 0, -0.10, 0.65]]], f);
-  const lid = track([[0, 0], [16, 0], [52, 1], [119, 1]], f);
-  const lift = track([[0, 0], [54, 0], [96, 1], [119, 1]], f);
+  const closed = [-28, 22, 0, 0, -0.02, 0.60];
+  const pose = track([[0, closed], [16, [-24, 22, 0, 0, -0.02, 0.62]], [54, [-18, 20, 0, 0, -0.06, 0.65]],
+    [98, [-14, 18, 0, 0, -0.09, 0.65]], [116, closed], [119, closed]], f);
+  const lid = track([[0, 0], [14, 0], [46, 1], [100, 1], [116, 0], [119, 0]], f);
+  const lift = track([[0, 0], [48, 0], [82, 1], [98, 1], [112, 0], [119, 0]], f);
   return { pose, lid, lift };
 }
 function pairState(f) {
